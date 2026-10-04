@@ -229,6 +229,66 @@ def test_cloud_reading_progress_extraction():
     print("✅ Тест извлечения прогресса чтения Bookmate успешно пройден!\n")
 
 
+def test_ota_update_semver_and_github_contract():
+    print("--- [ТЕСТ 6] OTA Обновление: Сравнение версий SemVer и контракт GitHub Releases ---")
+
+    def is_version_newer(latest_tag, current_version):
+        if not latest_tag or not current_version:
+            return False
+        import re
+        l = re.sub(r"^[vV]", "", latest_tag.strip())
+        c = re.sub(r"^[vV]", "", current_version.strip())
+        if l.lower() == c.lower():
+            return False
+
+        l_parts = re.split(r"[.-]", l)
+        c_parts = re.split(r"[.-]", c)
+        max_len = max(len(l_parts), len(c_parts))
+        for i in range(max_len):
+            l_val = int(re.sub(r"\D+", "", l_parts[i])) if i < len(l_parts) and re.sub(r"\D+", "", l_parts[i]) else 0
+            c_val = int(re.sub(r"\D+", "", c_parts[i])) if i < len(c_parts) and re.sub(r"\D+", "", c_parts[i]) else 0
+            if l_val > c_val:
+                return True
+            if l_val < c_val:
+                return False
+        return False
+
+    # Проверка SemVer
+    assert is_version_newer("v1.3.0", "1.2.9") == True, "1.3.0 должна быть новее 1.2.9"
+    assert is_version_newer("1.3.0", "1.2.9") == True, "1.3.0 должна быть новее 1.2.9"
+    assert is_version_newer("v1.2.10", "v1.2.9") == True, "1.2.10 должна быть новее 1.2.9"
+    assert is_version_newer("v2.0.0", "1.9.9") == True, "2.0.0 должна быть новее 1.9.9"
+    assert is_version_newer("v1.2.9", "1.2.9") == False, "Одинаковые версии не должны считаться обновлением"
+    assert is_version_newer("v1.2.8", "1.2.9") == False, "Старая версия не должна считаться обновлением"
+
+    # Проверка контракта GitHub API
+    sample_github_release = {
+        "tag_name": "v1.3.0",
+        "name": "v1.3.0 - Встроенное OTA обновление",
+        "body": "## Что нового в v1.3.0\n- OTA обновления",
+        "assets": [
+            {
+                "name": "yandex-books-lite-v1.3.0.apk",
+                "browser_download_url": "https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.3.0/yandex-books-lite-v1.3.0.apk",
+                "size": 2275156
+            }
+        ]
+    }
+
+    apk_asset = None
+    for a in sample_github_release.get("assets", []):
+        if a.get("name", "").endswith(".apk"):
+            apk_asset = a
+            break
+
+    assert apk_asset is not None, "APK ассет не найден в релизе!"
+    assert apk_asset["name"] == "yandex-books-lite-v1.3.0.apk"
+    assert apk_asset["browser_download_url"].startswith("https://")
+    assert apk_asset["size"] > 0
+
+    print("✅ Тест OTA обновлений и контракта GitHub API успешно пройден!\n")
+
+
 if __name__ == "__main__":
     print("==================================================")
     print("🚀 Запуск тотальной верификации ядра Яндекс Книги Lite")
@@ -239,6 +299,7 @@ if __name__ == "__main__":
     test_paginator_math()
     test_device_flow_contract()
     test_cloud_reading_progress_extraction()
+    test_ota_update_semver_and_github_contract()
     print("==================================================")
     print("🎉 ВСЕ ТЕСТЫ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

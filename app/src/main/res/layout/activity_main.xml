@@ -46,6 +46,24 @@
             android:layout_marginRight="4dp" />
 
         <Button
+            android:id="@+id/btn_check_update"
+            android:layout_width="wrap_content"
+            android:layout_height="24dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:text="⬆ Обн."
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:textColor="@color/eink_black"
+            android:background="@drawable/btn_eink"
+            android:includeFontPadding="false"
+            android:paddingLeft="5dp"
+            android:paddingRight="5dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:layout_marginRight="4dp" />
+
+        <Button
             android:id="@+id/btn_refresh_top"
             android:layout_width="wrap_content"
             android:layout_height="24dp"

@@ -10,6 +10,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.text.TextUtils;
+import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -35,6 +36,7 @@ import com.onyx.yandexbooks.core.storage.CacheManager;
 import com.onyx.yandexbooks.core.storage.DatabaseHelper;
 import com.onyx.yandexbooks.core.sync.SyncManager;
 import com.onyx.yandexbooks.core.ui.CoverLoader;
+import com.onyx.yandexbooks.core.update.AppUpdateManager;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -49,7 +51,7 @@ public class MainActivity extends Activity {
 
     private ListView booksListView;
     private Button tabReadingBtn, tabToReadBtn, tabDoneBtn;
-    private Button btnRefreshTop, btnLogout, btnToggleReaderMode;
+    private Button btnRefreshTop, btnLogout, btnToggleReaderMode, btnCheckUpdate;
     private TextView loadingTextView;
     private View emptyStateContainer;
     private Button btnRefreshShelf;
@@ -90,6 +92,7 @@ public class MainActivity extends Activity {
         tabToReadBtn = (Button) findViewById(R.id.tab_to_read_btn);
         tabDoneBtn = (Button) findViewById(R.id.tab_done_btn);
         btnToggleReaderMode = (Button) findViewById(R.id.btn_toggle_reader_mode);
+        btnCheckUpdate = (Button) findViewById(R.id.btn_check_update);
         btnRefreshTop = (Button) findViewById(R.id.btn_refresh_top);
         btnLogout = (Button) findViewById(R.id.btn_logout);
         loadingTextView = (TextView) findViewById(R.id.loading_text);
@@ -121,6 +124,7 @@ public class MainActivity extends Activity {
             isAuthLaunching = false;
             loadBooks(currentShelf);
             syncManager.flushOfflineQueue();
+            checkAppUpdate(false);
         }
     }
 
@@ -141,6 +145,15 @@ public class MainActivity extends Activity {
                 Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show();
             }
         });
+
+        if (btnCheckUpdate != null) {
+            btnCheckUpdate.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    checkAppUpdate(true);
+                }
+            });
+        }
 
         btnRefreshTop.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -175,6 +188,46 @@ public class MainActivity extends Activity {
                         })
                         .setNegativeButton(R.string.btn_cancel, null)
                         .show();
+            }
+        });
+    }
+
+    private void checkAppUpdate(final boolean userTriggered) {
+        final ProgressDialog pd;
+        if (userTriggered) {
+            pd = new ProgressDialog(this);
+            pd.setTitle("Обновление ПО");
+            pd.setMessage("Проверка обновлений на GitHub...");
+            pd.setCancelable(false);
+            pd.show();
+        } else {
+            pd = null;
+        }
+
+        AppUpdateManager.getInstance().fetchLatestRelease(this, new AppUpdateManager.UpdateCheckCallback() {
+            @Override
+            public void onResult(boolean updateAvailable, final AppUpdateManager.ReleaseInfo release, String message) {
+                if (pd != null && pd.isShowing()) {
+                    pd.dismiss();
+                }
+
+                if (updateAvailable && release != null) {
+                    if (btnCheckUpdate != null) {
+                        btnCheckUpdate.setText("⬆ " + release.tagName);
+                        btnCheckUpdate.setBackgroundResource(R.drawable.btn_eink_primary);
+                        btnCheckUpdate.setTextColor(Color.WHITE);
+                    }
+                    if (userTriggered) {
+                        AppUpdateManager.getInstance().showUpdateDialog(MainActivity.this, release);
+                    } else {
+                        Toast.makeText(MainActivity.this, "Доступно обновление " + release.tagName + " (нажмите ⬆)", Toast.LENGTH_LONG).show();
+                    }
+                } else {
+                    if (userTriggered) {
+                        String cur = AppUpdateManager.getInstance().getCurrentVersionName(MainActivity.this);
+                        Toast.makeText(MainActivity.this, "У вас последняя версия (v" + cur + ")", Toast.LENGTH_SHORT).show();
+                    }
+                }
             }
         });
     }
@@ -284,7 +337,14 @@ public class MainActivity extends Activity {
         if ("to_read".equals(currentShelf)) title = "В планах";
         else if ("done".equals(currentShelf)) title = "Прочитано";
 
-        shelfFooterStatus.setText("📚 " + title + ": " + currentBooks.size() + " книг");
+        String curVer = AppUpdateManager.getInstance().getCurrentVersionName(this);
+        shelfFooterStatus.setText("📚 " + title + ": " + currentBooks.size() + " • v" + curVer);
+        shelfFooterStatus.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                checkAppUpdate(true);
+            }
+        });
 
         if (currentBooks.isEmpty()) {
             shelfPageIndicator.setText(" 0/0 ");
@@ -577,52 +637,57 @@ public class MainActivity extends Activity {
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
 
         float density = getResources().getDisplayMetrics().density;
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        int screenHeight = getResources().getDisplayMetrics().heightPixels;
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.WHITE);
-        int padH = (int) (18 * density);
-        int padV = (int) (16 * density);
+        int padH = (int) (14 * density);
+        int padV = (int) (12 * density);
         root.setPadding(padH, padV, padH, padV);
 
-        // 1. Заголовок книги
+        // 1. Компактный заголовок книги (14sp bold, max 2 lines)
         TextView titleView = new TextView(this);
         titleView.setText(book.getTitle());
-        titleView.setTextSize(15);
+        titleView.setTextSize(14);
         titleView.setTypeface(null, Typeface.BOLD);
         titleView.setTextColor(Color.BLACK);
         titleView.setMaxLines(2);
         titleView.setEllipsize(TextUtils.TruncateAt.END);
         root.addView(titleView);
 
-        // 2. Полное имя автора
+        // 2. Метаданные (Автор и Прогресс/Статус) - две ультракомпактные строки
+        LinearLayout metaLayout = new LinearLayout(this);
+        metaLayout.setOrientation(LinearLayout.VERTICAL);
+        metaLayout.setPadding(0, (int) (2 * density), 0, (int) (4 * density));
+
         TextView authorView = new TextView(this);
         authorView.setText("Автор: " + (book.getAuthor() != null ? book.getAuthor() : "Не указан"));
-        authorView.setTextSize(13);
+        authorView.setTextSize(12);
         authorView.setTypeface(null, Typeface.BOLD);
         authorView.setTextColor(Color.BLACK);
-        authorView.setPadding(0, (int) (4 * density), 0, (int) (2 * density));
-        root.addView(authorView);
+        metaLayout.addView(authorView);
 
-        // 3. Прогресс чтения и статус
         double pct = book.getPercent();
         TextView progressView = new TextView(this);
         String progStr = pct > 0 ? String.format("%.0f%%", pct) : "0%";
-        progressView.setText("Прогресс: " + progStr + " • " + (isDownloaded ? "✔ В памяти устройства" : "☁ В сети"));
-        progressView.setTextSize(12);
+        progressView.setText("Прогресс: " + progStr + "  •  Статус: " + (isDownloaded ? "✔ В памяти" : "☁ В сети"));
+        progressView.setTextSize(11);
         progressView.setTextColor(Color.BLACK);
-        progressView.setPadding(0, 0, 0, (int) (8 * density));
-        root.addView(progressView);
+        metaLayout.addView(progressView);
 
-        // 4. Верхний разделитель
+        root.addView(metaLayout);
+
+        // 3. Тонкий 1px разделитель
         View divider = new View(this);
         divider.setBackgroundColor(Color.BLACK);
-        root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (2 * density)));
+        root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
 
-        // 5. Аннотация книги
+        // 4. Аннотация книги (ГЛАВНАЯ ЧАСТЬ - занимает более 60% высоты окна!)
         ScrollView scrollView = new ScrollView(this);
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
-        scrollLp.setMargins(0, (int) (8 * density), 0, (int) (8 * density));
+        scrollLp.setMargins(0, (int) (6 * density), 0, (int) (6 * density));
         scrollView.setLayoutParams(scrollLp);
 
         TextView annView = new TextView(this);
@@ -631,34 +696,39 @@ public class MainActivity extends Activity {
             ann = "Описание книги не предоставлено сервисом.";
         }
         annView.setText(ann);
-        annView.setTextSize(12);
+        annView.setTextSize(13);
         annView.setTextColor(Color.BLACK);
-        annView.setLineSpacing(4f, 1.15f);
+        annView.setLineSpacing(3f, 1.2f);
         scrollView.addView(annView);
         root.addView(scrollView);
 
-        // 6. Нижний разделитель
+        // 5. Тонкий разделитель над кнопками
         View divider2 = new View(this);
         divider2.setBackgroundColor(Color.BLACK);
-        root.addView(divider2, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (2 * density)));
+        root.addView(divider2, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
 
-        // 7. Вертикальный контейнер кнопок (все кнопки на 100% ширины)
+        // 6. Компактный блок кнопок действий (2 компактные горизонтальные строки вместо 4 вертикальных)
         LinearLayout buttonContainer = new LinearLayout(this);
         buttonContainer.setOrientation(LinearLayout.VERTICAL);
         buttonContainer.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        buttonContainer.setPadding(0, (int) (6 * density), 0, 0);
 
-        int btnHeight = (int) (38 * density);
-        int marginBtn = (int) (6 * density);
+        int row1Height = (int) (36 * density);
+        int row2Height = (int) (32 * density);
 
-        // Кнопка 1: Onyx NeoReader (Основная кнопка чтения)
+        // Строка 1: Кнопки чтения [ 📖 Onyx Reader ] и [ ⚡ Читалка Lite ] бок о бок (50% / 50%)
+        LinearLayout readRow = new LinearLayout(this);
+        readRow.setOrientation(LinearLayout.HORIZONTAL);
+        readRow.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, row1Height));
+
         Button btnOnyx = new Button(this);
-        btnOnyx.setText("📖 Читать в Onyx (NeoReader)");
-        btnOnyx.setTextSize(12);
+        btnOnyx.setText("📖 Onyx Reader");
+        btnOnyx.setTextSize(11);
         btnOnyx.setTypeface(null, Typeface.BOLD);
         btnOnyx.setTextColor(Color.WHITE);
         btnOnyx.setBackgroundResource(R.drawable.btn_eink_primary);
-        LinearLayout.LayoutParams lpOnyx = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, btnHeight);
-        lpOnyx.setMargins(0, (int) (8 * density), 0, 0);
+        LinearLayout.LayoutParams lpOnyx = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
+        lpOnyx.setMargins(0, 0, (int) (4 * density), 0);
         btnOnyx.setLayoutParams(lpOnyx);
         btnOnyx.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -667,17 +737,16 @@ public class MainActivity extends Activity {
                 openInOnyxReader(book);
             }
         });
-        buttonContainer.addView(btnOnyx);
+        readRow.addView(btnOnyx);
 
-        // Кнопка 2: В читалке Lite
         Button btnLite = new Button(this);
-        btnLite.setText("⚡ Читать в читалке Lite");
-        btnLite.setTextSize(12);
+        btnLite.setText("⚡ Читалка Lite");
+        btnLite.setTextSize(11);
         btnLite.setTypeface(null, Typeface.BOLD);
         btnLite.setTextColor(Color.BLACK);
         btnLite.setBackgroundResource(R.drawable.btn_eink);
-        LinearLayout.LayoutParams lpLite = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, btnHeight);
-        lpLite.setMargins(0, marginBtn, 0, 0);
+        LinearLayout.LayoutParams lpLite = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
+        lpLite.setMargins((int) (4 * density), 0, 0, 0);
         btnLite.setLayoutParams(lpLite);
         btnLite.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -686,24 +755,32 @@ public class MainActivity extends Activity {
                 openInLiteReader(book);
             }
         });
-        buttonContainer.addView(btnLite);
+        readRow.addView(btnLite);
+        buttonContainer.addView(readRow);
 
-        // Кнопка 3: Скачивание EPUB
+        // Строка 2: Скачивание / Статус и кнопка Закрыть
+        LinearLayout actionRow = new LinearLayout(this);
+        actionRow.setOrientation(LinearLayout.HORIZONTAL);
+        actionRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams lpActionRow = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, row2Height);
+        lpActionRow.setMargins(0, (int) (5 * density), 0, 0);
+        actionRow.setLayoutParams(lpActionRow);
+
         if (!isDownloaded) {
             final Button btnDownload = new Button(this);
-            btnDownload.setText("📥 Скачать EPUB в память устройства");
-            btnDownload.setTextSize(12);
+            btnDownload.setText("📥 Скачать EPUB");
+            btnDownload.setTextSize(11);
             btnDownload.setTypeface(null, Typeface.BOLD);
             btnDownload.setTextColor(Color.BLACK);
             btnDownload.setBackgroundResource(R.drawable.btn_eink);
-            LinearLayout.LayoutParams lpDown = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, btnHeight);
-            lpDown.setMargins(0, marginBtn, 0, 0);
+            LinearLayout.LayoutParams lpDown = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
+            lpDown.setMargins(0, 0, (int) (4 * density), 0);
             btnDownload.setLayoutParams(lpDown);
             btnDownload.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
                     btnDownload.setEnabled(false);
-                    btnDownload.setText("⏳ Идет загрузка EPUB...");
+                    btnDownload.setText("⏳ Загрузка...");
                     Toast.makeText(MainActivity.this, "Загрузка книги «" + book.getTitle() + "»...", Toast.LENGTH_SHORT).show();
                     cacheManager.downloadBookAsync(book.getUuid(), book.getTitle(), new CacheManager.DownloadProgressCallback() {
                         @Override
@@ -728,57 +805,73 @@ public class MainActivity extends Activity {
                                 public void run() {
                                     Toast.makeText(MainActivity.this, "Ошибка скачивания: " + message, Toast.LENGTH_LONG).show();
                                     btnDownload.setEnabled(true);
-                                    btnDownload.setText("📥 Скачать EPUB в память устройства");
+                                    btnDownload.setText("📥 Скачать EPUB");
                                 }
                             });
                         }
                     });
                 }
             });
-            buttonContainer.addView(btnDownload);
+            actionRow.addView(btnDownload);
+
+            Button btnClose = new Button(this);
+            btnClose.setText("✕ Закрыть");
+            btnClose.setTextSize(11);
+            btnClose.setTypeface(null, Typeface.BOLD);
+            btnClose.setTextColor(Color.BLACK);
+            btnClose.setBackgroundResource(R.drawable.btn_eink);
+            LinearLayout.LayoutParams lpClose = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
+            lpClose.setMargins((int) (4 * density), 0, 0, 0);
+            btnClose.setLayoutParams(lpClose);
+            btnClose.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    dialog.dismiss();
+                }
+            });
+            actionRow.addView(btnClose);
         } else {
             TextView pathView = new TextView(this);
-            pathView.setText("✔ Книга сохранена в памяти (/sdcard/Books/YandexBooks/)");
-            pathView.setTextSize(11);
+            pathView.setText("✔ В памяти (/sdcard/Books/...)");
+            pathView.setTextSize(10);
             pathView.setTextColor(Color.BLACK);
-            pathView.setPadding(0, (int) (6 * density), 0, 0);
-            buttonContainer.addView(pathView);
-        }
+            pathView.setSingleLine(true);
+            pathView.setEllipsize(TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams lpPath = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
+            pathView.setLayoutParams(lpPath);
+            actionRow.addView(pathView);
 
-        // Кнопка 4: Закрыть
-        Button btnClose = new Button(this);
-        btnClose.setText("✕ Закрыть");
-        btnClose.setTextSize(12);
-        btnClose.setTypeface(null, Typeface.BOLD);
-        btnClose.setTextColor(Color.BLACK);
-        btnClose.setBackgroundResource(R.drawable.btn_eink);
-        LinearLayout.LayoutParams lpClose = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (34 * density));
-        lpClose.setMargins(0, marginBtn, 0, 0);
-        btnClose.setLayoutParams(lpClose);
-        btnClose.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                dialog.dismiss();
-            }
-        });
-        buttonContainer.addView(btnClose);
+            Button btnClose = new Button(this);
+            btnClose.setText("✕ Закрыть");
+            btnClose.setTextSize(11);
+            btnClose.setTypeface(null, Typeface.BOLD);
+            btnClose.setTextColor(Color.BLACK);
+            btnClose.setBackgroundResource(R.drawable.btn_eink);
+            LinearLayout.LayoutParams lpClose = new LinearLayout.LayoutParams((int) (110 * density), ViewGroup.LayoutParams.MATCH_PARENT);
+            btnClose.setLayoutParams(lpClose);
+            btnClose.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    dialog.dismiss();
+                }
+            });
+            actionRow.addView(btnClose);
+        }
+        buttonContainer.addView(actionRow);
 
         root.addView(buttonContainer);
 
-        dialog.setContentView(root);
-
-        // Настройка геометрии окна диалога
-        if (dialog.getWindow() != null) {
-            android.view.WindowManager.LayoutParams lp = new android.view.WindowManager.LayoutParams();
-            lp.copyFrom(dialog.getWindow().getAttributes());
-            int screenWidth = getResources().getDisplayMetrics().widthPixels;
-            int screenHeight = getResources().getDisplayMetrics().heightPixels;
-            lp.width = (int) (screenWidth * 0.94);
-            lp.height = Math.min((int) (screenHeight * 0.90), (int) (580 * density));
-            dialog.getWindow().setAttributes(lp);
-        }
+        dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         dialog.show();
+
+        // Гарантируем размер окна диалога 92% ширины и 85% высоты дисплея
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
+            int targetW = (int) (screenWidth * 0.92);
+            int targetH = (int) (screenHeight * 0.85);
+            dialog.getWindow().setLayout(targetW, targetH);
+        }
     }
 
     @Override
