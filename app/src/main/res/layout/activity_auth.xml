@@ -54,14 +54,14 @@
             android:gravity="center"
             android:layout_marginBottom="6dp" />
 
-        <!-- Компактный, четкий QR-код (170dp) -->
+        <!-- Компактный, четкий QR-код (135dp) -->
         <ImageView
             android:id="@+id/qr_image"
-            android:layout_width="170dp"
-            android:layout_height="170dp"
+            android:layout_width="135dp"
+            android:layout_height="135dp"
             android:background="@color/eink_white"
             android:scaleType="fitCenter"
-            android:layout_marginBottom="6dp" />
+            android:layout_marginBottom="4dp" />
 
         <!-- Плашка со статусом -->
         <TextView

@@ -104,22 +104,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         db.beginTransaction();
         try {
             for (Book book : books) {
-                ContentValues cv = new ContentValues();
-                cv.put("uuid", book.getUuid());
-                cv.put("title", book.getTitle());
-                cv.put("author", book.getAuthor());
-                cv.put("annotation", book.getAnnotation());
-                cv.put("cover_url", book.getCoverUrl());
-                cv.put("percent", book.getPercent());
-                cv.put("shelf_type", shelfType != null ? shelfType : book.getShelfType());
-                cv.put("is_downloaded", book.isDownloaded() ? 1 : 0);
-                cv.put("last_read_timestamp", book.getLastReadTimestamp());
-                db.insertWithOnConflict("books", null, cv, SQLiteDatabase.CONFLICT_REPLACE);
-
-                // Автоматически инициализируем или обновляем прогресс из облака
-                if (book.getPercent() > 0) {
-                    syncInitialCloudProgress(db, book);
-                }
+                saveOrUpdateBookInternal(db, book, shelfType);
             }
             db.setTransactionSuccessful();
         } finally {
@@ -132,25 +117,74 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         db.beginTransaction();
         try {
             for (Book book : books) {
-                ContentValues cv = new ContentValues();
-                cv.put("uuid", book.getUuid());
-                cv.put("title", book.getTitle());
-                cv.put("author", book.getAuthor());
-                cv.put("annotation", book.getAnnotation());
-                cv.put("cover_url", book.getCoverUrl());
-                cv.put("percent", book.getPercent());
-                cv.put("shelf_type", book.getShelfType());
-                cv.put("is_downloaded", book.isDownloaded() ? 1 : 0);
-                cv.put("last_read_timestamp", book.getLastReadTimestamp());
-                db.insertWithOnConflict("books", null, cv, SQLiteDatabase.CONFLICT_REPLACE);
-
-                if (book.getPercent() > 0) {
-                    syncInitialCloudProgress(db, book);
-                }
+                saveOrUpdateBookInternal(db, book, null);
             }
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
+        }
+    }
+
+    private void saveOrUpdateBookInternal(SQLiteDatabase db, Book book, String overrideShelfType) {
+        double effectivePercent = book.getPercent();
+        boolean effectiveDownloaded = book.isDownloaded();
+        long effectiveTimestamp = book.getLastReadTimestamp();
+
+        // 1. Проверяем локальную БД: не перезаписываем уже прочитанное нулевым прогрессом
+        try {
+            Cursor c = db.rawQuery("SELECT percent, is_downloaded, last_read_timestamp FROM books WHERE uuid = ?", new String[]{book.getUuid()});
+            if (c != null) {
+                if (c.moveToFirst()) {
+                    double localPercent = c.getDouble(0);
+                    int localDown = c.getInt(1);
+                    long localTs = c.getLong(2);
+
+                    if (localPercent > effectivePercent) {
+                        effectivePercent = localPercent;
+                    }
+                    if (localDown == 1) {
+                        effectiveDownloaded = true;
+                    }
+                    if (localTs > effectiveTimestamp) {
+                        effectiveTimestamp = localTs;
+                    }
+                }
+                c.close();
+            }
+
+            // 2. Дополнительно сверяем с таблицей progress
+            Cursor pc = db.rawQuery("SELECT percent, timestamp FROM progress WHERE book_uuid = ?", new String[]{book.getUuid()});
+            if (pc != null) {
+                if (pc.moveToFirst()) {
+                    double progPercent = pc.getDouble(0);
+                    long progTs = pc.getLong(1);
+                    if (progPercent > effectivePercent) {
+                        effectivePercent = progPercent;
+                    }
+                    if (progTs > effectiveTimestamp) {
+                        effectiveTimestamp = progTs;
+                    }
+                }
+                pc.close();
+            }
+        } catch (Exception ignored) {}
+
+        ContentValues cv = new ContentValues();
+        cv.put("uuid", book.getUuid());
+        cv.put("title", book.getTitle());
+        cv.put("author", book.getAuthor());
+        cv.put("annotation", book.getAnnotation());
+        cv.put("cover_url", book.getCoverUrl());
+        cv.put("percent", effectivePercent);
+        cv.put("shelf_type", overrideShelfType != null ? overrideShelfType : book.getShelfType());
+        cv.put("is_downloaded", effectiveDownloaded ? 1 : 0);
+        cv.put("last_read_timestamp", effectiveTimestamp);
+
+        db.insertWithOnConflict("books", null, cv, SQLiteDatabase.CONFLICT_REPLACE);
+
+        if (effectivePercent > 0) {
+            book.setPercent(effectivePercent);
+            syncInitialCloudProgress(db, book);
         }
     }
 
@@ -161,7 +195,6 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             if (c != null) {
                 if (c.moveToFirst()) {
                     double existingPercent = c.getDouble(0);
-                    // Если локально процент больше или уже читается, не затираем
                     if (existingPercent >= book.getPercent()) {
                         shouldUpdate = false;
                     }

@@ -210,6 +210,7 @@ public class AuthWebViewActivity extends Activity {
         settings.setDisplayZoomControls(false);
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
+        settings.setTextZoom(75);
         // Аутентичный User-Agent Android KitKat: принудительно активирует ультралегкий режим Яндекса (Granny / Domik)
         // со статическим PNG QR-кодом для приложения Яндекс Ключ и нативными полями ввода
         settings.setUserAgentString("Mozilla/5.0 (Linux; U; Android 4.4.4; ru-ru; Onyx Darwin Build/KTU84P) AppleWebKit/534.30 (KHTML, like Gecko) Version/4.0 Mobile Safari/534.30");
@@ -233,6 +234,20 @@ public class AuthWebViewActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 checkUrlForToken(url);
+
+                // Ограничиваем габариты QR-кода, чтобы он свободно умещался на дисплее 758x1024
+                String css = "var st = document.createElement('style');" +
+                        "st.innerHTML = 'body { margin: 0 !important; padding: 2px !important; } " +
+                        "header, .Header, .passp-auth-header { padding: 2px 0 !important; margin: 0 !important; } " +
+                        "img, svg, canvas, .MagicField, [data-testid=\"qr-code\"], .passp-auth-content { max-width: 62vw !important; max-height: 44vh !important; margin: 0 auto !important; } " +
+                        ".passp-footer, footer { padding: 2px 0 !important; font-size: 10px !important; }';" +
+                        "document.head.appendChild(st);";
+                if (android.os.Build.VERSION.SDK_INT >= 19) {
+                    view.evaluateJavascript(css, null);
+                } else {
+                    view.loadUrl("javascript:" + css);
+                }
+
                 EpdController.requestFullRefresh(AuthWebViewActivity.this, webView);
             }
 

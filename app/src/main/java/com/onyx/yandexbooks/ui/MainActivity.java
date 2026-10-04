@@ -30,6 +30,7 @@ import com.onyx.yandexbooks.core.storage.DatabaseHelper;
 import com.onyx.yandexbooks.core.sync.SyncManager;
 import com.onyx.yandexbooks.core.ui.CoverLoader;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -42,12 +43,13 @@ public class MainActivity extends Activity {
 
     private ListView booksListView;
     private Button tabReadingBtn, tabToReadBtn, tabDoneBtn;
-    private Button btnRefreshTop, btnLogout;
+    private Button btnRefreshTop, btnLogout, btnToggleReaderMode;
     private TextView loadingTextView;
     private View emptyStateContainer;
     private Button btnRefreshShelf;
 
     private TokenStorage tokenStorage;
+    private com.onyx.yandexbooks.core.storage.AppSettings appSettings;
     private YandexBooksApiClient apiClient;
     private DatabaseHelper dbHelper;
     private CacheManager cacheManager;
@@ -65,6 +67,7 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
 
         tokenStorage = new TokenStorage(this);
+        appSettings = new com.onyx.yandexbooks.core.storage.AppSettings(this);
         apiClient = new YandexBooksApiClient(tokenStorage);
         dbHelper = DatabaseHelper.getInstance(this);
         cacheManager = new CacheManager(this, apiClient);
@@ -75,6 +78,7 @@ public class MainActivity extends Activity {
         tabReadingBtn = (Button) findViewById(R.id.tab_reading_btn);
         tabToReadBtn = (Button) findViewById(R.id.tab_to_read_btn);
         tabDoneBtn = (Button) findViewById(R.id.tab_done_btn);
+        btnToggleReaderMode = (Button) findViewById(R.id.btn_toggle_reader_mode);
         btnRefreshTop = (Button) findViewById(R.id.btn_refresh_top);
         btnLogout = (Button) findViewById(R.id.btn_logout);
         loadingTextView = (TextView) findViewById(R.id.loading_text);
@@ -104,6 +108,23 @@ public class MainActivity extends Activity {
     }
 
     private void setupHeaderActions() {
+        updateReaderModeButton();
+
+        btnToggleReaderMode.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                boolean wasOnyx = appSettings.isOnyxReaderPreferred();
+                String newMode = wasOnyx ? com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_LITE : com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_ONYX;
+                appSettings.setReaderMode(newMode);
+                updateReaderModeButton();
+                adapter.notifyDataSetChanged();
+                String msg = appSettings.isOnyxReaderPreferred() 
+                        ? "Читалка по умолчанию: Системная Onyx (NeoReader/AlReader)" 
+                        : "Читалка по умолчанию: Встроенная Lite (с синхронизацией)";
+                Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show();
+            }
+        });
+
         btnRefreshTop.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -255,13 +276,73 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void updateReaderModeButton() {
+        if (btnToggleReaderMode != null) {
+            boolean isOnyx = appSettings.isOnyxReaderPreferred();
+            btnToggleReaderMode.setText(isOnyx ? "📖 Onyx" : "⚡ Lite");
+        }
+    }
+
     private void openBook(final Book book) {
+        if (appSettings.isOnyxReaderPreferred()) {
+            openInOnyxReader(book);
+        } else {
+            openInLiteReader(book);
+        }
+    }
+
+    private void openInOnyxReader(final Book book) {
+        File epub = cacheManager.ensurePublicEpubFile(book.getUuid(), book.getTitle());
+        if (epub != null && epub.exists() && epub.length() > 0) {
+            boolean ok = CacheManager.openInSystemReader(this, epub);
+            if (!ok) {
+                Toast.makeText(this, "Читалка Onyx не найдена. Открываем в читалке Lite...", Toast.LENGTH_SHORT).show();
+                openInLiteReader(book);
+            }
+            return;
+        }
+
+        final ProgressDialog dialog = new ProgressDialog(this);
+        dialog.setTitle("Яндекс Книги");
+        dialog.setMessage("Загрузка EPUB в /sdcard/Books/ для Onyx...");
+        dialog.setIndeterminate(true);
+        dialog.setCancelable(false);
+        dialog.show();
+
+        cacheManager.downloadBookAsync(book.getUuid(), book.getTitle(), new CacheManager.DownloadProgressCallback() {
+            @Override
+            public void onProgress(int downloadedCount, int totalCount) {}
+
+            @Override
+            public void onComplete() {
+                if (dialog.isShowing()) dialog.dismiss();
+                adapter.notifyDataSetChanged();
+                File readyEpub = cacheManager.ensurePublicEpubFile(book.getUuid(), book.getTitle());
+                if (readyEpub != null && readyEpub.exists()) {
+                    boolean ok = CacheManager.openInSystemReader(MainActivity.this, readyEpub);
+                    if (!ok) {
+                        openInLiteReader(book);
+                    }
+                } else {
+                    openInLiteReader(book);
+                }
+            }
+
+            @Override
+            public void onError(String message) {
+                if (dialog.isShowing()) dialog.dismiss();
+                Toast.makeText(MainActivity.this, "Ошибка скачивания: " + message + ". Открываем в Lite.", Toast.LENGTH_LONG).show();
+                openInLiteReader(book);
+            }
+        });
+    }
+
+    private void openInLiteReader(final Book book) {
         if (cacheManager.isBookDownloaded(book.getUuid())) {
             launchReader(book);
             return;
         }
 
-        // Показываем диалог быстрой подготовки книги
         final ProgressDialog dialog = new ProgressDialog(this);
         dialog.setTitle("Яндекс Книги");
         dialog.setMessage("Загрузка и подготовка книги к чтению...");
@@ -272,18 +353,14 @@ public class MainActivity extends Activity {
         cacheManager.ensureBookReady(book.getUuid(), book.getTitle(), new CacheManager.BookReadyCallback() {
             @Override
             public void onReady(List<Chapter> chapters) {
-                if (dialog.isShowing()) {
-                    dialog.dismiss();
-                }
+                if (dialog.isShowing()) dialog.dismiss();
                 adapter.notifyDataSetChanged();
                 launchReader(book);
             }
 
             @Override
             public void onError(String message) {
-                if (dialog.isShowing()) {
-                    dialog.dismiss();
-                }
+                if (dialog.isShowing()) dialog.dismiss();
                 Toast.makeText(MainActivity.this, "Не удалось открыть книгу: " + message, Toast.LENGTH_LONG).show();
             }
         });
@@ -435,17 +512,32 @@ public class MainActivity extends Activity {
         scrollView.addView(layout);
         builder.setView(scrollView);
 
-        builder.setPositiveButton("Читать", new DialogInterface.OnClickListener() {
+        builder.setPositiveButton("📖 В Onyx (NeoReader)", new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
-                openBook(book);
+                openInOnyxReader(book);
+            }
+        });
+
+        builder.setNeutralButton("⚡ В читалке Lite", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                openInLiteReader(book);
             }
         });
 
         if (!isDownloaded) {
-            builder.setNeutralButton("Скачать офлайн", new DialogInterface.OnClickListener() {
+            Button downloadBtnInDialog = new Button(this);
+            downloadBtnInDialog.setText("📥 Скачать EPUB в память устройства");
+            downloadBtnInDialog.setTextSize(12);
+            downloadBtnInDialog.setTextColor(Color.BLACK);
+            downloadBtnInDialog.setBackgroundResource(R.drawable.btn_eink);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 44 * (int) getResources().getDisplayMetrics().density);
+            lp.setMargins(0, 16, 0, 8);
+            downloadBtnInDialog.setLayoutParams(lp);
+            downloadBtnInDialog.setOnClickListener(new View.OnClickListener() {
                 @Override
-                public void onClick(DialogInterface dialog, int which) {
+                public void onClick(View v) {
                     Toast.makeText(MainActivity.this, "Загрузка книги «" + book.getTitle() + "»...", Toast.LENGTH_SHORT).show();
                     cacheManager.downloadBookAsync(book.getUuid(), book.getTitle(), new CacheManager.DownloadProgressCallback() {
                         @Override
@@ -453,7 +545,7 @@ public class MainActivity extends Activity {
 
                         @Override
                         public void onComplete() {
-                            Toast.makeText(MainActivity.this, "«" + book.getTitle() + "» сохранена офлайн!", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(MainActivity.this, "«" + book.getTitle() + "» сохранена в /sdcard/Books/!", Toast.LENGTH_SHORT).show();
                             adapter.notifyDataSetChanged();
                         }
 
@@ -464,6 +556,14 @@ public class MainActivity extends Activity {
                     });
                 }
             });
+            layout.addView(downloadBtnInDialog);
+        } else {
+            TextView pathView = new TextView(this);
+            pathView.setText("✔ Книга сохранена в памяти (/sdcard/Books/YandexBooks/) и доступна для любой системной читалки.");
+            pathView.setTextSize(11);
+            pathView.setTextColor(Color.BLACK);
+            pathView.setPadding(0, 12, 0, 4);
+            layout.addView(pathView);
         }
 
         builder.setNegativeButton("Закрыть", null);

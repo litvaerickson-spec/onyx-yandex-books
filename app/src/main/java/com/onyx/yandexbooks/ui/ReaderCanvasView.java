@@ -154,19 +154,26 @@ public class ReaderCanvasView extends View {
             currentY += lineHeight;
         }
 
-        // Отрисовка информативного нижнего колонтитула (номер страницы, прогресс и название)
-        float footerY = getHeight() - 12;
-        String chapterLabel = (totalChapters > 1) ? ("Гл. " + (currentChapterIndex + 1) + "/" + totalChapters + " • ") : "";
-        String titleTrimmed = chapterTitle;
-        if (titleTrimmed.length() > 28) {
-            titleTrimmed = titleTrimmed.substring(0, 26) + "…";
-        }
-        String leftFooter = chapterLabel + titleTrimmed;
-        canvas.drawText(leftFooter, config.getPaddingLeftPx(), footerY, footerPaint);
+        // Отрисовка нижнего колонтитула с математической защитой от набегания текста
+        float footerY = getHeight() - 8;
+        String pageInfo = "Стр. " + (currentPage.pageIndex + 1) + "/" + totalPages + String.format(" (%.0f%%)", globalPercent);
+        float pageInfoWidth = footerPaint.measureText(pageInfo);
 
-        String rightFooter = "Стр. " + (currentPage.pageIndex + 1) + "/" + totalPages + String.format(" (%.0f%%)", globalPercent);
-        float pageInfoWidth = footerPaint.measureText(rightFooter);
-        canvas.drawText(rightFooter, getWidth() - config.getPaddingRightPx() - pageInfoWidth, footerY, footerPaint);
+        // Страница и процент справа
+        canvas.drawText(pageInfo, getWidth() - config.getPaddingRightPx() - pageInfoWidth, footerY, footerPaint);
+
+        // Название слева: жестко ограничивается по ширине, исключая наложение на номер страницы
+        float maxLeftWidth = getWidth() - config.getPaddingLeftPx() - config.getPaddingRightPx() - pageInfoWidth - 24;
+        if (maxLeftWidth > 60 && chapterTitle != null && !chapterTitle.trim().isEmpty()) {
+            String titleText = chapterTitle.trim();
+            while (titleText.length() > 3 && footerPaint.measureText(titleText + "…") > maxLeftWidth) {
+                titleText = titleText.substring(0, titleText.length() - 1);
+            }
+            if (titleText.length() < chapterTitle.trim().length()) {
+                titleText += "…";
+            }
+            canvas.drawText(titleText, config.getPaddingLeftPx(), footerY, footerPaint);
+        }
     }
 
     @Override

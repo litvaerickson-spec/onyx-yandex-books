@@ -10,14 +10,14 @@ import java.io.Serializable;
 public class TypographyConfig implements Serializable {
 
     private int fontSizeSp = 18;
-    private float lineSpacingMultiplier = 1.30f;
-    private int paragraphIndentPx = 32;
+    private float lineSpacingMultiplier = 1.25f;
+    private int paragraphIndentPx = 20;
 
-    // Комфортные физические отступы (не прилипают к рамкам экрана Onyx Boox Darwin)
-    private int paddingLeftPx = 42;
-    private int paddingRightPx = 42;
-    private int paddingTopPx = 36;
-    private int paddingBottomPx = 44;
+    // Оптимальные компактные отступы для E-Ink Carta экрана Onyx Boox Darwin (758x1024)
+    private int paddingLeftPx = 18;
+    private int paddingRightPx = 18;
+    private int paddingTopPx = 14;
+    private int paddingBottomPx = 24;
 
     private boolean isHyphenationEnabled = true;
     private boolean isJustifyEnabled = true;

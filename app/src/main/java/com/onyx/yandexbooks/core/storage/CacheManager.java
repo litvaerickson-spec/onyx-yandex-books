@@ -221,7 +221,32 @@ public class CacheManager {
         });
     }
 
-    private void exportToPublicBooksDir(File sourceEpub, String title) {
+    public File getPublicEpubFile(String title) {
+        File extStorage = Environment.getExternalStorageDirectory();
+        if (extStorage != null) {
+            File yandexBooksDir = new File(extStorage, "Books/YandexBooks");
+            String cleanName = (title != null ? title : "book").replaceAll("[\\\\/:*?\"<>|]", "_");
+            if (cleanName.length() > 60) {
+                cleanName = cleanName.substring(0, 60);
+            }
+            return new File(yandexBooksDir, cleanName + ".epub");
+        }
+        return null;
+    }
+
+    public File ensurePublicEpubFile(String bookUuid, String bookTitle) {
+        File publicFile = getPublicEpubFile(bookTitle);
+        if (publicFile != null && publicFile.exists() && publicFile.length() > 0) {
+            return publicFile;
+        }
+        File privateEpub = getEpubFile(bookUuid);
+        if (privateEpub.exists() && privateEpub.length() > 0) {
+            return exportToPublicBooksDir(privateEpub, bookTitle);
+        }
+        return null;
+    }
+
+    public File exportToPublicBooksDir(File sourceEpub, String title) {
         try {
             File extStorage = Environment.getExternalStorageDirectory();
             if (extStorage != null && extStorage.canWrite()) {
@@ -236,9 +261,56 @@ public class CacheManager {
                 File destFile = new File(yandexBooksDir, cleanName + ".epub");
                 copyFile(sourceEpub, destFile);
                 Log.d(TAG, "Exported EPUB to: " + destFile.getAbsolutePath());
+
+                // Регистрация в системном медиа-сканере Onyx для появления в Библиотеке
+                android.media.MediaScannerConnection.scanFile(
+                        context,
+                        new String[]{ destFile.getAbsolutePath() },
+                        new String[]{ "application/epub+zip" },
+                        null
+                );
+
+                return destFile;
             }
         } catch (Exception e) {
             Log.w(TAG, "Failed to export EPUB to public Books directory", e);
+        }
+        return null;
+    }
+
+    public static boolean openInSystemReader(android.app.Activity activity, File epubFile) {
+        if (epubFile == null || !epubFile.exists()) {
+            return false;
+        }
+        android.net.Uri uri = android.net.Uri.fromFile(epubFile);
+
+        // 1. Попытка открыть напрямую через Intent для EPUB
+        android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW);
+        intent.setDataAndType(uri, "application/epub+zip");
+        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+
+        try {
+            activity.startActivity(intent);
+            return true;
+        } catch (android.content.ActivityNotFoundException e) {
+            // 2. Попытка с общим MIME-типом или chooser
+            try {
+                android.content.Intent chooser = android.content.Intent.createChooser(intent, "Выберите читалку Onyx:");
+                chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                activity.startActivity(chooser);
+                return true;
+            } catch (Exception ex) {
+                try {
+                    android.content.Intent fallback = new android.content.Intent(android.content.Intent.ACTION_VIEW);
+                    fallback.setDataAndType(uri, "*/*");
+                    fallback.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                    activity.startActivity(fallback);
+                    return true;
+                } catch (Exception e2) {
+                    Log.e(TAG, "No app found to open EPUB", e2);
+                    return false;
+                }
+            }
         }
     }
 

@@ -5,118 +5,132 @@
     android:orientation="vertical"
     android:background="@color/eink_white">
 
-    <!-- Верхняя панель (Header): Заголовок, версия, кнопка Обновить и Выход -->
+    <!-- Компактная верхняя панель (Header): уменьшена в 2 раза, поднята выше -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingLeft="14dp"
-        android:paddingRight="14dp"
-        android:paddingTop="10dp"
-        android:paddingBottom="10dp"
+        android:paddingLeft="10dp"
+        android:paddingRight="10dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp"
         android:background="@color/eink_white">
 
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:orientation="vertical">
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Яндекс Книги"
-                android:textSize="20sp"
+                android:textSize="15sp"
                 android:textStyle="bold"
                 android:textColor="@color/eink_black" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Lite v1.2.6 • Onyx Boox"
-                android:textSize="11sp"
+                android:text=" v1.2.7"
+                android:textSize="10sp"
                 android:textColor="@color/eink_black" />
         </LinearLayout>
 
         <Button
+            android:id="@+id/btn_toggle_reader_mode"
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:text="📖 Onyx"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:textColor="@color/eink_black"
+            android:background="@drawable/btn_eink"
+            android:paddingLeft="6dp"
+            android:paddingRight="6dp"
+            android:layout_marginRight="4dp" />
+
+        <Button
             android:id="@+id/btn_refresh_top"
             android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="↻ Обновить"
+            android:layout_height="28dp"
+            android:text="↻"
             android:textSize="12sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
             android:background="@drawable/btn_eink"
-            android:paddingLeft="10dp"
-            android:paddingRight="10dp"
-            android:layout_marginRight="8dp" />
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp"
+            android:layout_marginRight="4dp" />
 
         <Button
             android:id="@+id/btn_logout"
             android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="@string/btn_logout"
-            android:textSize="12sp"
+            android:layout_height="28dp"
+            android:text="Выход"
+            android:textSize="11sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
             android:background="@drawable/btn_eink"
-            android:paddingLeft="10dp"
-            android:paddingRight="10dp" />
+            android:paddingLeft="6dp"
+            android:paddingRight="6dp" />
     </LinearLayout>
 
     <View
         android:layout_width="match_parent"
-        android:layout_height="2dp"
+        android:layout_height="1dp"
         android:background="@color/eink_black" />
 
-    <!-- Вкладки полок (Табы с бейджами количества) -->
+    <!-- Компактные вкладки полок -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:paddingLeft="8dp"
-        android:paddingRight="8dp"
-        android:paddingTop="6dp"
-        android:paddingBottom="6dp"
+        android:paddingLeft="6dp"
+        android:paddingRight="6dp"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
         android:background="@color/eink_white">
 
         <Button
             android:id="@+id/tab_reading_btn"
             android:layout_width="0dp"
-            android:layout_height="40dp"
+            android:layout_height="30dp"
             android:layout_weight="1"
             android:text="Читаю (0)"
-            android:textSize="13sp"
+            android:textSize="11sp"
             android:textStyle="bold"
             android:textColor="@color/eink_white"
             android:background="@drawable/tab_eink_active"
-            android:layout_marginRight="3dp" />
+            android:layout_marginRight="2dp" />
 
         <Button
             android:id="@+id/tab_to_read_btn"
             android:layout_width="0dp"
-            android:layout_height="40dp"
+            android:layout_height="30dp"
             android:layout_weight="1"
             android:text="В планах (0)"
-            android:textSize="13sp"
+            android:textSize="11sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
             android:background="@drawable/tab_eink_inactive"
-            android:layout_marginLeft="3dp"
-            android:layout_marginRight="3dp" />
+            android:layout_marginLeft="2dp"
+            android:layout_marginRight="2dp" />
 
         <Button
             android:id="@+id/tab_done_btn"
             android:layout_width="0dp"
-            android:layout_height="40dp"
+            android:layout_height="30dp"
             android:layout_weight="1"
             android:text="Прочитано (0)"
-            android:textSize="13sp"
+            android:textSize="11sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
             android:background="@drawable/tab_eink_inactive"
-            android:layout_marginLeft="3dp" />
+            android:layout_marginLeft="2dp" />
     </LinearLayout>
 
     <View

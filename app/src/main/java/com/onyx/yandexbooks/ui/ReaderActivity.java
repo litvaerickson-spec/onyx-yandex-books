@@ -33,7 +33,7 @@ public class ReaderActivity extends Activity {
     private ReaderCanvasView readerCanvas;
     private View menuOverlay;
     private TextView fontSizeLabel;
-    private Button btnFontDecrease, btnFontIncrease, btnToggleHyphenation, btnToggleContrast, btnForceRefresh;
+    private Button btnFontDecrease, btnFontIncrease, btnToggleHyphenation, btnToggleContrast, btnToggleMargins, btnForceRefresh;
 
     private String bookUuid;
     private String bookTitle;
@@ -50,6 +50,7 @@ public class ReaderActivity extends Activity {
     private SyncManager syncManager;
     private DatabaseHelper dbHelper;
     private YandexBooksApiClient apiClient;
+    private com.onyx.yandexbooks.core.storage.AppSettings appSettings;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -66,9 +67,14 @@ public class ReaderActivity extends Activity {
         btnFontIncrease = (Button) findViewById(R.id.btn_font_increase);
         btnToggleHyphenation = (Button) findViewById(R.id.btn_toggle_hyphenation);
         btnToggleContrast = (Button) findViewById(R.id.btn_toggle_contrast);
+        btnToggleMargins = (Button) findViewById(R.id.btn_toggle_margins);
         btnForceRefresh = (Button) findViewById(R.id.btn_force_refresh);
 
+        appSettings = new com.onyx.yandexbooks.core.storage.AppSettings(this);
         typographyConfig = new TypographyConfig();
+        int marginPx = appSettings.getMarginPaddingPx();
+        typographyConfig.setPaddingLeftPx(marginPx);
+        typographyConfig.setPaddingRightPx(marginPx);
         paginator = new TextPaginator();
 
         TokenStorage tokenStorage = new TokenStorage(this);
@@ -174,12 +180,50 @@ public class ReaderActivity extends Activity {
             }
         });
 
+        btnToggleMargins.setText(getMarginButtonText());
+        btnToggleMargins.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                cycleMarginMode();
+            }
+        });
+
         btnForceRefresh.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 forceEpdRefresh();
             }
         });
+    }
+
+    private String getMarginButtonText() {
+        String mode = appSettings.getMarginMode();
+        if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_MEDIUM.equalsIgnoreCase(mode)) {
+            return "Поля: Средние";
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_WIDE.equalsIgnoreCase(mode)) {
+            return "Поля: Широкие";
+        } else {
+            return "Поля: Узкие";
+        }
+    }
+
+    private void cycleMarginMode() {
+        String current = appSettings.getMarginMode();
+        String nextMode;
+        if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_NARROW.equalsIgnoreCase(current)) {
+            nextMode = com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_MEDIUM;
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_MEDIUM.equalsIgnoreCase(current)) {
+            nextMode = com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_WIDE;
+        } else {
+            nextMode = com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_NARROW;
+        }
+        appSettings.setMarginMode(nextMode);
+        int px = appSettings.getMarginPaddingPx();
+        typographyConfig.setPaddingLeftPx(px);
+        typographyConfig.setPaddingRightPx(px);
+        btnToggleMargins.setText(getMarginButtonText());
+        readerCanvas.setTypographyConfig(typographyConfig);
+        repaginateCurrentChapter();
     }
 
     private void loadBookData() {
@@ -381,7 +425,15 @@ public class ReaderActivity extends Activity {
                 System.currentTimeMillis()
         );
 
-        syncManager.saveAndSyncProgress(progress, false, null);
+        // Реальная синхронизация с облаком Яндекса в фоновом режиме
+        syncManager.saveAndSyncProgress(progress, true, null);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        saveProgress();
+        syncManager.flushOfflineQueue();
     }
 
     @Override

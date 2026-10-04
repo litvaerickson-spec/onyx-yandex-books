@@ -32,10 +32,10 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Название книги"
-            android:textSize="15sp"
+            android:textSize="14sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
-            android:maxLines="2"
+            android:maxLines="3"
             android:ellipsize="end" />
 
         <TextView
@@ -43,11 +43,11 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Автор"
-            android:textSize="13sp"
+            android:textSize="12sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
             android:layout_marginTop="1dp"
-            android:maxLines="1"
+            android:maxLines="2"
             android:ellipsize="end" />
 
         <!-- Описание/Аннотация книги (2 строки для информативности) -->
@@ -63,19 +63,19 @@
             android:ellipsize="end"
             android:lineSpacingMultiplier="1.1" />
 
-        <!-- Прогресс чтения с контрастным мини-баром -->
+        <!-- Прогресс чтения с контрастным мини-баром и единой строкой статуса -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginTop="4dp">
+            android:layout_marginTop="3dp">
 
             <ProgressBar
                 android:id="@+id/book_progress_bar"
                 style="?android:attr/progressBarStyleHorizontal"
-                android:layout_width="60dp"
-                android:layout_height="5dp"
+                android:layout_width="50dp"
+                android:layout_height="4dp"
                 android:progressDrawable="@drawable/progress_eink_bar"
                 android:max="100"
                 android:progress="0"
@@ -86,18 +86,22 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="0%"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 android:textStyle="bold"
-                android:textColor="@color/eink_black" />
+                android:textColor="@color/eink_black"
+                android:singleLine="true" />
 
             <TextView
                 android:id="@+id/book_status_tag"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_weight="1"
                 android:text=" • В памяти"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 android:textColor="@color/eink_black"
-                android:layout_marginLeft="4dp" />
+                android:layout_marginLeft="4dp"
+                android:singleLine="true"
+                android:ellipsize="end" />
         </LinearLayout>
     </LinearLayout>
 
@@ -111,10 +115,10 @@
 
         <Button
             android:id="@+id/book_read_btn"
-            android:layout_width="68dp"
-            android:layout_height="36dp"
+            android:layout_width="66dp"
+            android:layout_height="32dp"
             android:text="@string/btn_read"
-            android:textSize="13sp"
+            android:textSize="12sp"
             android:textStyle="bold"
             android:textColor="@color/eink_white"
             android:background="@drawable/btn_eink_primary"
@@ -122,8 +126,8 @@
 
         <Button
             android:id="@+id/book_download_btn"
-            android:layout_width="68dp"
-            android:layout_height="30dp"
+            android:layout_width="66dp"
+            android:layout_height="26dp"
             android:text="О книге"
             android:textSize="11sp"
             android:textStyle="bold"

@@ -175,34 +175,8 @@ public class YandexBooksApiClient {
 
         String title = bObj.optString("title", bObj.optString("name", "Без названия"));
 
-        // Корректный парсинг авторов
-        String authorText = bObj.optString("authors_text", "");
-        if (authorText == null || authorText.trim().isEmpty() || "null".equals(authorText)) {
-            JSONArray authorsArr = bObj.optJSONArray("authors");
-            if (authorsArr == null || authorsArr.length() == 0) {
-                authorsArr = bObj.optJSONArray("authors_objects");
-            }
-            if (authorsArr != null && authorsArr.length() > 0) {
-                StringBuilder sb = new StringBuilder();
-                for (int a = 0; a < authorsArr.length(); a++) {
-                    Object aItem = authorsArr.opt(a);
-                    String aName = "";
-                    if (aItem instanceof JSONObject) {
-                        aName = ((JSONObject) aItem).optString("name", "");
-                    } else if (aItem instanceof String) {
-                        aName = (String) aItem;
-                    }
-                    if (!aName.isEmpty()) {
-                        if (sb.length() > 0) sb.append(", ");
-                        sb.append(aName);
-                    }
-                }
-                authorText = sb.toString();
-            }
-        }
-        if (authorText == null || authorText.trim().isEmpty() || "null".equals(authorText)) {
-            authorText = "Автор не указан";
-        }
+        // Комплексный парсинг полного ФИО авторов
+        String authorText = parseAuthorString(bObj, card);
 
         // Корректный парсинг обложки
         String coverUrl = "";
@@ -214,8 +188,15 @@ public class YandexBooksApiClient {
             coverUrl = bObj.optString("cover_url", bObj.optString("cover", ""));
         }
 
-        // Прогресс чтения
+        // Прогресс чтения (нормализация 0..1 в 0..100)
         double prog = card.optDouble("reading_progress", 0.0);
+        if (prog <= 0.0) {
+            JSONObject pObj = card.optJSONObject("position");
+            if (pObj == null) pObj = card.optJSONObject("reading_position");
+            if (pObj != null) {
+                prog = pObj.optDouble("percent", pObj.optDouble("reading_progress", 0.0));
+            }
+        }
         if (prog <= 1.0 && prog > 0.0) {
             prog = prog * 100.0;
         }
@@ -272,11 +253,144 @@ public class YandexBooksApiClient {
         return book;
     }
 
+    private String parseAuthorString(JSONObject bObj, JSONObject card) {
+        // 1. Проверяем authors_text
+        String authorsText = bObj != null ? bObj.optString("authors_text", "") : "";
+        if (authorsText.isEmpty() && card != null) {
+            authorsText = card.optString("authors_text", "");
+        }
+
+        // 2. Извлекаем авторов из массива authors / authors_objects
+        JSONArray arr = bObj != null ? bObj.optJSONArray("authors") : null;
+        if (arr == null && bObj != null) arr = bObj.optJSONArray("authors_objects");
+        if (arr == null && card != null) arr = card.optJSONArray("authors");
+
+        String fullFromArr = "";
+        if (arr != null && arr.length() > 0) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < arr.length(); i++) {
+                Object item = arr.opt(i);
+                String name = extractPersonName(item);
+                if (!name.isEmpty()) {
+                    if (sb.length() > 0) sb.append(", ");
+                    sb.append(name);
+                }
+            }
+            fullFromArr = sb.toString().trim();
+        }
+
+        // 3. Извлекаем автора из одиночного объекта author
+        JSONObject aObj = bObj != null ? bObj.optJSONObject("author") : null;
+        if (aObj == null && card != null) aObj = card.optJSONObject("author");
+        String fullFromObj = "";
+        if (aObj != null) {
+            fullFromObj = extractPersonName(aObj);
+        }
+
+        // Выбираем наиболее информативное имя
+        if (!fullFromArr.isEmpty()) {
+            return fullFromArr;
+        }
+        if (!fullFromObj.isEmpty()) {
+            return fullFromObj;
+        }
+        if (isValidAuthor(authorsText)) {
+            return authorsText.trim();
+        }
+
+        String singleAuthor = bObj != null ? bObj.optString("author", "") : "";
+        if (isValidAuthor(singleAuthor)) {
+            return singleAuthor.trim();
+        }
+
+        return "Автор не указан";
+    }
+
+    private String extractPersonName(Object item) {
+        if (item == null) return "";
+        if (item instanceof String) {
+            return ((String) item).trim();
+        }
+        if (item instanceof JSONObject) {
+            JSONObject obj = (JSONObject) item;
+            String fn = obj.optString("first_name", "").trim();
+            String mn = obj.optString("middle_name", "").trim();
+            String ln = obj.optString("last_name", "").trim();
+            String full = obj.optString("full_name", obj.optString("name", "")).trim();
+
+            if (!ln.isEmpty() && !fn.isEmpty()) {
+                StringBuilder sb = new StringBuilder();
+                sb.append(fn).append(" ");
+                if (!mn.isEmpty()) sb.append(mn).append(" ");
+                sb.append(ln);
+                return sb.toString().trim();
+            }
+            if (!full.isEmpty()) {
+                if (!ln.isEmpty() && !full.contains(ln)) {
+                    return (full + " " + ln).trim();
+                }
+                return full;
+            }
+            if (!ln.isEmpty()) return ln;
+            if (!fn.isEmpty()) return fn;
+        }
+        return "";
+    }
+
+    private boolean isValidAuthor(String text) {
+        if (text == null) return false;
+        String t = text.trim();
+        return !t.isEmpty() && !"null".equalsIgnoreCase(t) && !"undefined".equalsIgnoreCase(t);
+    }
+
     /**
      * Запрос актуальной позиции чтения из облака Яндекса.
      */
     public void getReadingProgress(final String bookUuid, final ApiCallback<ReadingProgress> callback) {
         String endpoint = BASE_URL + "/books/" + bookUuid + "/progress";
+        Request request = createAuthRequestBuilder(endpoint).get().build();
+
+        httpClient.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                // Запасной запрос через library_cards
+                getReadingProgressFallback(bookUuid, callback);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                if (!response.isSuccessful()) {
+                    getReadingProgressFallback(bookUuid, callback);
+                    return;
+                }
+                try {
+                    String body = response.body().string();
+                    JSONObject json = new JSONObject(body);
+                    JSONObject pObj = json.optJSONObject("progress");
+                    if (pObj == null) pObj = json.optJSONObject("position");
+                    if (pObj == null) pObj = json;
+
+                    double pct = pObj.optDouble("percent", pObj.optDouble("reading_progress", 0.0));
+                    if (pct <= 1.0 && pct > 0.0) {
+                        pct = pct * 100.0;
+                    }
+
+                    int chIdx = pObj.optInt("chapter_index", pObj.optInt("chapter", 0));
+                    int parIdx = pObj.optInt("paragraph_index", pObj.optInt("paragraph", 0));
+                    long ts = pObj.optLong("timestamp", System.currentTimeMillis());
+
+                    final ReadingProgress progress = new ReadingProgress(bookUuid, pct, chIdx, parIdx, 0, ts);
+                    progress.setSyncedWithServer(true);
+                    postSuccess(callback, progress);
+                } catch (Exception e) {
+                    getReadingProgressFallback(bookUuid, callback);
+                }
+            }
+        });
+    }
+
+    private void getReadingProgressFallback(final String bookUuid, final ApiCallback<ReadingProgress> callback) {
+        String endpoint = BASE_URL + "/profile/library_cards/" + bookUuid;
         Request request = createAuthRequestBuilder(endpoint).get().build();
 
         httpClient.newCall(request).enqueue(new Callback() {
@@ -294,19 +408,32 @@ public class YandexBooksApiClient {
                 try {
                     String body = response.body().string();
                     JSONObject json = new JSONObject(body);
-                    JSONObject pObj = json.optJSONObject("progress");
-                    if (pObj == null) pObj = json;
+                    JSONObject card = json.optJSONObject("library_card");
+                    if (card == null) card = json;
 
-                    double pct = pObj.optDouble("percent", 0.0);
-                    int chIdx = pObj.optInt("chapter_index", pObj.optInt("chapter", 0));
-                    int parIdx = pObj.optInt("paragraph_index", pObj.optInt("paragraph", 0));
-                    long ts = pObj.optLong("timestamp", System.currentTimeMillis());
+                    double pct = card.optDouble("reading_progress", 0.0);
+                    JSONObject posObj = card.optJSONObject("position");
+                    if (posObj == null) posObj = card.optJSONObject("reading_position");
+                    if (posObj != null && pct <= 0.0) {
+                        pct = posObj.optDouble("percent", posObj.optDouble("reading_progress", 0.0));
+                    }
+                    if (pct <= 1.0 && pct > 0.0) {
+                        pct = pct * 100.0;
+                    }
+
+                    int chIdx = 0;
+                    int parIdx = 0;
+                    if (posObj != null) {
+                        chIdx = posObj.optInt("chapter_index", posObj.optInt("chapter", 0));
+                        parIdx = posObj.optInt("paragraph_index", posObj.optInt("paragraph", 0));
+                    }
+                    long ts = System.currentTimeMillis();
 
                     final ReadingProgress progress = new ReadingProgress(bookUuid, pct, chIdx, parIdx, 0, ts);
                     progress.setSyncedWithServer(true);
                     postSuccess(callback, progress);
                 } catch (Exception e) {
-                    postError(callback, "Ошибка парсинга прогресса: " + e.getMessage());
+                    postError(callback, "Ошибка парсинга fallback прогресса: " + e.getMessage());
                 }
             }
         });
@@ -398,14 +525,60 @@ public class YandexBooksApiClient {
     }
 
     /**
-     * Отправка позиции чтения в облако Яндекса.
+     * Отправка позиции чтения в облако Яндекса с поддержкой формата Bookmate.
      */
     public void sendReadingProgress(final ReadingProgress progress, final ApiCallback<Boolean> callback) {
         String endpoint = BASE_URL + "/books/" + progress.getBookUuid() + "/progress";
 
         try {
+            double normalizedFraction = Math.min(1.0, Math.max(0.0, progress.getPercent() / 100.0));
             JSONObject bodyJson = new JSONObject();
-            bodyJson.put("percent", progress.getPercent());
+            bodyJson.put("percent", normalizedFraction);
+            bodyJson.put("reading_progress", normalizedFraction);
+            bodyJson.put("chapter_index", progress.getChapterIndex());
+            bodyJson.put("paragraph_index", progress.getParagraphIndex());
+            bodyJson.put("timestamp", progress.getTimestamp());
+
+            JSONObject posObj = new JSONObject();
+            posObj.put("chapter", progress.getChapterIndex());
+            posObj.put("chapter_index", progress.getChapterIndex());
+            posObj.put("paragraph", progress.getParagraphIndex());
+            posObj.put("paragraph_index", progress.getParagraphIndex());
+            posObj.put("percent", normalizedFraction);
+            posObj.put("timestamp", progress.getTimestamp());
+            bodyJson.put("position", posObj);
+            bodyJson.put("reading_position", posObj);
+
+            RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString());
+            Request request = createAuthRequestBuilder(endpoint).post(body).build();
+
+            httpClient.newCall(request).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    sendReadingProgressFallback(progress, callback);
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) {
+                    if (response.isSuccessful()) {
+                        postSuccess(callback, true);
+                    } else {
+                        sendReadingProgressFallback(progress, callback);
+                    }
+                }
+            });
+        } catch (Exception e) {
+            postError(callback, e.getMessage());
+        }
+    }
+
+    private void sendReadingProgressFallback(final ReadingProgress progress, final ApiCallback<Boolean> callback) {
+        String endpoint = BASE_URL + "/profile/library_cards/" + progress.getBookUuid() + "/reading_position";
+        try {
+            double normalizedFraction = Math.min(1.0, Math.max(0.0, progress.getPercent() / 100.0));
+            JSONObject bodyJson = new JSONObject();
+            bodyJson.put("percent", normalizedFraction);
+            bodyJson.put("reading_progress", normalizedFraction);
             bodyJson.put("chapter_index", progress.getChapterIndex());
             bodyJson.put("paragraph_index", progress.getParagraphIndex());
             bodyJson.put("timestamp", progress.getTimestamp());
@@ -421,17 +594,11 @@ public class YandexBooksApiClient {
 
                 @Override
                 public void onResponse(Call call, Response response) {
-                    final boolean ok = response.isSuccessful();
-                    mainHandler.post(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (ok) {
-                                callback.onSuccess(true);
-                            } else {
-                                callback.onError("Ошибка сервера при сохранении прогресса");
-                            }
-                        }
-                    });
+                    if (response.isSuccessful()) {
+                        postSuccess(callback, true);
+                    } else {
+                        postError(callback, "Ошибка сервера при синхронизации прогресса: HTTP " + response.code());
+                    }
                 }
             });
         } catch (Exception e) {
