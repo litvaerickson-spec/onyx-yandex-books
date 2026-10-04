@@ -7,6 +7,7 @@ import android.content.DialogInterface;
 import android.graphics.Bitmap;
 import android.net.http.SslError;
 import android.os.Bundle;
+import android.os.Handler;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
@@ -57,7 +58,7 @@ public class AuthWebViewActivity extends Activity {
         tokenStorage = new TokenStorage(this);
 
         webView = (WebView) findViewById(R.id.auth_webview);
-        webviewHint = (TextView) findViewById(R.id.webview_hint);
+        webviewHint = (TextView) findViewById(R.id.auth_webview_tip);
         btnClose = (Button) findViewById(R.id.btn_close_webview);
         btnReload = (Button) findViewById(R.id.btn_reload_webview);
         btnOpenKeyboard = (Button) findViewById(R.id.btn_open_keyboard);
@@ -210,7 +211,7 @@ public class AuthWebViewActivity extends Activity {
         settings.setDisplayZoomControls(false);
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
-        settings.setTextZoom(75);
+        settings.setTextZoom(70);
         // Аутентичный User-Agent Android KitKat: принудительно активирует ультралегкий режим Яндекса (Granny / Domik)
         // со статическим PNG QR-кодом для приложения Яндекс Ключ и нативными полями ввода
         settings.setUserAgentString("Mozilla/5.0 (Linux; U; Android 4.4.4; ru-ru; Onyx Darwin Build/KTU84P) AppleWebKit/534.30 (KHTML, like Gecko) Version/4.0 Mobile Safari/534.30");
@@ -228,26 +229,14 @@ public class AuthWebViewActivity extends Activity {
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
                 checkUrlForToken(url);
+                injectEinkStyles(view);
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 checkUrlForToken(url);
-
-                // Ограничиваем габариты QR-кода, чтобы он свободно умещался на дисплее 758x1024
-                String css = "var st = document.createElement('style');" +
-                        "st.innerHTML = 'body { margin: 0 !important; padding: 2px !important; } " +
-                        "header, .Header, .passp-auth-header { padding: 2px 0 !important; margin: 0 !important; } " +
-                        "img, svg, canvas, .MagicField, [data-testid=\"qr-code\"], .passp-auth-content { max-width: 62vw !important; max-height: 44vh !important; margin: 0 auto !important; } " +
-                        ".passp-footer, footer { padding: 2px 0 !important; font-size: 10px !important; }';" +
-                        "document.head.appendChild(st);";
-                if (android.os.Build.VERSION.SDK_INT >= 19) {
-                    view.evaluateJavascript(css, null);
-                } else {
-                    view.loadUrl("javascript:" + css);
-                }
-
+                injectEinkStyles(view);
                 EpdController.requestFullRefresh(AuthWebViewActivity.this, webView);
             }
 
@@ -294,6 +283,53 @@ public class AuthWebViewActivity extends Activity {
         return false;
     }
 
+    private void injectEinkStyles(WebView view) {
+        if (view == null) return;
+        String css = "var st = document.getElementById('eink_auth_override');" +
+                "if (!st) { st = document.createElement('style'); st.id = 'eink_auth_override'; (document.head || document.documentElement).appendChild(st); }" +
+                "st.innerHTML = '* { box-sizing: border-box !important; } " +
+                "html, body { margin: 0 !important; padding: 2px !important; width: 100% !important; overflow-x: hidden !important; } " +
+                "header, .Header, .passp-auth-header, [class*=\"header\"], [class*=\"Header\"] { padding: 1px 0 !important; margin: 0 !important; } " +
+                "h1, h2, h3, [class*=\"title\"], [class*=\"Title\"], .passp-title { font-size: 13px !important; line-height: 1.15 !important; margin: 2px 0 !important; } " +
+                "p, [class*=\"subtitle\"], [class*=\"description\"], .passp-auth-content__description { font-size: 10px !important; margin: 1px 0 !important; line-height: 1.15 !important; } " +
+                "ol, ul { margin: 2px 0 !important; padding-left: 18px !important; } " +
+                "li { font-size: 10px !important; margin: 1px 0 !important; line-height: 1.15 !important; } " +
+                "footer, .passp-footer, [class*=\"footer\"], [class*=\"Footer\"], .passp-auth-footer { display: none !important; } " +
+                ".passp-auth-content { padding: 1px !important; margin: 0 auto !important; max-width: 100% !important; } " +
+                "[data-testid*=\"qr\"], [class*=\"qr\"], [class*=\"Qr\"], .MagicField-qr, canvas, svg, .passp-auth-content img { max-width: 52vw !important; max-height: 38vh !important; margin: 4px auto !important; display: block !important; }';" +
+                "var qr = document.querySelector('[data-testid*=\"qr\"]') || document.querySelector('canvas') || document.querySelector('.MagicField') || document.querySelector('img[src*=\"data:image\"]');" +
+                "if (qr) { qr.scrollIntoView({block: 'center', inline: 'center'}); }";
+
+        if (android.os.Build.VERSION.SDK_INT >= 19) {
+            view.evaluateJavascript(css, null);
+        } else {
+            view.loadUrl("javascript:" + css);
+        }
+    }
+
+    private final Handler styleHandler = new Handler();
+    private final Runnable styleRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!isFinishing() && webView != null) {
+                injectEinkStyles(webView);
+                styleHandler.postDelayed(this, 1500);
+            }
+        }
+    };
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        styleHandler.post(styleRunnable);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        styleHandler.removeCallbacks(styleRunnable);
+    }
+
     @Override
     public void onBackPressed() {
         if (webView.canGoBack()) {
@@ -305,6 +341,7 @@ public class AuthWebViewActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        styleHandler.removeCallbacks(styleRunnable);
         if (webView != null) {
             webView.stopLoading();
             webView.destroy();

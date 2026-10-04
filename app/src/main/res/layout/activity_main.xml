@@ -5,78 +5,80 @@
     android:orientation="vertical"
     android:background="@color/eink_white">
 
-    <!-- Компактная верхняя панель (Header): уменьшена в 2 раза, поднята выше -->
+    <!-- Ультракомпактная верхняя панель (Header: 28dp) -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="28dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingLeft="10dp"
-        android:paddingRight="10dp"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"
+        android:paddingLeft="8dp"
+        android:paddingRight="8dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
         android:background="@color/eink_white">
 
-        <LinearLayout
+        <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Яндекс Книги"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="@color/eink_black" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text=" v1.2.7"
-                android:textSize="10sp"
-                android:textColor="@color/eink_black" />
-        </LinearLayout>
+            android:text="Яндекс Книги"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/eink_black"
+            android:singleLine="true" />
 
         <Button
             android:id="@+id/btn_toggle_reader_mode"
             android:layout_width="wrap_content"
-            android:layout_height="28dp"
+            android:layout_height="24dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
             android:text="📖 Onyx"
-            android:textSize="11sp"
+            android:textSize="10sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
             android:background="@drawable/btn_eink"
+            android:includeFontPadding="false"
             android:paddingLeft="6dp"
             android:paddingRight="6dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
             android:layout_marginRight="4dp" />
 
         <Button
             android:id="@+id/btn_refresh_top"
             android:layout_width="wrap_content"
-            android:layout_height="28dp"
+            android:layout_height="24dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
             android:text="↻"
-            android:textSize="12sp"
+            android:textSize="11sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
             android:background="@drawable/btn_eink"
-            android:paddingLeft="8dp"
-            android:paddingRight="8dp"
+            android:includeFontPadding="false"
+            android:paddingLeft="7dp"
+            android:paddingRight="7dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
             android:layout_marginRight="4dp" />
 
         <Button
             android:id="@+id/btn_logout"
             android:layout_width="wrap_content"
-            android:layout_height="28dp"
+            android:layout_height="24dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
             android:text="Выход"
-            android:textSize="11sp"
+            android:textSize="10sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
             android:background="@drawable/btn_eink"
+            android:includeFontPadding="false"
             android:paddingLeft="6dp"
-            android:paddingRight="6dp" />
+            android:paddingRight="6dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp" />
     </LinearLayout>
 
     <View
@@ -84,77 +86,91 @@
         android:layout_height="1dp"
         android:background="@color/eink_black" />
 
-    <!-- Компактные вкладки полок -->
+    <!-- Компактные вкладки полок (Tabs: 28dp) -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="28dp"
         android:orientation="horizontal"
-        android:paddingLeft="6dp"
-        android:paddingRight="6dp"
-        android:paddingTop="3dp"
-        android:paddingBottom="3dp"
+        android:paddingLeft="4dp"
+        android:paddingRight="4dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
         android:background="@color/eink_white">
 
         <Button
             android:id="@+id/tab_reading_btn"
             android:layout_width="0dp"
-            android:layout_height="30dp"
+            android:layout_height="24dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
             android:layout_weight="1"
             android:text="Читаю (0)"
-            android:textSize="11sp"
+            android:textSize="10sp"
             android:textStyle="bold"
             android:textColor="@color/eink_white"
             android:background="@drawable/tab_eink_active"
+            android:includeFontPadding="false"
+            android:padding="0dp"
             android:layout_marginRight="2dp" />
 
         <Button
             android:id="@+id/tab_to_read_btn"
             android:layout_width="0dp"
-            android:layout_height="30dp"
+            android:layout_height="24dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
             android:layout_weight="1"
             android:text="В планах (0)"
-            android:textSize="11sp"
+            android:textSize="10sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
             android:background="@drawable/tab_eink_inactive"
+            android:includeFontPadding="false"
+            android:padding="0dp"
             android:layout_marginLeft="2dp"
             android:layout_marginRight="2dp" />
 
         <Button
             android:id="@+id/tab_done_btn"
             android:layout_width="0dp"
-            android:layout_height="30dp"
+            android:layout_height="24dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
             android:layout_weight="1"
             android:text="Прочитано (0)"
-            android:textSize="11sp"
+            android:textSize="10sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
             android:background="@drawable/tab_eink_inactive"
+            android:includeFontPadding="false"
+            android:padding="0dp"
             android:layout_marginLeft="2dp" />
     </LinearLayout>
 
     <View
         android:layout_width="match_parent"
-        android:layout_height="1.5dp"
+        android:layout_height="1dp"
         android:background="@color/eink_black" />
 
-    <!-- Индикатор загрузки -->
+    <!-- Индикатор синхронизации -->
     <TextView
         android:id="@+id/loading_text"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Синхронизация библиотеки с облаком Яндекса..."
-        android:textSize="13sp"
+        android:textSize="11sp"
         android:textStyle="bold"
         android:gravity="center"
-        android:padding="8dp"
+        android:padding="4dp"
         android:textColor="@color/eink_white"
         android:background="@color/eink_black"
         android:visibility="gone" />
 
+    <!-- Основная область списка книг -->
     <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent">
+        android:layout_height="0dp"
+        android:layout_weight="1">
 
         <!-- Список книг на полке -->
         <ListView
@@ -162,7 +178,10 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:divider="@color/eink_black"
-            android:dividerHeight="1dp" />
+            android:dividerHeight="1dp"
+            android:footerDividersEnabled="false"
+            android:headerDividersEnabled="false"
+            android:overScrollMode="never" />
 
         <!-- Пустое состояние (когда на полке нет книг) -->
         <LinearLayout
@@ -171,42 +190,117 @@
             android:layout_height="match_parent"
             android:orientation="vertical"
             android:gravity="center"
-            android:padding="24dp"
+            android:padding="20dp"
             android:visibility="gone">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/empty_shelf_title"
-                android:textSize="20sp"
+                android:textSize="18sp"
                 android:textStyle="bold"
                 android:textColor="@color/eink_black"
                 android:gravity="center"
-                android:layout_marginBottom="10dp" />
+                android:layout_marginBottom="8dp" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/empty_shelf_hint"
-                android:textSize="14sp"
+                android:textSize="13sp"
                 android:textColor="@color/eink_dark_gray"
                 android:gravity="center"
                 android:lineSpacingMultiplier="1.2"
-                android:layout_marginBottom="20dp" />
+                android:layout_marginBottom="16dp" />
 
             <Button
                 android:id="@+id/btn_refresh_shelf"
                 android:layout_width="wrap_content"
-                android:layout_height="42dp"
+                android:layout_height="36dp"
                 android:text="Обновить список книг"
-                android:textSize="14sp"
+                android:textSize="13sp"
                 android:textStyle="bold"
                 android:textColor="@color/eink_black"
                 android:background="@drawable/btn_eink"
-                android:paddingLeft="24dp"
-                android:paddingRight="24dp" />
+                android:paddingLeft="20dp"
+                android:paddingRight="20dp" />
         </LinearLayout>
 
     </FrameLayout>
+
+    <!-- Разделитель нижней панели -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/eink_black" />
+
+    <!-- Нижняя статус-панель полки и постраничная навигация E-Ink (Footer: 30dp) -->
+    <LinearLayout
+        android:id="@+id/shelf_footer_bar"
+        android:layout_width="match_parent"
+        android:layout_height="30dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingLeft="8dp"
+        android:paddingRight="8dp"
+        android:background="@color/eink_white">
+
+        <TextView
+            android:id="@+id/shelf_footer_status"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="📚 Книг: 0"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:textColor="@color/eink_black"
+            android:singleLine="true"
+            android:ellipsize="end" />
+
+        <Button
+            android:id="@+id/btn_shelf_prev_page"
+            android:layout_width="wrap_content"
+            android:layout_height="22dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:text="◀ Стр"
+            android:textSize="9sp"
+            android:textStyle="bold"
+            android:textColor="@color/eink_black"
+            android:background="@drawable/btn_eink"
+            android:includeFontPadding="false"
+            android:paddingLeft="5dp"
+            android:paddingRight="5dp"
+            android:paddingTop="1dp"
+            android:paddingBottom="1dp" />
+
+        <TextView
+            android:id="@+id/shelf_page_indicator"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=" 1/1 "
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:textColor="@color/eink_black"
+            android:layout_marginLeft="4dp"
+            android:layout_marginRight="4dp" />
+
+        <Button
+            android:id="@+id/btn_shelf_next_page"
+            android:layout_width="wrap_content"
+            android:layout_height="22dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:text="Стр ▶"
+            android:textSize="9sp"
+            android:textStyle="bold"
+            android:textColor="@color/eink_black"
+            android:background="@drawable/btn_eink"
+            android:includeFontPadding="false"
+            android:paddingLeft="5dp"
+            android:paddingRight="5dp"
+            android:paddingTop="1dp"
+            android:paddingBottom="1dp" />
+    </LinearLayout>
 
 </LinearLayout>

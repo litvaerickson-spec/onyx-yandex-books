@@ -7,6 +7,7 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -25,6 +26,7 @@ import com.onyx.yandexbooks.core.api.YandexBooksApiClient;
 import com.onyx.yandexbooks.core.api.models.Book;
 import com.onyx.yandexbooks.core.api.models.Chapter;
 import com.onyx.yandexbooks.core.auth.TokenStorage;
+import com.onyx.yandexbooks.core.eink.EpdController;
 import com.onyx.yandexbooks.core.storage.CacheManager;
 import com.onyx.yandexbooks.core.storage.DatabaseHelper;
 import com.onyx.yandexbooks.core.sync.SyncManager;
@@ -61,6 +63,11 @@ public class MainActivity extends Activity {
     private BooksAdapter adapter;
     private boolean isAuthLaunching = false;
 
+    private TextView shelfFooterStatus;
+    private Button btnShelfPrevPage;
+    private Button btnShelfNextPage;
+    private TextView shelfPageIndicator;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -85,11 +92,17 @@ public class MainActivity extends Activity {
         emptyStateContainer = findViewById(R.id.empty_state_container);
         btnRefreshShelf = (Button) findViewById(R.id.btn_refresh_shelf);
 
+        shelfFooterStatus = (TextView) findViewById(R.id.shelf_footer_status);
+        btnShelfPrevPage = (Button) findViewById(R.id.btn_shelf_prev_page);
+        btnShelfNextPage = (Button) findViewById(R.id.btn_shelf_next_page);
+        shelfPageIndicator = (TextView) findViewById(R.id.shelf_page_indicator);
+
         adapter = new BooksAdapter();
         booksListView.setAdapter(adapter);
 
         setupTabs();
         setupHeaderActions();
+        setupFooterActions();
 
         checkAuthAndLoad();
     }
@@ -216,6 +229,69 @@ public class MainActivity extends Activity {
         tabDoneBtn.setText("Прочитано (" + doneCount + ")");
     }
 
+    private void setupFooterActions() {
+        if (btnShelfPrevPage != null) {
+            btnShelfPrevPage.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (booksListView == null || currentBooks.isEmpty()) return;
+                    int current = booksListView.getFirstVisiblePosition();
+                    int target = Math.max(0, current - 3);
+                    booksListView.setSelection(target);
+                    updateShelfFooter();
+                    EpdController.requestFullRefresh(MainActivity.this, booksListView);
+                }
+            });
+        }
+
+        if (btnShelfNextPage != null) {
+            btnShelfNextPage.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (booksListView == null || currentBooks.isEmpty()) return;
+                    int current = booksListView.getFirstVisiblePosition();
+                    int target = Math.min(currentBooks.size() - 1, current + 3);
+                    booksListView.setSelection(target);
+                    updateShelfFooter();
+                    EpdController.requestFullRefresh(MainActivity.this, booksListView);
+                }
+            });
+        }
+
+        if (booksListView != null) {
+            booksListView.setOnScrollListener(new android.widget.AbsListView.OnScrollListener() {
+                @Override
+                public void onScrollStateChanged(android.widget.AbsListView view, int scrollState) {
+                    if (scrollState == SCROLL_STATE_IDLE) {
+                        updateShelfFooter();
+                        EpdController.requestFullRefresh(MainActivity.this, booksListView);
+                    }
+                }
+                @Override
+                public void onScroll(android.widget.AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount) {
+                }
+            });
+        }
+    }
+
+    private void updateShelfFooter() {
+        if (shelfFooterStatus == null || shelfPageIndicator == null) return;
+        String title = "Читаю";
+        if ("to_read".equals(currentShelf)) title = "В планах";
+        else if ("done".equals(currentShelf)) title = "Прочитано";
+
+        shelfFooterStatus.setText("📚 " + title + ": " + currentBooks.size() + " книг");
+
+        if (currentBooks.isEmpty()) {
+            shelfPageIndicator.setText(" 0/0 ");
+        } else {
+            int totalPages = Math.max(1, (int) Math.ceil((double) currentBooks.size() / 3.0));
+            int firstPos = booksListView.getFirstVisiblePosition();
+            int currentPage = Math.min(totalPages, (firstPos / 3) + 1);
+            shelfPageIndicator.setText(" " + currentPage + "/" + totalPages + " ");
+        }
+    }
+
     private void updateEmptyState() {
         if (currentBooks.isEmpty()) {
             emptyStateContainer.setVisibility(View.VISIBLE);
@@ -224,6 +300,7 @@ public class MainActivity extends Activity {
             emptyStateContainer.setVisibility(View.GONE);
             booksListView.setVisibility(View.VISIBLE);
         }
+        updateShelfFooter();
     }
 
     private void loadBooks(final String shelf) {
@@ -233,6 +310,7 @@ public class MainActivity extends Activity {
         updateTabBadges();
         updateTabStyles();
         updateEmptyState();
+        updateShelfFooter();
 
         loadingTextView.setVisibility(View.VISIBLE);
 
@@ -248,12 +326,14 @@ public class MainActivity extends Activity {
                 adapter.notifyDataSetChanged();
                 updateTabBadges();
                 updateEmptyState();
+                updateShelfFooter();
             }
 
             @Override
             public void onError(String errorMessage) {
                 loadingTextView.setVisibility(View.GONE);
                 updateEmptyState();
+                updateShelfFooter();
                 if (errorMessage != null && (errorMessage.contains("401") || errorMessage.contains("not_authenticated"))) {
                     Toast.makeText(MainActivity.this, "Сессия истекла (401). Пожалуйста, войдите снова.", Toast.LENGTH_SHORT).show();
                     tokenStorage.clear();
@@ -273,7 +353,32 @@ public class MainActivity extends Activity {
             currentBooks = dbHelper.getBooksByShelf(currentShelf);
             adapter.notifyDataSetChanged();
             updateTabBadges();
+            updateShelfFooter();
         }
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            if (booksListView != null && !currentBooks.isEmpty()) {
+                int current = booksListView.getFirstVisiblePosition();
+                int target = Math.min(currentBooks.size() - 1, current + 3);
+                booksListView.setSelection(target);
+                updateShelfFooter();
+                EpdController.requestFullRefresh(MainActivity.this, booksListView);
+                return true;
+            }
+        } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            if (booksListView != null && !currentBooks.isEmpty()) {
+                int current = booksListView.getFirstVisiblePosition();
+                int target = Math.max(0, current - 3);
+                booksListView.setSelection(target);
+                updateShelfFooter();
+                EpdController.requestFullRefresh(MainActivity.this, booksListView);
+                return true;
+            }
+        }
+        return super.onKeyDown(keyCode, event);
     }
 
     private void updateReaderModeButton() {
@@ -422,7 +527,7 @@ public class MainActivity extends Activity {
             if (pct > 0.0) {
                 progress.setText(String.format("%.0f%%", pct));
             } else {
-                progress.setText("Не начата");
+                progress.setText("0%");
             }
 
             coverLoader.loadCover(cover, book.getUuid(), book.getCoverUrl(), book.getTitle());
