@@ -1,0 +1,256 @@
+package com.onyx.yandexbooks.core.storage;
+
+import android.content.Context;
+import android.os.AsyncTask;
+import android.os.Environment;
+import android.util.Log;
+
+import com.onyx.yandexbooks.core.api.YandexBooksApiClient;
+import com.onyx.yandexbooks.core.api.models.Chapter;
+import com.onyx.yandexbooks.core.epub.EpubParser;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Менеджер кэширования и загрузки книг в формате EPUB.
+ * Скачивает EPUB из Яндекс Книг, парсит главы для Canvas-читалки
+ * и сохраняет файл в каталог /sdcard/Books/YandexBooks/ для внешней библиотеки Onyx.
+ */
+public class CacheManager {
+
+    private static final String TAG = "CacheManager";
+    private final Context context;
+    private final File booksDir;
+    private final YandexBooksApiClient apiClient;
+    private final DatabaseHelper dbHelper;
+
+    public interface DownloadProgressCallback {
+        void onProgress(int downloadedCount, int totalCount);
+        void onComplete();
+        void onError(String message);
+    }
+
+    public interface BookReadyCallback {
+        void onReady(List<Chapter> chapters);
+        void onError(String message);
+    }
+
+    public CacheManager(Context context, YandexBooksApiClient apiClient) {
+        this.context = context.getApplicationContext();
+        this.booksDir = new File(this.context.getFilesDir(), "cached_books");
+        if (!booksDir.exists()) {
+            booksDir.mkdirs();
+        }
+        this.apiClient = apiClient;
+        this.dbHelper = DatabaseHelper.getInstance(this.context);
+    }
+
+    public File getEpubFile(String bookUuid) {
+        File bDir = new File(booksDir, bookUuid);
+        if (!bDir.exists()) {
+            bDir.mkdirs();
+        }
+        return new File(bDir, "book.epub");
+    }
+
+    private File getChapterFile(String bookUuid, String chapterId) {
+        File bDir = new File(booksDir, bookUuid);
+        if (!bDir.exists()) {
+            bDir.mkdirs();
+        }
+        return new File(bDir, "ch_" + chapterId + ".txt");
+    }
+
+    public boolean isBookDownloaded(String bookUuid) {
+        File epub = getEpubFile(bookUuid);
+        if (epub.exists() && epub.length() > 0) {
+            List<Chapter> chs = dbHelper.getChapters(bookUuid);
+            return chs != null && !chs.isEmpty();
+        }
+        return false;
+    }
+
+    public boolean isChapterCached(String bookUuid, String chapterId) {
+        File file = getChapterFile(bookUuid, chapterId);
+        return file.exists() && file.length() > 0;
+    }
+
+    public void saveChapter(String bookUuid, String chapterId, String content) {
+        try {
+            File file = getChapterFile(bookUuid, chapterId);
+            try (FileOutputStream fos = new FileOutputStream(file);
+                 OutputStreamWriter writer = new OutputStreamWriter(fos, StandardCharsets.UTF_8)) {
+                writer.write(content);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving chapter " + chapterId, e);
+        }
+    }
+
+    public String loadChapter(String bookUuid, String chapterId) {
+        File file = getChapterFile(bookUuid, chapterId);
+        if (!file.exists()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        try (FileInputStream fis = new FileInputStream(file);
+             BufferedReader reader = new BufferedReader(new InputStreamReader(fis, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append("\n");
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            Log.e(TAG, "Error reading chapter " + chapterId, e);
+            return null;
+        }
+    }
+
+    /**
+     * Загрузка книги (EPUB) и извлечение глав.
+     */
+    public void downloadBookAsync(final String bookUuid, final String bookTitle, final DownloadProgressCallback callback) {
+        final File epubFile = getEpubFile(bookUuid);
+
+        apiClient.downloadBookEpub(bookUuid, epubFile, new YandexBooksApiClient.ApiCallback<File>() {
+            @Override
+            public void onSuccess(final File downloadedFile) {
+                // В фоновом потоке парсим главы из скачанного EPUB архива
+                new AsyncTask<Void, Void, List<Chapter>>() {
+                    @Override
+                    protected List<Chapter> doInBackground(Void... voids) {
+                        try {
+                            List<EpubParser.ChapterData> parsed = EpubParser.parseEpub(downloadedFile);
+                            if (parsed.isEmpty()) {
+                                return null;
+                            }
+
+                            List<Chapter> chapters = new ArrayList<>();
+                            for (int i = 0; i < parsed.size(); i++) {
+                                EpubParser.ChapterData cd = parsed.get(i);
+                                String chId = String.valueOf(i);
+                                saveChapter(bookUuid, chId, cd.textContent);
+
+                                Chapter ch = new Chapter();
+                                ch.setId(chId);
+                                ch.setBookUuid(bookUuid);
+                                ch.setChapterIndex(i);
+                                ch.setTitle(cd.title);
+                                chapters.add(ch);
+                            }
+
+                            dbHelper.saveChapters(bookUuid, chapters);
+                            dbHelper.updateBookDownloaded(bookUuid, true);
+
+                            // Также экспортируем копию в /sdcard/Books/YandexBooks/ для системы Onyx
+                            exportToPublicBooksDir(downloadedFile, bookTitle);
+
+                            return chapters;
+                        } catch (Exception e) {
+                            Log.e(TAG, "Error parsing downloaded EPUB", e);
+                            return null;
+                        }
+                    }
+
+                    @Override
+                    protected void onPostExecute(List<Chapter> chapters) {
+                        if (chapters != null && !chapters.isEmpty()) {
+                            if (callback != null) {
+                                callback.onProgress(chapters.size(), chapters.size());
+                                callback.onComplete();
+                            }
+                        } else {
+                            if (callback != null) {
+                                callback.onError("Не удалось извлечь текст из книги");
+                            }
+                        }
+                    }
+                }.execute();
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                if (callback != null) {
+                    callback.onError(errorMessage);
+                }
+            }
+        });
+    }
+
+    /**
+     * Обеспечивает готовность книги к чтению (берет из локального кэша или скачивает).
+     */
+    public void ensureBookReady(final String bookUuid, final String bookTitle, final BookReadyCallback callback) {
+        if (isBookDownloaded(bookUuid)) {
+            List<Chapter> chapters = dbHelper.getChapters(bookUuid);
+            if (chapters != null && !chapters.isEmpty()) {
+                callback.onReady(chapters);
+                return;
+            }
+        }
+
+        // Скачиваем книгу
+        downloadBookAsync(bookUuid, bookTitle, new DownloadProgressCallback() {
+            @Override
+            public void onProgress(int downloadedCount, int totalCount) {}
+
+            @Override
+            public void onComplete() {
+                List<Chapter> chapters = dbHelper.getChapters(bookUuid);
+                if (chapters != null && !chapters.isEmpty()) {
+                    callback.onReady(chapters);
+                } else {
+                    callback.onError("Книга загружена, но главы не найдены");
+                }
+            }
+
+            @Override
+            public void onError(String message) {
+                callback.onError(message);
+            }
+        });
+    }
+
+    private void exportToPublicBooksDir(File sourceEpub, String title) {
+        try {
+            File extStorage = Environment.getExternalStorageDirectory();
+            if (extStorage != null && extStorage.canWrite()) {
+                File yandexBooksDir = new File(extStorage, "Books/YandexBooks");
+                if (!yandexBooksDir.exists()) {
+                    yandexBooksDir.mkdirs();
+                }
+                String cleanName = (title != null ? title : "book").replaceAll("[\\\\/:*?\"<>|]", "_");
+                if (cleanName.length() > 60) {
+                    cleanName = cleanName.substring(0, 60);
+                }
+                File destFile = new File(yandexBooksDir, cleanName + ".epub");
+                copyFile(sourceEpub, destFile);
+                Log.d(TAG, "Exported EPUB to: " + destFile.getAbsolutePath());
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to export EPUB to public Books directory", e);
+        }
+    }
+
+    private void copyFile(File src, File dst) throws Exception {
+        try (InputStream in = new FileInputStream(src);
+             OutputStream out = new FileOutputStream(dst)) {
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = in.read(buf)) > 0) {
+                out.write(buf, 0, len);
+            }
+            out.flush();
+        }
+    }
+}

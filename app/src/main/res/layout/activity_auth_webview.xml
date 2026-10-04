@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/eink_white">
+
+    <!-- Верхняя панель управления -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingLeft="8dp"
+        android:paddingRight="8dp"
+        android:background="#EEEEEE">
+
+        <Button
+            android:id="@+id/btn_close_webview"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="← Назад"
+            android:textSize="13sp"
+            android:textColor="@color/eink_black" />
+
+        <Button
+            android:id="@+id/btn_open_keyboard"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="36dp"
+            android:text="⌨️ Клавиатура"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="@color/eink_black"
+            android:layout_marginLeft="4dp"
+            android:layout_marginRight="4dp" />
+
+        <Button
+            android:id="@+id/btn_native_input"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="36dp"
+            android:text="✏️ Ввести в поле"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="@color/eink_black"
+            android:layout_marginRight="4dp" />
+
+        <Button
+            android:id="@+id/btn_reload_webview"
+            android:layout_width="40dp"
+            android:layout_height="36dp"
+            android:text="🔄"
+            android:textSize="14sp"
+            android:textColor="@color/eink_black" />
+
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/eink_divider" />
+
+    <!-- Подсказка для E-Ink -->
+    <TextView
+        android:id="@+id/webview_hint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#F2F2F2"
+        android:paddingLeft="10dp"
+        android:paddingRight="10dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:text="💡 Наведите камеру Яндекс Ключа на QR-код, либо нажмите «Войти в другой аккаунт» для входа по логину.\nКнопки «⌨️ Клавиатура» и «✏️ Ввести в поле» помогут ввести данные."
+        android:textSize="11sp"
+        android:textColor="#222222"
+        android:gravity="center"
+        android:lineSpacingExtra="2dp" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/eink_divider" />
+
+    <!-- Сам WebView с обязательным фокусом для клавиатуры -->
+    <WebView
+        android:id="@+id/auth_webview"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:focusable="true"
+        android:focusableInTouchMode="true" />
+
+</LinearLayout>

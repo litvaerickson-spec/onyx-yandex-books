@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/eink_white">
+
+    <com.onyx.yandexbooks.ui.ReaderCanvasView
+        android:id="@+id/reader_canvas"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Меню настроек верстки (появляется по центральному тапу) -->
+    <LinearLayout
+        android:id="@+id/reader_menu_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:orientation="vertical"
+        android:background="@color/eink_white"
+        android:padding="16dp"
+        android:visibility="gone">
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="2dp"
+            android:background="@color/eink_black"
+            android:layout_marginBottom="12dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Размер шрифта:"
+                android:textColor="@color/eink_black" />
+
+            <Button
+                android:id="@+id/btn_font_decrease"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="A-" />
+
+            <TextView
+                android:id="@+id/font_size_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:padding="8dp"
+                android:text="18"
+                android:textStyle="bold"
+                android:textColor="@color/eink_black" />
+
+            <Button
+                android:id="@+id/btn_font_increase"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="A+" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="8dp">
+
+            <Button
+                android:id="@+id/btn_toggle_hyphenation"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Переносы: Вкл"
+                android:layout_marginRight="4dp" />
+
+            <Button
+                android:id="@+id/btn_toggle_contrast"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Контраст: Высокий"
+                android:layout_marginRight="4dp" />
+
+            <Button
+                android:id="@+id/btn_force_refresh"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Очистить" />
+        </LinearLayout>
+
+    </LinearLayout>
+
+</RelativeLayout>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.EInk" parent="android:Theme.Holo.Light.NoActionBar">
+        <item name="android:windowBackground">@color/eink_white</item>
+        <item name="android:colorBackground">@color/eink_white</item>
+        <item name="android:textColorPrimary">@color/eink_black</item>
+        <item name="android:windowAnimationStyle">@style/Animation.EInk.NoAnimation</item>
+    </style>
+
+    <style name="Animation.EInk.NoAnimation" parent="android:Animation">
+        <item name="android:windowEnterAnimation">@null</item>
+        <item name="android:windowExitAnimation">@null</item>
+        <item name="android:activityOpenEnterAnimation">@null</item>
+        <item name="android:activityOpenExitAnimation">@null</item>
+        <item name="android:activityCloseEnterAnimation">@null</item>
+        <item name="android:activityCloseExitAnimation">@null</item>
+    </style>
+</resources>

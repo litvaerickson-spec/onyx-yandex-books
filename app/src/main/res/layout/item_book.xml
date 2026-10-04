@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:paddingLeft="12dp"
+    android:paddingRight="12dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp"
+    android:gravity="center_vertical"
+    android:background="@color/eink_white">
+
+    <!-- Обложка книги с контрастной рамкой 2px -->
+    <ImageView
+        android:id="@+id/book_cover"
+        android:layout_width="56dp"
+        android:layout_height="82dp"
+        android:layout_marginRight="12dp"
+        android:background="@drawable/cover_border"
+        android:padding="2dp"
+        android:scaleType="centerCrop" />
+
+    <!-- Информативный блок книги: Название, Автор, Описание, Прогресс -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/book_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Название книги"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:textColor="@color/eink_black"
+            android:maxLines="2"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/book_author"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Автор"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/eink_black"
+            android:layout_marginTop="1dp"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <!-- Описание/Аннотация книги (2 строки для информативности) -->
+        <TextView
+            android:id="@+id/book_annotation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Краткое описание сюжета книги..."
+            android:textSize="11sp"
+            android:textColor="@color/eink_black"
+            android:layout_marginTop="2dp"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:lineSpacingMultiplier="1.1" />
+
+        <!-- Прогресс чтения с контрастным мини-баром -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="4dp">
+
+            <ProgressBar
+                android:id="@+id/book_progress_bar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="60dp"
+                android:layout_height="5dp"
+                android:progressDrawable="@drawable/progress_eink_bar"
+                android:max="100"
+                android:progress="0"
+                android:layout_marginRight="6dp" />
+
+            <TextView
+                android:id="@+id/book_progress"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0%"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="@color/eink_black" />
+
+            <TextView
+                android:id="@+id/book_status_tag"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text=" • В памяти"
+                android:textSize="11sp"
+                android:textColor="@color/eink_black"
+                android:layout_marginLeft="4dp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Компактные кнопки действий справа -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:layout_marginLeft="8dp">
+
+        <Button
+            android:id="@+id/book_read_btn"
+            android:layout_width="68dp"
+            android:layout_height="36dp"
+            android:text="@string/btn_read"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/eink_white"
+            android:background="@drawable/btn_eink_primary"
+            android:layout_marginBottom="4dp" />
+
+        <Button
+            android:id="@+id/book_download_btn"
+            android:layout_width="68dp"
+            android:layout_height="30dp"
+            android:text="О книге"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:textColor="@color/eink_black"
+            android:background="@drawable/btn_eink" />
+    </LinearLayout>
+
+</LinearLayout>

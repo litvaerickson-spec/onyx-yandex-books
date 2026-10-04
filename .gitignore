@@ -1,0 +1,23 @@
+# Build outputs
+build/
+.gradle/
+*.class
+
+# Binaries and packages (attached to GitHub Releases instead of git history)
+*.apk
+*.idsig
+
+# Keystores (re-generated on build if absent)
+*.keystore
+*.jks
+
+# OS & IDE
+.DS_Store
+.idea/
+*.iml
+*.swp
+*.swo
+
+# Python caches
+__pycache__/
+*.py[cod]

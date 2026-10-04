@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="eink_white">#FFFFFF</color>
+    <color name="eink_black">#000000</color>
+    <color name="eink_dark_gray">#222222</color>
+    <color name="eink_gray">#555555</color>
+    <color name="eink_light_gray">#EEEEEE</color>
+    <color name="eink_divider">#000000</color>
+    <color name="eink_border">#000000</color>
+    <color name="eink_highlight">#000000</color>
+</resources>
