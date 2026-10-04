@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-VERSION="${1:-1.3.0}"
+VERSION="${1:-1.3.1}"
 TARGET_APK="yandex-books-lite-v${VERSION}.apk"
 
 echo "=== Сборка Яндекс Книги Lite APK (Версия: $VERSION) ==="

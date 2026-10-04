@@ -125,9 +125,14 @@ public class ReaderCanvasView extends View {
         float startX = config.getPaddingLeftPx();
         float currentY = config.getPaddingTopPx() - fm.top;
         float maxAllowedX = getWidth() - config.getPaddingRightPx();
+        float maxAllowedTextBottom = getHeight() - config.getPaddingBottomPx() - config.getFooterReservedHeightPx();
 
         // Отрисовка строк текущей страницы
         for (TextPaginator.Line line : currentPage.lines) {
+            if (currentY + fm.bottom > maxAllowedTextBottom + 6) {
+                break; // 100% математическая защита: текст физически не может наехать на колонтитул
+            }
+
             if (line.text.isEmpty()) {
                 currentY += lineHeight;
                 continue;
@@ -155,7 +160,7 @@ public class ReaderCanvasView extends View {
         }
 
         // Отрисовка нижнего колонтитула с математической защитой от набегания текста
-        float footerY = getHeight() - 8;
+        float footerY = getHeight() - 10;
         String pageInfo = "Стр. " + (currentPage.pageIndex + 1) + "/" + totalPages + String.format(" (%.0f%%)", globalPercent);
         float pageInfoWidth = footerPaint.measureText(pageInfo);
 

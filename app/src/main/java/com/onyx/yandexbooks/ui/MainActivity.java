@@ -192,14 +192,30 @@ public class MainActivity extends Activity {
         });
     }
 
+    private Dialog showEinkLoadingDialog(String title, String message) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle(title);
+        builder.setMessage(message);
+        builder.setCancelable(false);
+        AlertDialog dialog = builder.create();
+        dialog.show();
+        return dialog;
+    }
+
+    private void dismissEinkLoadingDialog(Dialog dialog) {
+        if (dialog != null && dialog.isShowing()) {
+            try {
+                dialog.dismiss();
+            } catch (Exception ignored) {}
+            // Принудительно очищаем дисплей E-Ink от остаточных артефактов закрытого окна
+            EpdController.requestFullRefresh(MainActivity.this, null);
+        }
+    }
+
     private void checkAppUpdate(final boolean userTriggered) {
-        final ProgressDialog pd;
+        final Dialog pd;
         if (userTriggered) {
-            pd = new ProgressDialog(this);
-            pd.setTitle("Обновление ПО");
-            pd.setMessage("Проверка обновлений на GitHub...");
-            pd.setCancelable(false);
-            pd.show();
+            pd = showEinkLoadingDialog("Обновление ПО", "Проверка обновлений на GitHub...");
         } else {
             pd = null;
         }
@@ -207,9 +223,7 @@ public class MainActivity extends Activity {
         AppUpdateManager.getInstance().fetchLatestRelease(this, new AppUpdateManager.UpdateCheckCallback() {
             @Override
             public void onResult(boolean updateAvailable, final AppUpdateManager.ReleaseInfo release, String message) {
-                if (pd != null && pd.isShowing()) {
-                    pd.dismiss();
-                }
+                dismissEinkLoadingDialog(pd);
 
                 if (updateAvailable && release != null) {
                     if (btnCheckUpdate != null) {
@@ -419,6 +433,8 @@ public class MainActivity extends Activity {
             updateTabBadges();
             updateShelfFooter();
         }
+        // Очищаем экран при возвращении в библиотеку от возможных остаточных артефактов
+        EpdController.requestFullRefresh(this, booksListView);
     }
 
     @Override
@@ -471,12 +487,7 @@ public class MainActivity extends Activity {
             return;
         }
 
-        final ProgressDialog dialog = new ProgressDialog(this);
-        dialog.setTitle("Яндекс Книги");
-        dialog.setMessage("Загрузка EPUB в /sdcard/Books/ для Onyx...");
-        dialog.setIndeterminate(true);
-        dialog.setCancelable(false);
-        dialog.show();
+        final Dialog dialog = showEinkLoadingDialog("Яндекс Книги", "Загрузка EPUB в /sdcard/Books/ для Onyx...");
 
         cacheManager.downloadBookAsync(book.getUuid(), book.getTitle(), new CacheManager.DownloadProgressCallback() {
             @Override
@@ -484,7 +495,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void onComplete() {
-                if (dialog.isShowing()) dialog.dismiss();
+                dismissEinkLoadingDialog(dialog);
                 adapter.notifyDataSetChanged();
                 File readyEpub = cacheManager.ensurePublicEpubFile(book.getUuid(), book.getTitle());
                 if (readyEpub != null && readyEpub.exists()) {
@@ -499,7 +510,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void onError(String message) {
-                if (dialog.isShowing()) dialog.dismiss();
+                dismissEinkLoadingDialog(dialog);
                 Toast.makeText(MainActivity.this, "Ошибка скачивания: " + message + ". Открываем в Lite.", Toast.LENGTH_LONG).show();
                 openInLiteReader(book);
             }
@@ -512,24 +523,19 @@ public class MainActivity extends Activity {
             return;
         }
 
-        final ProgressDialog dialog = new ProgressDialog(this);
-        dialog.setTitle("Яндекс Книги");
-        dialog.setMessage("Загрузка и подготовка книги к чтению...");
-        dialog.setIndeterminate(true);
-        dialog.setCancelable(false);
-        dialog.show();
+        final Dialog dialog = showEinkLoadingDialog("Яндекс Книги", "Загрузка и подготовка книги к чтению...");
 
         cacheManager.ensureBookReady(book.getUuid(), book.getTitle(), new CacheManager.BookReadyCallback() {
             @Override
             public void onReady(List<Chapter> chapters) {
-                if (dialog.isShowing()) dialog.dismiss();
+                dismissEinkLoadingDialog(dialog);
                 adapter.notifyDataSetChanged();
                 launchReader(book);
             }
 
             @Override
             public void onError(String message) {
-                if (dialog.isShowing()) dialog.dismiss();
+                dismissEinkLoadingDialog(dialog);
                 Toast.makeText(MainActivity.this, "Не удалось открыть книгу: " + message, Toast.LENGTH_LONG).show();
             }
         });

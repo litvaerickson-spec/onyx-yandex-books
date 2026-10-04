@@ -17,7 +17,11 @@ public class TypographyConfig implements Serializable {
     private int paddingLeftPx = 18;
     private int paddingRightPx = 18;
     private int paddingTopPx = 14;
-    private int paddingBottomPx = 24;
+    private int paddingBottomPx = 20;
+
+    // Резерв высоты под нижний колонтитул (номер страницы, глава, глобальный процент),
+    // исключающий физическое наложение текста книги на строку статуса
+    private int footerReservedHeightPx = 44;
 
     private boolean isHyphenationEnabled = true;
     private boolean isJustifyEnabled = true;
@@ -47,6 +51,9 @@ public class TypographyConfig implements Serializable {
 
     public int getPaddingBottomPx() { return paddingBottomPx; }
     public void setPaddingBottomPx(int paddingBottomPx) { this.paddingBottomPx = paddingBottomPx; }
+
+    public int getFooterReservedHeightPx() { return footerReservedHeightPx; }
+    public void setFooterReservedHeightPx(int footerReservedHeightPx) { this.footerReservedHeightPx = footerReservedHeightPx; }
 
     public boolean isHyphenationEnabled() { return isHyphenationEnabled; }
     public void setHyphenationEnabled(boolean hyphenationEnabled) { isHyphenationEnabled = hyphenationEnabled; }

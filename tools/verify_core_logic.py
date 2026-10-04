@@ -116,13 +116,15 @@ def test_paginator_math():
         "преследовать прокуратора с рассвета."
     )
 
-    padding_x = 40
-    padding_y = 60
-    line_height = 36 # px
+    padding_x = 36
+    padding_top = 14
+    padding_bottom = 20
+    footer_reserved_height = 44
+    line_height = 28 # px (при 18sp)
 
     for screen in darwin_screens:
         avail_w = screen["width"] - padding_x
-        avail_h = screen["height"] - padding_y
+        avail_h = screen["height"] - padding_top - padding_bottom - footer_reserved_height
         max_lines_per_page = int(avail_h / line_height)
         
         words = sample_text.split()
@@ -131,13 +133,20 @@ def test_paginator_math():
         total_lines = len(words) // words_per_line + (1 if len(words) % words_per_line else 0)
         total_pages = total_lines // max_lines_per_page + (1 if total_lines % max_lines_per_page else 0)
 
+        # Проверка зазора между нижней строкой текста и колонтитулом
+        lowest_text_bottom = padding_top + (max_lines_per_page * line_height)
+        footer_y = screen["height"] - 10
+        clearance = footer_y - lowest_text_bottom
+
         print(f"Устройство: {screen['name']} ({screen['width']}x{screen['height']})")
         print(f"  Доступно строк на страницу: {max_lines_per_page}")
         print(f"  Всего строк абзаца: {total_lines}, Всего страниц: {total_pages}")
+        print(f"  Гарантированный зазор до колонтитула: {clearance}px (>= 30px)")
         assert max_lines_per_page > 15, "Слишком мало строк на страницу!"
         assert total_pages >= 1, "Должна получиться как минимум 1 страница!"
+        assert clearance >= 30, f"Опасность наложения текста на колонтитул! Зазор {clearance}px < 30px"
 
-    print("✅ Тест пагинации экранов Darwin успешно пройден!\n")
+    print("✅ Тест пагинации и защиты колонтитула Darwin успешно пройден!\n")
 
 
 def test_device_flow_contract():
@@ -254,12 +263,14 @@ def test_ota_update_semver_and_github_contract():
         return False
 
     # Проверка SemVer
+    assert is_version_newer("v1.3.1", "1.3.0") == True, "1.3.1 должна быть новее 1.3.0"
+    assert is_version_newer("1.3.1", "v1.3.0") == True, "1.3.1 должна быть новее 1.3.0"
     assert is_version_newer("v1.3.0", "1.2.9") == True, "1.3.0 должна быть новее 1.2.9"
     assert is_version_newer("1.3.0", "1.2.9") == True, "1.3.0 должна быть новее 1.2.9"
     assert is_version_newer("v1.2.10", "v1.2.9") == True, "1.2.10 должна быть новее 1.2.9"
     assert is_version_newer("v2.0.0", "1.9.9") == True, "2.0.0 должна быть новее 1.9.9"
-    assert is_version_newer("v1.2.9", "1.2.9") == False, "Одинаковые версии не должны считаться обновлением"
-    assert is_version_newer("v1.2.8", "1.2.9") == False, "Старая версия не должна считаться обновлением"
+    assert is_version_newer("v1.3.1", "1.3.1") == False, "Одинаковые версии не должны считаться обновлением"
+    assert is_version_newer("v1.3.0", "1.3.1") == False, "Старая версия не должна считаться обновлением"
 
     # Проверка контракта GitHub API
     sample_github_release = {

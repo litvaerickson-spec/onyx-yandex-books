@@ -25,6 +25,9 @@ import com.onyx.yandexbooks.core.typography.TypographyConfig;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Экран чтения с нативным Canvas-рендерером, аппаратным управлением Darwin и типографикой AlReader.
@@ -43,6 +46,11 @@ public class ReaderActivity extends Activity {
     private List<TextPaginator.Page> currentPages = new ArrayList<>();
     private int currentPageIndex = 0;
     private int pageTurnCounter = 0;
+    private boolean hasPerformedInitialRefresh = false;
+
+    // Фоновый исполнитель пагинации: полностью исключает блокировку UI-потока и ANR
+    private final ExecutorService paginationExecutor = Executors.newSingleThreadExecutor();
+    private final AtomicLong paginationTaskId = new AtomicLong(0);
 
     private TypographyConfig typographyConfig;
     private TextPaginator paginator;
@@ -375,31 +383,94 @@ public class ReaderActivity extends Activity {
     }
 
     private void displayChapterText(String rawText, String title) {
-        // Синхронизируем типографику с View перед замером строк
+        displayChapterText(rawText, title, -1);
+    }
+
+    private void displayChapterText(final String rawText, final String title, final int anchorCharOffset) {
+        // Синхронизируем типографику с View
         readerCanvas.setTypographyConfig(typographyConfig);
 
-        // ВАЖНО: Пагинатор использует точно такой же Paint и Typeface (Serif/Bold),
-        // что гарантирует идеальное соответствие и исключает обрезку строк справа!
-        Paint paint = readerCanvas.getTextPaint();
+        // ВАЖНО: Используем независимую копию Paint для безопасных фоновых замеров
+        final Paint paint = new Paint(readerCanvas.getTextPaint());
 
-        int screenWidth = getResources().getDisplayMetrics().widthPixels;
-        int screenHeight = getResources().getDisplayMetrics().heightPixels;
-
-        currentPages = paginator.paginate(rawText, screenWidth, screenHeight, paint, typographyConfig);
-
-        if (currentPageIndex >= currentPages.size()) {
-            currentPageIndex = 0;
+        int w = readerCanvas.getWidth();
+        int h = readerCanvas.getHeight();
+        if (w <= 0 || h <= 0) {
+            w = getResources().getDisplayMetrics().widthPixels;
+            h = getResources().getDisplayMetrics().heightPixels;
         }
+        final int screenWidth = w;
+        final int screenHeight = h;
 
-        renderCurrentPage();
+        // Создаем неизменяемую копию конфигурации для потокобезопасного расчета
+        final TypographyConfig configCopy = new TypographyConfig();
+        configCopy.setFontSizeSp(typographyConfig.getFontSizeSp());
+        configCopy.setLineSpacingMultiplier(typographyConfig.getLineSpacingMultiplier());
+        configCopy.setParagraphIndentPx(typographyConfig.getParagraphIndentPx());
+        configCopy.setPaddingLeftPx(typographyConfig.getPaddingLeftPx());
+        configCopy.setPaddingRightPx(typographyConfig.getPaddingRightPx());
+        configCopy.setPaddingTopPx(typographyConfig.getPaddingTopPx());
+        configCopy.setPaddingBottomPx(typographyConfig.getPaddingBottomPx());
+        configCopy.setFooterReservedHeightPx(typographyConfig.getFooterReservedHeightPx());
+        configCopy.setHyphenationEnabled(typographyConfig.isHyphenationEnabled());
+        configCopy.setJustifyEnabled(typographyConfig.isJustifyEnabled());
+        configCopy.setBoldText(typographyConfig.isBoldText());
+
+        final long taskId = paginationTaskId.incrementAndGet();
+
+        // Фоновый расчет: UI поток никогда не блокируется, полностью исключая ANR
+        paginationExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                final List<TextPaginator.Page> pages = paginator.paginate(
+                        rawText, screenWidth, screenHeight, paint, configCopy
+                );
+
+                if (taskId != paginationTaskId.get()) {
+                    return; // Задача отменена более новым запросом
+                }
+
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (taskId != paginationTaskId.get()) {
+                            return;
+                        }
+                        currentPages = pages;
+
+                        // Если задано смещение текста (при смене шрифта или полей), сохраняем точное место чтения
+                        if (anchorCharOffset >= 0 && !pages.isEmpty()) {
+                            int targetPage = 0;
+                            for (int i = 0; i < pages.size(); i++) {
+                                if (anchorCharOffset >= pages.get(i).startCharOffset && anchorCharOffset <= pages.get(i).endCharOffset) {
+                                    targetPage = i;
+                                    break;
+                                }
+                            }
+                            currentPageIndex = targetPage;
+                        } else if (currentPageIndex >= currentPages.size()) {
+                            currentPageIndex = 0;
+                        }
+
+                        renderCurrentPage();
+                    }
+                });
+            }
+        });
     }
 
     private void repaginateCurrentChapter() {
         if (currentChapterIndex < chapters.size()) {
+            // Сохраняем текущее смещение текста для точного сохранения позиции после смены шрифта/полей
+            int anchorOffset = -1;
+            if (!currentPages.isEmpty() && currentPageIndex < currentPages.size()) {
+                anchorOffset = currentPages.get(currentPageIndex).startCharOffset;
+            }
+
             String id = chapters.get(currentChapterIndex).getId();
             String text = cacheManager.loadChapter(bookUuid, id);
             if (text != null) {
-                displayChapterText(text, chapters.get(currentChapterIndex).getTitle());
+                displayChapterText(text, chapters.get(currentChapterIndex).getTitle(), anchorOffset);
             }
         }
     }
@@ -420,7 +491,13 @@ public class ReaderActivity extends Activity {
             readerCanvas.setPage(currentPages.get(currentPageIndex), currentPages.size(), title, currentChapterIndex, totalChapters, percent);
         }
 
-        // Проверка на цикл очистки остаточных артефактов E-Ink
+        // Первое открытие книги: гарантированная полная очистка экрана от артефактов лоадера
+        if (!hasPerformedInitialRefresh) {
+            hasPerformedInitialRefresh = true;
+            forceEpdRefresh();
+        }
+
+        // Периодический сброс остаточных артефактов E-Ink
         pageTurnCounter++;
         if (pageTurnCounter >= typographyConfig.getEpdFullRefreshInterval()) {
             pageTurnCounter = 0;
@@ -474,10 +551,22 @@ public class ReaderActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        forceEpdRefresh();
+    }
+
+    @Override
     protected void onPause() {
         super.onPause();
         saveProgress();
         syncManager.flushOfflineQueue();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        paginationExecutor.shutdownNow();
     }
 
     @Override

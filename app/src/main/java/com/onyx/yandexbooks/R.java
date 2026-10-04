@@ -11,6 +11,7 @@ public final class R {
     public static final class attr {
     }
     public static final class color {
+        public static final int btn_eink_text_color=0x7f040008;
         public static final int eink_black=0x7f040001;
         public static final int eink_border=0x7f040006;
         public static final int eink_dark_gray=0x7f040002;

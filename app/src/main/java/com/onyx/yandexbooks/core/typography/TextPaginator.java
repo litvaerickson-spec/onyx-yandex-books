@@ -57,7 +57,7 @@ public class TextPaginator {
         }
 
         float availableWidth = screenWidth - config.getPaddingLeftPx() - config.getPaddingRightPx();
-        float availableHeight = screenHeight - config.getPaddingTopPx() - config.getPaddingBottomPx();
+        float availableHeight = screenHeight - config.getPaddingTopPx() - config.getPaddingBottomPx() - config.getFooterReservedHeightPx();
 
         Paint.FontMetrics fm = paint.getFontMetrics();
         float lineHeight = (fm.bottom - fm.top) * config.getLineSpacingMultiplier();
@@ -68,6 +68,7 @@ public class TextPaginator {
         int pageIndex = 0;
         int globalCharOffset = 0;
         int pageStartCharOffset = 0;
+        float spaceWidth = paint.measureText(" ");
 
         TeXHyphenator.TextWidthMeasurer measurer = new TeXHyphenator.TextWidthMeasurer() {
             @Override
@@ -93,42 +94,80 @@ public class TextPaginator {
             String[] words = trimmed.split("\\s+");
             StringBuilder currentLineText = new StringBuilder();
             boolean isFirstLineOfParagraph = true;
+            float lineIndent = config.getParagraphIndentPx();
+            float currentLineWidth = lineIndent;
 
             for (int w = 0; w < words.length; w++) {
                 String word = words[w];
-                float lineIndent = isFirstLineOfParagraph ? config.getParagraphIndentPx() : 0;
-                float currentLineWidth = paint.measureText(currentLineText.toString()) + lineIndent;
+                float wordWidth = paint.measureText(word);
 
-                String candidate = currentLineText.length() == 0 ? word : currentLineText + " " + word;
-                float candidateWidth = paint.measureText(candidate) + lineIndent;
-
-                if (candidateWidth <= availableWidth) {
-                    currentLineText = new StringBuilder(candidate);
-                } else {
-                    // Пробуем перенос слова (Hyphenation)
-                    if (config.isHyphenationEnabled()) {
-                        float spaceLeft = availableWidth - currentLineWidth - paint.measureText(" ");
-                        String[] split = hyphenator.splitWordForWidth(word, spaceLeft, measurer);
-                        if (split != null) {
-                            if (currentLineText.length() > 0) {
-                                currentLineText.append(" ");
+                if (currentLineText.length() == 0) {
+                    if (currentLineWidth + wordWidth <= availableWidth) {
+                        currentLineText.append(word);
+                        currentLineWidth += wordWidth;
+                    } else {
+                        // Длинное слово не помещается даже на пустой строке
+                        if (config.isHyphenationEnabled()) {
+                            float spaceLeft = availableWidth - currentLineWidth;
+                            String[] split = hyphenator.splitWordForWidth(word, spaceLeft, measurer);
+                            if (split != null) {
+                                currentLineText.append(split[0]);
+                                word = split[1];
+                                wordWidth = paint.measureText(word);
                             }
-                            currentLineText.append(split[0]);
-                            word = split[1]; // остаток слова переходит на следующую строку
+                        }
+                        if (currentLineText.length() == 0) {
+                            currentLineText.append(word);
+                            currentLineWidth += wordWidth;
+                        } else {
+                            if (currentLines.size() + 1 > maxLinesPerPage) {
+                                pages.add(new Page(pageIndex++, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
+                                currentLines.clear();
+                                pageStartCharOffset = globalCharOffset;
+                            }
+                            float currentLineIndent = isFirstLineOfParagraph ? lineIndent : 0;
+                            float spacing = calculateJustifySpacing(currentLineText.toString(), availableWidth - currentLineIndent, paint);
+                            currentLines.add(new Line(currentLineText.toString(), isFirstLineOfParagraph, false, spacing));
+                            isFirstLineOfParagraph = false;
+                            currentLineText.setLength(0);
+                            currentLineText.append(word);
+                            currentLineWidth = wordWidth;
                         }
                     }
+                } else {
+                    float candidateWidth = currentLineWidth + spaceWidth + wordWidth;
+                    if (candidateWidth <= availableWidth) {
+                        currentLineText.append(' ').append(word);
+                        currentLineWidth = candidateWidth;
+                    } else {
+                        // Слово не помещается в текущую строку, пробуем перенос
+                        if (config.isHyphenationEnabled()) {
+                            float spaceLeft = availableWidth - currentLineWidth - spaceWidth;
+                            if (spaceLeft > 0) {
+                                String[] split = hyphenator.splitWordForWidth(word, spaceLeft, measurer);
+                                if (split != null) {
+                                    currentLineText.append(' ').append(split[0]);
+                                    word = split[1];
+                                    wordWidth = paint.measureText(word);
+                                }
+                            }
+                        }
 
-                    // Добавляем заполненную строку на страницу
-                    if (currentLines.size() + 1 > maxLinesPerPage) {
-                        pages.add(new Page(pageIndex++, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
-                        currentLines.clear();
-                        pageStartCharOffset = globalCharOffset;
+                        // Сохраняем заполненную строку на страницу
+                        if (currentLines.size() + 1 > maxLinesPerPage) {
+                            pages.add(new Page(pageIndex++, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
+                            currentLines.clear();
+                            pageStartCharOffset = globalCharOffset;
+                        }
+
+                        float currentLineIndent = isFirstLineOfParagraph ? lineIndent : 0;
+                        float spacing = calculateJustifySpacing(currentLineText.toString(), availableWidth - currentLineIndent, paint);
+                        currentLines.add(new Line(currentLineText.toString(), isFirstLineOfParagraph, false, spacing));
+                        isFirstLineOfParagraph = false;
+                        currentLineText.setLength(0);
+                        currentLineText.append(word);
+                        currentLineWidth = wordWidth;
                     }
-
-                    float spacing = calculateJustifySpacing(currentLineText.toString(), availableWidth - lineIndent, paint);
-                    currentLines.add(new Line(currentLineText.toString(), isFirstLineOfParagraph, false, spacing));
-                    isFirstLineOfParagraph = false;
-                    currentLineText = new StringBuilder(word);
                 }
             }
 
@@ -155,14 +194,17 @@ public class TextPaginator {
     }
 
     private float calculateJustifySpacing(String lineText, float targetWidth, Paint paint) {
-        String[] words = lineText.split(" ");
-        if (words.length <= 1) {
+        int spaceCount = 0;
+        for (int i = 0; i < lineText.length(); i++) {
+            if (lineText.charAt(i) == ' ') spaceCount++;
+        }
+        if (spaceCount == 0) {
             return 0;
         }
         float actualTextWidth = paint.measureText(lineText);
         float delta = targetWidth - actualTextWidth;
-        if (delta > 0 && delta < targetWidth * 0.4f) { // Защита от неестественно огромных пробелов
-            return delta / (words.length - 1);
+        if (delta > 0 && delta < targetWidth * 0.35f) { // Защита от неестественно огромных пробелов
+            return delta / spaceCount;
         }
         return 0;
     }

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.3.1] - 2026-10-04
+
+### Features
+- **Фоновая асинхронная пагинация (Async Pagination)**:
+  - Пагинация вынесена в фоновый `ExecutorService` с версионированием задач (`paginationTaskId`). UI-поток полностью разгружен, что исключает зависания и ошибку Android ANR («Приложение не отвечает»).
+  - Оптимизирован алгоритм расчета ширины строк в `TextPaginator` до $O(N)$ (линейное суммирование ширины слов без повторного переизмерения строки).
+  - Внедрен потокобезопасный LRU-кэш слоговых переносов в `TeXHyphenator` для частотных русских слов.
+  - Сохранение точной позиции чтения (`startCharOffset`) при изменении размера шрифта или полей страницы.
+- **Устранение остаточных артефактов E-Ink (Ghosting Fix)**:
+  - Замена анимированных спиннеров загрузки `ProgressDialog` на статические E-Ink диалоги без 60fps круговой анимации.
+  - Автоматический аппаратный сброс дисплея `EpdController.requestFullRefresh` при закрытии диалогов, в `onResume` и при открытии первой страницы книги.
+- **Селектор цвета текста кнопок меню ридера (`btn_eink_text_color`)**:
+  - При нажатии кнопок меню текст становится контрастно белым на черном фоне, исключая эффект залипания «черным-по-черному».
+- **Защита от наложения текста на нижний колонтитул (Footer Margin Protection)**:
+  - Резервирование высоты `footerReservedHeightPx = 44px` в `TypographyConfig` и жесткий барьер отрисовки `maxAllowedTextBottom` в `ReaderCanvasView`.
+  - Гарантированный зазор между текстом книги и колонтитулом (номер страницы, глава, процент) составляет > 75 пикселей.
+
 ## [v1.3.0] - 2026-10-04
 
 ### Features
