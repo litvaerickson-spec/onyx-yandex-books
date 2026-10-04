@@ -193,7 +193,31 @@ public class AppUpdateManager {
     }
 
     /**
-     * Показывает диалог с информацией о релизе и кнопкой «Скачать и установить».
+     * Очищает Markdown-разметку, спецсимволы и эмодзи из описания релиза для четкого E-Ink отображения.
+     */
+    public static String cleanReleaseNotes(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return "Улучшение стабильности, интерфейса и синхронизации.";
+        }
+        // Убираем заголовки markdown (#, ##, ###)
+        String text = raw.replaceAll("(?m)^#+\\s*", "");
+        // Убираем жирный/курсивный шрифт: **текст**, *текст*, `код`
+        text = text.replaceAll("\\*\\*(.*?)\\*\\*", "$1");
+        text = text.replaceAll("\\*(.*?)\\*", "$1");
+        text = text.replaceAll("`([^`]+)`", "$1");
+        // Убираем markdown-ссылки [текст](url) -> текст
+        text = text.replaceAll("\\[([^\\]]+)\\]\\([^\\)]+\\)", "$1");
+        // Удаляем эмодзи и спецсимволы, ломающие рендеринг на E-Ink
+        text = text.replaceAll("[\\uD83C-\\uDBFF\\uDC00-\\uDFFF\\u2600-\\u27BF]", "");
+        // Заменяем маркеры списков (- и *) на аккуратный круглый маркер •
+        text = text.replaceAll("(?m)^\\s*[-*]\\s+", "• ");
+        // Убираем избыточные пустые строки
+        text = text.replaceAll("\n{3,}", "\n\n");
+        return text.trim();
+    }
+
+    /**
+     * Показывает диалог с информацией о релизе и кнопкой «Обновить».
      */
     public void showUpdateDialog(final Activity activity, final ReleaseInfo release) {
         if (activity == null || activity.isFinishing()) return;
@@ -213,7 +237,7 @@ public class AppUpdateManager {
 
         // Заголовок
         TextView titleView = new TextView(activity);
-        titleView.setText("⬆ Доступно обновление " + release.tagName);
+        titleView.setText("Доступно обновление " + release.tagName);
         titleView.setTextSize(15);
         titleView.setTypeface(null, Typeface.BOLD);
         titleView.setTextColor(Color.BLACK);
@@ -223,7 +247,7 @@ public class AppUpdateManager {
         String currentVer = getCurrentVersionName(activity);
         String sizeMb = String.format("%.1f МБ", release.apkSize / (1024.0 * 1024.0));
         TextView infoView = new TextView(activity);
-        infoView.setText("Текущая версия: v" + currentVer + "  ➔  Новая: " + release.tagName + "\nРазмер обновления: " + sizeMb);
+        infoView.setText("Текущая версия: v" + currentVer + "  ->  Новая: " + release.tagName + "\nРазмер обновления: " + sizeMb);
         infoView.setTextSize(12);
         infoView.setTextColor(Color.BLACK);
         infoView.setPadding(0, (int) (4 * density), 0, (int) (6 * density));
@@ -241,11 +265,7 @@ public class AppUpdateManager {
         scrollView.setLayoutParams(scrollLp);
 
         TextView notesView = new TextView(activity);
-        String bodyText = release.body;
-        if (bodyText == null || bodyText.trim().isEmpty()) {
-            bodyText = "Улучшение стабильности, интерфейса и синхронизации.";
-        }
-        notesView.setText(bodyText);
+        notesView.setText(cleanReleaseNotes(release.body));
         notesView.setTextSize(12);
         notesView.setTextColor(Color.BLACK);
         notesView.setLineSpacing(3f, 1.15f);
@@ -264,12 +284,12 @@ public class AppUpdateManager {
         btnRow.setPadding(0, (int) (6 * density), 0, 0);
 
         Button btnInstall = new Button(activity);
-        btnInstall.setText("📥 Скачать и установить");
+        btnInstall.setText("Обновить");
         btnInstall.setTextSize(11);
         btnInstall.setTypeface(null, Typeface.BOLD);
         btnInstall.setTextColor(Color.WHITE);
         btnInstall.setBackgroundResource(R.drawable.btn_eink_primary);
-        LinearLayout.LayoutParams lpInst = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.2f);
+        LinearLayout.LayoutParams lpInst = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
         lpInst.setMargins(0, 0, (int) (4 * density), 0);
         btnInstall.setLayoutParams(lpInst);
         btnInstall.setOnClickListener(new View.OnClickListener() {

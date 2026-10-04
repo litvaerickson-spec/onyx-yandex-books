@@ -33,44 +33,8 @@
             android:layout_height="24dp"
             android:minHeight="0dp"
             android:minWidth="0dp"
-            android:text="📖 Onyx"
+            android:text="Onyx"
             android:textSize="10sp"
-            android:textStyle="bold"
-            android:textColor="@color/eink_black"
-            android:background="@drawable/btn_eink"
-            android:includeFontPadding="false"
-            android:paddingLeft="6dp"
-            android:paddingRight="6dp"
-            android:paddingTop="2dp"
-            android:paddingBottom="2dp"
-            android:layout_marginRight="4dp" />
-
-        <Button
-            android:id="@+id/btn_check_update"
-            android:layout_width="wrap_content"
-            android:layout_height="24dp"
-            android:minHeight="0dp"
-            android:minWidth="0dp"
-            android:text="⬆ Обн."
-            android:textSize="10sp"
-            android:textStyle="bold"
-            android:textColor="@color/eink_black"
-            android:background="@drawable/btn_eink"
-            android:includeFontPadding="false"
-            android:paddingLeft="5dp"
-            android:paddingRight="5dp"
-            android:paddingTop="2dp"
-            android:paddingBottom="2dp"
-            android:layout_marginRight="4dp" />
-
-        <Button
-            android:id="@+id/btn_refresh_top"
-            android:layout_width="wrap_content"
-            android:layout_height="24dp"
-            android:minHeight="0dp"
-            android:minWidth="0dp"
-            android:text="↻"
-            android:textSize="11sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
             android:background="@drawable/btn_eink"
@@ -82,19 +46,38 @@
             android:layout_marginRight="4dp" />
 
         <Button
-            android:id="@+id/btn_logout"
+            android:id="@+id/btn_check_update"
             android:layout_width="wrap_content"
             android:layout_height="24dp"
             android:minHeight="0dp"
             android:minWidth="0dp"
-            android:text="Выход"
+            android:text="Обновить"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:textColor="@color/eink_white"
+            android:background="@drawable/btn_eink_primary"
+            android:includeFontPadding="false"
+            android:paddingLeft="6dp"
+            android:paddingRight="6dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:visibility="gone"
+            android:layout_marginRight="4dp" />
+
+        <Button
+            android:id="@+id/btn_main_menu"
+            android:layout_width="wrap_content"
+            android:layout_height="24dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:text="Меню"
             android:textSize="10sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
             android:background="@drawable/btn_eink"
             android:includeFontPadding="false"
-            android:paddingLeft="6dp"
-            android:paddingRight="6dp"
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp"
             android:paddingTop="2dp"
             android:paddingBottom="2dp" />
     </LinearLayout>
@@ -104,7 +87,7 @@
         android:layout_height="1dp"
         android:background="@color/eink_black" />
 
-    <!-- Компактные вкладки полок (Tabs: 28dp) -->
+    <!-- Компактные вкладки полок и разделов (Tabs: 28dp) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="28dp"
@@ -149,13 +132,30 @@
             android:layout_marginRight="2dp" />
 
         <Button
-            android:id="@+id/tab_done_btn"
+            android:id="@+id/tab_catalog_btn"
             android:layout_width="0dp"
             android:layout_height="24dp"
             android:minHeight="0dp"
             android:minWidth="0dp"
             android:layout_weight="1"
-            android:text="Прочитано (0)"
+            android:text="Каталог"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:textColor="@color/eink_black"
+            android:background="@drawable/tab_eink_inactive"
+            android:includeFontPadding="false"
+            android:padding="0dp"
+            android:layout_marginLeft="2dp"
+            android:layout_marginRight="2dp" />
+
+        <Button
+            android:id="@+id/tab_search_btn"
+            android:layout_width="0dp"
+            android:layout_height="24dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:layout_weight="1"
+            android:text="Поиск"
             android:textSize="10sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
@@ -169,6 +169,60 @@
         android:layout_width="match_parent"
         android:layout_height="1dp"
         android:background="@color/eink_black" />
+
+    <!-- Панель поиска книг (Search bar: 32dp) -->
+    <LinearLayout
+        android:id="@+id/search_bar_container"
+        android:layout_width="match_parent"
+        android:layout_height="32dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingLeft="8dp"
+        android:paddingRight="8dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:background="@color/eink_white"
+        android:visibility="gone">
+
+        <EditText
+            android:id="@+id/search_query_input"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:hint="Название книги или автор..."
+            android:textSize="11sp"
+            android:textColor="@color/eink_black"
+            android:textColorHint="@color/eink_dark_gray"
+            android:background="@drawable/btn_eink"
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp"
+            android:singleLine="true"
+            android:imeOptions="actionSearch"
+            android:inputType="text" />
+
+        <Button
+            android:id="@+id/btn_search_submit"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:text="Найти"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:textColor="@color/eink_white"
+            android:background="@drawable/btn_eink_primary"
+            android:includeFontPadding="false"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:layout_marginLeft="6dp" />
+    </LinearLayout>
+
+    <View
+        android:id="@+id/search_bar_divider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/eink_black"
+        android:visibility="gone" />
 
     <!-- Индикатор синхронизации -->
     <TextView
@@ -268,7 +322,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="📚 Книг: 0"
+            android:text="Книг: 0"
             android:textSize="10sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
@@ -281,7 +335,7 @@
             android:layout_height="22dp"
             android:minHeight="0dp"
             android:minWidth="0dp"
-            android:text="◀ Стр"
+            android:text="&lt; Стр"
             android:textSize="9sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
@@ -309,7 +363,7 @@
             android:layout_height="22dp"
             android:minHeight="0dp"
             android:minWidth="0dp"
-            android:text="Стр ▶"
+            android:text="Стр &gt;"
             android:textSize="9sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"

@@ -202,7 +202,7 @@
             android:layout_height="38dp"
             android:minHeight="0dp"
             android:minWidth="0dp"
-            android:text="📚 Вернуться в библиотеку"
+            android:text="В библиотеку"
             android:textSize="12sp"
             android:textStyle="bold"
             android:textColor="@color/btn_eink_text_color"

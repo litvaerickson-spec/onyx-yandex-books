@@ -95,7 +95,7 @@
                 android:id="@+id/book_status_tag"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text=" • ☁ Сеть"
+                android:text=" • Онлайн"
                 android:textSize="10sp"
                 android:textColor="@color/eink_black"
                 android:singleLine="true"

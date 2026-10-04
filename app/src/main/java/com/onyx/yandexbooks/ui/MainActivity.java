@@ -4,12 +4,14 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
 import android.app.ProgressDialog;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.text.TextUtils;
+import android.util.DisplayMetrics;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
@@ -18,6 +20,7 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.widget.BaseAdapter;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
@@ -50,8 +53,12 @@ public class MainActivity extends Activity {
     private static final int REQUEST_AUTH = 1001;
 
     private ListView booksListView;
-    private Button tabReadingBtn, tabToReadBtn, tabDoneBtn;
-    private Button btnRefreshTop, btnLogout, btnToggleReaderMode, btnCheckUpdate;
+    private Button tabReadingBtn, tabToReadBtn, tabCatalogBtn, tabSearchBtn;
+    private Button btnToggleReaderMode, btnCheckUpdate, btnMainMenu;
+    private LinearLayout searchBarContainer;
+    private View searchBarDivider;
+    private EditText searchQueryInput;
+    private Button btnSearchSubmit;
     private TextView loadingTextView;
     private View emptyStateContainer;
     private Button btnRefreshShelf;
@@ -90,11 +97,18 @@ public class MainActivity extends Activity {
         booksListView = (ListView) findViewById(R.id.books_list_view);
         tabReadingBtn = (Button) findViewById(R.id.tab_reading_btn);
         tabToReadBtn = (Button) findViewById(R.id.tab_to_read_btn);
-        tabDoneBtn = (Button) findViewById(R.id.tab_done_btn);
+        tabCatalogBtn = (Button) findViewById(R.id.tab_catalog_btn);
+        tabSearchBtn = (Button) findViewById(R.id.tab_search_btn);
+
         btnToggleReaderMode = (Button) findViewById(R.id.btn_toggle_reader_mode);
         btnCheckUpdate = (Button) findViewById(R.id.btn_check_update);
-        btnRefreshTop = (Button) findViewById(R.id.btn_refresh_top);
-        btnLogout = (Button) findViewById(R.id.btn_logout);
+        btnMainMenu = (Button) findViewById(R.id.btn_main_menu);
+
+        searchBarContainer = (LinearLayout) findViewById(R.id.search_bar_container);
+        searchBarDivider = findViewById(R.id.search_bar_divider);
+        searchQueryInput = (EditText) findViewById(R.id.search_query_input);
+        btnSearchSubmit = (Button) findViewById(R.id.btn_search_submit);
+
         loadingTextView = (TextView) findViewById(R.id.loading_text);
         emptyStateContainer = findViewById(R.id.empty_state_container);
         btnRefreshShelf = (Button) findViewById(R.id.btn_refresh_shelf);
@@ -109,6 +123,7 @@ public class MainActivity extends Activity {
 
         setupTabs();
         setupHeaderActions();
+        setupSearchActions();
         setupFooterActions();
 
         checkAuthAndLoad();
@@ -140,8 +155,8 @@ public class MainActivity extends Activity {
                 updateReaderModeButton();
                 adapter.notifyDataSetChanged();
                 String msg = appSettings.isOnyxReaderPreferred() 
-                        ? "Читалка по умолчанию: Системная Onyx (NeoReader/AlReader)" 
-                        : "Читалка по умолчанию: Встроенная Lite (с синхронизацией)";
+                        ? "Читалка: Системная Onyx (NeoReader/AlReader)" 
+                        : "Читалка: Встроенная Онлайн (с синхронизацией)";
                 Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show();
             }
         });
@@ -155,41 +170,191 @@ public class MainActivity extends Activity {
             });
         }
 
-        btnRefreshTop.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                loadBooks(currentShelf);
-            }
-        });
+        if (btnMainMenu != null) {
+            btnMainMenu.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showMainMenuDialog();
+                }
+            });
+        }
 
-        btnRefreshShelf.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                loadBooks(currentShelf);
-            }
-        });
+        if (btnRefreshShelf != null) {
+            btnRefreshShelf.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if ("catalog".equals(currentShelf)) {
+                        loadCatalog();
+                    } else if ("search".equals(currentShelf)) {
+                        String q = searchQueryInput != null ? searchQueryInput.getText().toString().trim() : "";
+                        if (!q.isEmpty()) executeSearch(q);
+                    } else {
+                        loadBooks(currentShelf);
+                    }
+                }
+            });
+        }
+    }
 
-        btnLogout.setOnClickListener(new View.OnClickListener() {
+    private void setupSearchActions() {
+        if (btnSearchSubmit != null && searchQueryInput != null) {
+            btnSearchSubmit.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    executeSearch(searchQueryInput.getText().toString().trim());
+                }
+            });
+
+            searchQueryInput.setOnEditorActionListener(new TextView.OnEditorActionListener() {
+                @Override
+                public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
+                    if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+                            || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER && event.getAction() == KeyEvent.ACTION_DOWN)) {
+                        executeSearch(searchQueryInput.getText().toString().trim());
+                        return true;
+                    }
+                    return false;
+                }
+            });
+        }
+    }
+
+    private void showMainMenuDialog() {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        float density = getResources().getDisplayMetrics().density;
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.WHITE);
+        int padH = (int) (16 * density);
+        int padV = (int) (14 * density);
+        root.setPadding(padH, padV, padH, padV);
+
+        TextView titleView = new TextView(this);
+        titleView.setText("Меню приложения");
+        titleView.setTextSize(14);
+        titleView.setTypeface(null, Typeface.BOLD);
+        titleView.setTextColor(Color.BLACK);
+        titleView.setGravity(Gravity.CENTER);
+        titleView.setPadding(0, 0, 0, (int) (8 * density));
+        root.addView(titleView);
+
+        View divider = new View(this);
+        divider.setBackgroundColor(Color.BLACK);
+        root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
+
+        LinearLayout listLayout = new LinearLayout(this);
+        listLayout.setOrientation(LinearLayout.VERTICAL);
+        listLayout.setPadding(0, (int) (8 * density), 0, (int) (8 * density));
+
+        int doneCount = dbHelper.getBooksCountByShelf("done");
+        Button btnShelfDone = createMenuButton("Полка «Прочитано» (" + doneCount + ")", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                new AlertDialog.Builder(MainActivity.this)
-                        .setTitle(R.string.logout_confirm_title)
-                        .setMessage(R.string.logout_confirm_message)
-                        .setPositiveButton(R.string.btn_logout, new DialogInterface.OnClickListener() {
-                            @Override
-                            public void onClick(DialogInterface dialog, int which) {
-                                tokenStorage.clear();
-                                currentBooks.clear();
-                                adapter.notifyDataSetChanged();
-                                updateTabBadges();
-                                updateEmptyState();
-                                startActivityForResult(new Intent(MainActivity.this, AuthActivity.class), REQUEST_AUTH);
-                            }
-                        })
-                        .setNegativeButton(R.string.btn_cancel, null)
-                        .show();
+                dialog.dismiss();
+                switchTab("done");
+            }
+        }, density);
+        listLayout.addView(btnShelfDone);
+
+        Button btnSync = createMenuButton("Синхронизировать полки", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                loadBooks(currentShelf);
+                syncManager.flushOfflineQueue();
+            }
+        }, density);
+        listLayout.addView(btnSync);
+
+        Button btnUpdate = createMenuButton("Проверить обновление ПО", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                checkAppUpdate(true);
+            }
+        }, density);
+        listLayout.addView(btnUpdate);
+
+        Button btnRefresh = createMenuButton("Очистить экран (E-Ink)", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                EpdController.requestFullRefresh(MainActivity.this, null);
+            }
+        }, density);
+        listLayout.addView(btnRefresh);
+
+        Button btnLogoutItem = createMenuButton("Выйти из аккаунта", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                showLogoutConfirmDialog();
+            }
+        }, density);
+        listLayout.addView(btnLogoutItem);
+
+        root.addView(listLayout);
+
+        Button btnClose = new Button(this);
+        btnClose.setText("Закрыть");
+        btnClose.setTextSize(11);
+        btnClose.setTypeface(null, Typeface.BOLD);
+        btnClose.setTextColor(Color.BLACK);
+        btnClose.setBackgroundResource(R.drawable.btn_eink);
+        LinearLayout.LayoutParams lpClose = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (34 * density));
+        btnClose.setLayoutParams(lpClose);
+        btnClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
             }
         });
+        root.addView(btnClose);
+
+        dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
+            int w = (int) (dm.widthPixels * 0.85);
+            dialog.getWindow().setLayout(w, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        dialog.show();
+    }
+
+    private Button createMenuButton(String text, View.OnClickListener listener, float density) {
+        Button btn = new Button(this);
+        btn.setText(text);
+        btn.setTextSize(11);
+        btn.setTypeface(null, Typeface.BOLD);
+        btn.setTextColor(Color.BLACK);
+        btn.setBackgroundResource(R.drawable.btn_eink);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (36 * density));
+        lp.setMargins(0, 0, 0, (int) (6 * density));
+        btn.setLayoutParams(lp);
+        btn.setOnClickListener(listener);
+        return btn;
+    }
+
+    private void showLogoutConfirmDialog() {
+        new AlertDialog.Builder(MainActivity.this)
+                .setTitle(R.string.logout_confirm_title)
+                .setMessage(R.string.logout_confirm_message)
+                .setPositiveButton(R.string.btn_logout, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        tokenStorage.clear();
+                        currentBooks.clear();
+                        adapter.notifyDataSetChanged();
+                        updateTabBadges();
+                        updateEmptyState();
+                        startActivityForResult(new Intent(MainActivity.this, AuthActivity.class), REQUEST_AUTH);
+                    }
+                })
+                .setNegativeButton(R.string.btn_cancel, null)
+                .show();
     }
 
     private Dialog showEinkLoadingDialog(String title, String message) {
@@ -207,7 +372,6 @@ public class MainActivity extends Activity {
             try {
                 dialog.dismiss();
             } catch (Exception ignored) {}
-            // Принудительно очищаем дисплей E-Ink от остаточных артефактов закрытого окна
             EpdController.requestFullRefresh(MainActivity.this, null);
         }
     }
@@ -227,14 +391,15 @@ public class MainActivity extends Activity {
 
                 if (updateAvailable && release != null) {
                     if (btnCheckUpdate != null) {
-                        btnCheckUpdate.setText("⬆ " + release.tagName);
+                        btnCheckUpdate.setVisibility(View.VISIBLE);
+                        btnCheckUpdate.setText(release.tagName);
                         btnCheckUpdate.setBackgroundResource(R.drawable.btn_eink_primary);
                         btnCheckUpdate.setTextColor(Color.WHITE);
                     }
                     if (userTriggered) {
                         AppUpdateManager.getInstance().showUpdateDialog(MainActivity.this, release);
                     } else {
-                        Toast.makeText(MainActivity.this, "Доступно обновление " + release.tagName + " (нажмите ⬆)", Toast.LENGTH_LONG).show();
+                        Toast.makeText(MainActivity.this, "Доступно обновление " + release.tagName, Toast.LENGTH_LONG).show();
                     }
                 } else {
                     if (userTriggered) {
@@ -261,10 +426,17 @@ public class MainActivity extends Activity {
             }
         });
 
-        tabDoneBtn.setOnClickListener(new View.OnClickListener() {
+        tabCatalogBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                switchTab("done");
+                switchTab("catalog");
+            }
+        });
+
+        tabSearchBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                switchTab("search");
             }
         });
     }
@@ -272,13 +444,111 @@ public class MainActivity extends Activity {
     private void switchTab(String shelf) {
         currentShelf = shelf;
         updateTabStyles();
-        loadBooks(shelf);
+
+        if ("search".equals(shelf)) {
+            if (searchBarContainer != null) {
+                searchBarContainer.setVisibility(View.VISIBLE);
+                if (searchBarDivider != null) searchBarDivider.setVisibility(View.VISIBLE);
+                if (searchQueryInput != null) searchQueryInput.requestFocus();
+            }
+            updateEmptyState();
+            updateShelfFooter();
+        } else {
+            if (searchBarContainer != null) {
+                searchBarContainer.setVisibility(View.GONE);
+                if (searchBarDivider != null) searchBarDivider.setVisibility(View.GONE);
+            }
+            if ("catalog".equals(shelf)) {
+                loadCatalog();
+            } else {
+                loadBooks(shelf);
+            }
+        }
+    }
+
+    private void loadCatalog() {
+        currentBooks.clear();
+        adapter.notifyDataSetChanged();
+        updateEmptyState();
+        updateShelfFooter();
+
+        loadingTextView.setText("Загрузка каталога Яндекс Книг...");
+        loadingTextView.setVisibility(View.VISIBLE);
+
+        apiClient.getRecommendations(new YandexBooksApiClient.ApiCallback<List<Book>>() {
+            @Override
+            public void onSuccess(List<Book> books) {
+                loadingTextView.setVisibility(View.GONE);
+                if (books != null) {
+                    currentBooks = books;
+                } else {
+                    currentBooks = new ArrayList<>();
+                }
+                adapter.notifyDataSetChanged();
+                updateEmptyState();
+                updateShelfFooter();
+                EpdController.requestFullRefresh(MainActivity.this, booksListView);
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                loadingTextView.setVisibility(View.GONE);
+                updateEmptyState();
+                updateShelfFooter();
+                Toast.makeText(MainActivity.this, "Ошибка каталога: " + errorMessage, Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void executeSearch(String query) {
+        if (query == null || query.trim().isEmpty()) {
+            Toast.makeText(this, "Введите поисковый запрос", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        try {
+            android.view.inputmethod.InputMethodManager imm = (android.view.inputmethod.InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm != null && searchQueryInput != null) {
+                imm.hideSoftInputFromWindow(searchQueryInput.getWindowToken(), 0);
+            }
+        } catch (Exception ignored) {}
+
+        loadingTextView.setText("Поиск «" + query.trim() + "»...");
+        loadingTextView.setVisibility(View.VISIBLE);
+
+        apiClient.searchBooks(query.trim(), new YandexBooksApiClient.ApiCallback<List<Book>>() {
+            @Override
+            public void onSuccess(List<Book> books) {
+                loadingTextView.setVisibility(View.GONE);
+                if (books != null) {
+                    currentBooks = books;
+                } else {
+                    currentBooks = new ArrayList<>();
+                }
+                adapter.notifyDataSetChanged();
+                updateEmptyState();
+                updateShelfFooter();
+                if (currentBooks.isEmpty()) {
+                    Toast.makeText(MainActivity.this, "По запросу ничего не найдено", Toast.LENGTH_SHORT).show();
+                }
+                EpdController.requestFullRefresh(MainActivity.this, booksListView);
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                loadingTextView.setVisibility(View.GONE);
+                updateEmptyState();
+                updateShelfFooter();
+                Toast.makeText(MainActivity.this, "Ошибка поиска: " + errorMessage, Toast.LENGTH_SHORT).show();
+            }
+        });
     }
 
     private void updateTabStyles() {
         boolean isReading = "reading".equals(currentShelf);
         boolean isToRead = "to_read".equals(currentShelf);
-        boolean isDone = "done".equals(currentShelf);
+        boolean isCatalog = "catalog".equals(currentShelf);
+        boolean isSearch = "search".equals(currentShelf);
 
         tabReadingBtn.setBackgroundResource(isReading ? R.drawable.tab_eink_active : R.drawable.tab_eink_inactive);
         tabReadingBtn.setTextColor(getResources().getColor(isReading ? R.color.eink_white : R.color.eink_black));
@@ -286,18 +556,21 @@ public class MainActivity extends Activity {
         tabToReadBtn.setBackgroundResource(isToRead ? R.drawable.tab_eink_active : R.drawable.tab_eink_inactive);
         tabToReadBtn.setTextColor(getResources().getColor(isToRead ? R.color.eink_white : R.color.eink_black));
 
-        tabDoneBtn.setBackgroundResource(isDone ? R.drawable.tab_eink_active : R.drawable.tab_eink_inactive);
-        tabDoneBtn.setTextColor(getResources().getColor(isDone ? R.color.eink_white : R.color.eink_black));
+        tabCatalogBtn.setBackgroundResource(isCatalog ? R.drawable.tab_eink_active : R.drawable.tab_eink_inactive);
+        tabCatalogBtn.setTextColor(getResources().getColor(isCatalog ? R.color.eink_white : R.color.eink_black));
+
+        tabSearchBtn.setBackgroundResource(isSearch ? R.drawable.tab_eink_active : R.drawable.tab_eink_inactive);
+        tabSearchBtn.setTextColor(getResources().getColor(isSearch ? R.color.eink_white : R.color.eink_black));
     }
 
     private void updateTabBadges() {
         int readingCount = dbHelper.getBooksCountByShelf("reading");
         int toReadCount = dbHelper.getBooksCountByShelf("to_read");
-        int doneCount = dbHelper.getBooksCountByShelf("done");
 
         tabReadingBtn.setText("Читаю (" + readingCount + ")");
         tabToReadBtn.setText("В планах (" + toReadCount + ")");
-        tabDoneBtn.setText("Прочитано (" + doneCount + ")");
+        tabCatalogBtn.setText("Каталог");
+        tabSearchBtn.setText("Поиск");
     }
 
     private void setupFooterActions() {
@@ -350,9 +623,11 @@ public class MainActivity extends Activity {
         String title = "Читаю";
         if ("to_read".equals(currentShelf)) title = "В планах";
         else if ("done".equals(currentShelf)) title = "Прочитано";
+        else if ("catalog".equals(currentShelf)) title = "Каталог";
+        else if ("search".equals(currentShelf)) title = "Поиск";
 
         String curVer = AppUpdateManager.getInstance().getCurrentVersionName(this);
-        shelfFooterStatus.setText("📚 " + title + ": " + currentBooks.size() + " • v" + curVer);
+        shelfFooterStatus.setText(title + ": " + currentBooks.size() + " • v" + curVer);
         shelfFooterStatus.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -464,7 +739,7 @@ public class MainActivity extends Activity {
     private void updateReaderModeButton() {
         if (btnToggleReaderMode != null) {
             boolean isOnyx = appSettings.isOnyxReaderPreferred();
-            btnToggleReaderMode.setText(isOnyx ? "📖 Onyx" : "⚡ Lite");
+            btnToggleReaderMode.setText(isOnyx ? "Onyx" : "Онлайн");
         }
     }
 
@@ -589,7 +864,7 @@ public class MainActivity extends Activity {
 
             final boolean downloaded = cacheManager.isBookDownloaded(book.getUuid());
             if (statusTag != null) {
-                statusTag.setText(downloaded ? " • ✔ Память" : " • ☁ Сеть");
+                statusTag.setText(downloaded ? " • В памяти" : " • Онлайн");
             }
 
             double pct = book.getPercent();
@@ -678,7 +953,7 @@ public class MainActivity extends Activity {
         double pct = book.getPercent();
         TextView progressView = new TextView(this);
         String progStr = pct > 0 ? String.format("%.0f%%", pct) : "0%";
-        progressView.setText("Прогресс: " + progStr + "  •  Статус: " + (isDownloaded ? "✔ В памяти" : "☁ В сети"));
+        progressView.setText("Прогресс: " + progStr + "  •  Статус: " + (isDownloaded ? "В памяти" : "В сети"));
         progressView.setTextSize(11);
         progressView.setTextColor(Color.BLACK);
         metaLayout.addView(progressView);
@@ -713,7 +988,7 @@ public class MainActivity extends Activity {
         divider2.setBackgroundColor(Color.BLACK);
         root.addView(divider2, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
 
-        // 6. Компактный блок кнопок действий (2 компактные горизонтальные строки вместо 4 вертикальных)
+        // 6. Компактный блок кнопок действий
         LinearLayout buttonContainer = new LinearLayout(this);
         buttonContainer.setOrientation(LinearLayout.VERTICAL);
         buttonContainer.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -722,13 +997,13 @@ public class MainActivity extends Activity {
         int row1Height = (int) (36 * density);
         int row2Height = (int) (32 * density);
 
-        // Строка 1: Кнопки чтения [ 📖 Onyx Reader ] и [ ⚡ Читалка Lite ] бок о бок (50% / 50%)
+        // Строка 1: Кнопки чтения [ Onyx Reader ] и [ Читалка Онлайн ] бок о бок (50% / 50%)
         LinearLayout readRow = new LinearLayout(this);
         readRow.setOrientation(LinearLayout.HORIZONTAL);
         readRow.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, row1Height));
 
         Button btnOnyx = new Button(this);
-        btnOnyx.setText("📖 Onyx Reader");
+        btnOnyx.setText("Onyx Reader");
         btnOnyx.setTextSize(11);
         btnOnyx.setTypeface(null, Typeface.BOLD);
         btnOnyx.setTextColor(Color.WHITE);
@@ -746,7 +1021,7 @@ public class MainActivity extends Activity {
         readRow.addView(btnOnyx);
 
         Button btnLite = new Button(this);
-        btnLite.setText("⚡ Читалка Lite");
+        btnLite.setText("Читалка Онлайн");
         btnLite.setTextSize(11);
         btnLite.setTypeface(null, Typeface.BOLD);
         btnLite.setTextColor(Color.BLACK);
@@ -764,7 +1039,7 @@ public class MainActivity extends Activity {
         readRow.addView(btnLite);
         buttonContainer.addView(readRow);
 
-        // Строка 2: Скачивание / Статус и кнопка Закрыть
+        // Строка 2: Скачивание / Добавление на полку / Статус и кнопка Закрыть
         LinearLayout actionRow = new LinearLayout(this);
         actionRow.setOrientation(LinearLayout.HORIZONTAL);
         actionRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -772,9 +1047,12 @@ public class MainActivity extends Activity {
         lpActionRow.setMargins(0, (int) (5 * density), 0, 0);
         actionRow.setLayoutParams(lpActionRow);
 
+        final boolean isFromCatalogOrSearch = "catalog".equals(currentShelf) || "search".equals(currentShelf)
+                || "catalog".equals(book.getShelfType()) || "search".equals(book.getShelfType());
+
         if (!isDownloaded) {
             final Button btnDownload = new Button(this);
-            btnDownload.setText("📥 Скачать EPUB");
+            btnDownload.setText("Скачать EPUB");
             btnDownload.setTextSize(11);
             btnDownload.setTypeface(null, Typeface.BOLD);
             btnDownload.setTextColor(Color.BLACK);
@@ -786,7 +1064,7 @@ public class MainActivity extends Activity {
                 @Override
                 public void onClick(View v) {
                     btnDownload.setEnabled(false);
-                    btnDownload.setText("⏳ Загрузка...");
+                    btnDownload.setText("Загрузка...");
                     Toast.makeText(MainActivity.this, "Загрузка книги «" + book.getTitle() + "»...", Toast.LENGTH_SHORT).show();
                     cacheManager.downloadBookAsync(book.getUuid(), book.getTitle(), new CacheManager.DownloadProgressCallback() {
                         @Override
@@ -811,7 +1089,7 @@ public class MainActivity extends Activity {
                                 public void run() {
                                     Toast.makeText(MainActivity.this, "Ошибка скачивания: " + message, Toast.LENGTH_LONG).show();
                                     btnDownload.setEnabled(true);
-                                    btnDownload.setText("📥 Скачать EPUB");
+                                    btnDownload.setText("Скачать EPUB");
                                 }
                             });
                         }
@@ -819,26 +1097,9 @@ public class MainActivity extends Activity {
                 }
             });
             actionRow.addView(btnDownload);
-
-            Button btnClose = new Button(this);
-            btnClose.setText("✕ Закрыть");
-            btnClose.setTextSize(11);
-            btnClose.setTypeface(null, Typeface.BOLD);
-            btnClose.setTextColor(Color.BLACK);
-            btnClose.setBackgroundResource(R.drawable.btn_eink);
-            LinearLayout.LayoutParams lpClose = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
-            lpClose.setMargins((int) (4 * density), 0, 0, 0);
-            btnClose.setLayoutParams(lpClose);
-            btnClose.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    dialog.dismiss();
-                }
-            });
-            actionRow.addView(btnClose);
         } else {
             TextView pathView = new TextView(this);
-            pathView.setText("✔ В памяти (/sdcard/Books/...)");
+            pathView.setText("В памяти устройства");
             pathView.setTextSize(10);
             pathView.setTextColor(Color.BLACK);
             pathView.setSingleLine(true);
@@ -846,23 +1107,60 @@ public class MainActivity extends Activity {
             LinearLayout.LayoutParams lpPath = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
             pathView.setLayoutParams(lpPath);
             actionRow.addView(pathView);
+        }
 
-            Button btnClose = new Button(this);
-            btnClose.setText("✕ Закрыть");
-            btnClose.setTextSize(11);
-            btnClose.setTypeface(null, Typeface.BOLD);
-            btnClose.setTextColor(Color.BLACK);
-            btnClose.setBackgroundResource(R.drawable.btn_eink);
-            LinearLayout.LayoutParams lpClose = new LinearLayout.LayoutParams((int) (110 * density), ViewGroup.LayoutParams.MATCH_PARENT);
-            btnClose.setLayoutParams(lpClose);
-            btnClose.setOnClickListener(new View.OnClickListener() {
+        if (isFromCatalogOrSearch) {
+            final Button btnAddToShelf = new Button(this);
+            btnAddToShelf.setText("В планы");
+            btnAddToShelf.setTextSize(11);
+            btnAddToShelf.setTypeface(null, Typeface.BOLD);
+            btnAddToShelf.setTextColor(Color.BLACK);
+            btnAddToShelf.setBackgroundResource(R.drawable.btn_eink);
+            LinearLayout.LayoutParams lpShelf = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
+            lpShelf.setMargins(0, 0, (int) (4 * density), 0);
+            btnAddToShelf.setLayoutParams(lpShelf);
+            btnAddToShelf.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    dialog.dismiss();
+                    btnAddToShelf.setEnabled(false);
+                    btnAddToShelf.setText("Добавление...");
+                    apiClient.addBookToLibrary(book.getUuid(), new YandexBooksApiClient.ApiCallback<Boolean>() {
+                        @Override
+                        public void onSuccess(Boolean result) {
+                            book.setShelfType("to_read");
+                            dbHelper.saveBooks(java.util.Collections.singletonList(book), "to_read");
+                            updateTabBadges();
+                            btnAddToShelf.setText("В планах");
+                            Toast.makeText(MainActivity.this, "«" + book.getTitle() + "» добавлена в планы", Toast.LENGTH_SHORT).show();
+                        }
+
+                        @Override
+                        public void onError(final String errorMessage) {
+                            btnAddToShelf.setEnabled(true);
+                            btnAddToShelf.setText("В планы");
+                            Toast.makeText(MainActivity.this, "Ошибка: " + errorMessage, Toast.LENGTH_SHORT).show();
+                        }
+                    });
                 }
             });
-            actionRow.addView(btnClose);
+            actionRow.addView(btnAddToShelf);
         }
+
+        Button btnClose = new Button(this);
+        btnClose.setText("Закрыть");
+        btnClose.setTextSize(11);
+        btnClose.setTypeface(null, Typeface.BOLD);
+        btnClose.setTextColor(Color.BLACK);
+        btnClose.setBackgroundResource(R.drawable.btn_eink);
+        LinearLayout.LayoutParams lpClose = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.9f);
+        btnClose.setLayoutParams(lpClose);
+        btnClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        actionRow.addView(btnClose);
         buttonContainer.addView(actionRow);
 
         root.addView(buttonContainer);

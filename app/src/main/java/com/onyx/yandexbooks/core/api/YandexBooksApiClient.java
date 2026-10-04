@@ -377,6 +377,13 @@ public class YandexBooksApiClient {
             return singleAuthor.trim();
         }
 
+        if (bObj != null && bObj.has("authors") && bObj.opt("authors") instanceof String) {
+            String sAuthors = bObj.optString("authors", "");
+            if (isValidAuthor(sAuthors)) {
+                return sAuthors.trim();
+            }
+        }
+
         return "Автор не указан";
     }
 
@@ -683,6 +690,301 @@ public class YandexBooksApiClient {
             });
         } catch (Exception e) {
             postError(callback, e.getMessage());
+        }
+    }
+
+    private static final String GQL_SEARCH =
+            "query Search($query: SearchParamsInput!) {\n" +
+            "    search(query: $query) {\n" +
+            "        page {\n" +
+            "            __typename\n" +
+            "            ...searchSnippetAudioBookFragment\n" +
+            "            ...searchSnippetTextBookFragment\n" +
+            "            ...searchSnippetComicBookFragment\n" +
+            "            ...searchSnippetTextSerialFragment\n" +
+            "            ...bookshelfFragment\n" +
+            "            ...personFragment\n" +
+            "            ...publisherFragment\n" +
+            "            ...seriesFragment\n" +
+            "            ...topicFragment\n" +
+            "            ...userFragment\n" +
+            "        }\n" +
+            "        cursor\n" +
+            "        rankedFilter { filterType }\n" +
+            "        misspell { correctedText correctionType }\n" +
+            "    }\n" +
+            "}\n" +
+            "fragment coverFragment on Cover { url ratio backgroundColorHex }\n" +
+            "fragment personFragment on Person { avatar { __typename ...coverFragment } name uuid worksCount roles }\n" +
+            "fragment bookFragment on Book { annotation name cover { __typename ...coverFragment } uuid authors { __typename ...personFragment } ageRestriction editorAnnotation }\n" +
+            "fragment publisherFragment on Publisher { avatar { __typename ...coverFragment } name uuid worksCount }\n" +
+            "fragment publisherBookFragment on Book { publisher { __typename ...publisherFragment } }\n" +
+            "fragment translatorsBookFragment on Book { translators { __typename ...personFragment } }\n" +
+            "fragment topicsBookFragment on Book { topics { name totalBook uuid } }\n" +
+            "fragment subscriptionLevelsFragment on Book { subscriptionLevels }\n" +
+            "fragment snippetBookFragment on Book { __typename ...bookFragment ...publisherBookFragment ...translatorsBookFragment ...topicsBookFragment ...subscriptionLevelsFragment }\n" +
+            "fragment bookTagFragment on Tag { name value }\n" +
+            "fragment narratorsAudioBookFragment on AudioBook { narrators { __typename ...personFragment } }\n" +
+            "fragment progressFragment on Progress { finished inLibrary progress isPublic }\n" +
+            "fragment progressAudioBookFragment on AudioBook { progress { __typename ...progressFragment } }\n" +
+            "fragment listenersCountAudioBookFragment on AudioBook { listenersCount }\n" +
+            "fragment searchSnippetAudioBookFragment on AudioBook { __typename book { __typename ...snippetBookFragment tags { __typename ...bookTagFragment } } ...narratorsAudioBookFragment ...progressAudioBookFragment ...listenersCountAudioBookFragment }\n" +
+            "fragment progressTextBookFragment on TextBook { progress { __typename ...progressFragment } }\n" +
+            "fragment readersCountTextBookFragment on TextBook { readersCount }\n" +
+            "fragment searchSnippetTextBookFragment on TextBook { __typename book { __typename ...snippetBookFragment tags { __typename ...bookTagFragment } } ...progressTextBookFragment ...readersCountTextBookFragment }\n" +
+            "fragment progressComicBookFragment on ComicBook { progress { __typename ...progressFragment } }\n" +
+            "fragment readersCountComicBookFragment on ComicBook { readersCount }\n" +
+            "fragment searchSnippetComicBookFragment on ComicBook { __typename book { __typename ...snippetBookFragment tags { __typename ...bookTagFragment } } ...progressComicBookFragment ...readersCountComicBookFragment }\n" +
+            "fragment textSerialFragment on TextSerial { book { __typename ...bookFragment } }\n" +
+            "fragment episodesTextSerialFragment on TextSerial { episodes { total } }\n" +
+            "fragment readersCountTextSerialFragment on TextSerial { readersCount }\n" +
+            "fragment searchSnippetTextSerialFragment on TextSerial { __typename book { __typename ...snippetBookFragment tags { __typename ...bookTagFragment } } ...textSerialFragment ...episodesTextSerialFragment ...readersCountTextSerialFragment }\n" +
+            "fragment userFragment on User { avatar { __typename ...coverFragment } name uuid followersCount login }\n" +
+            "fragment bookshelfFragment on Bookshelf { cover { __typename ...coverFragment } name uuid user { __typename ...userFragment } posts { total } followersCount description }\n" +
+            "fragment seriesFragment on Series { authors { __typename ...personFragment } cover { __typename ...coverFragment } name uuid items { followersCount total } }\n" +
+            "fragment topicFragment on Topic { name slug totalBook uuid parent { name slug totalBook uuid } }\n";
+
+    /**
+     * Загрузка рекомендаций и популярных книг каталога Яндекс Книг.
+     */
+    public void getRecommendations(final ApiCallback<List<Book>> callback) {
+        String endpoint = BASE_URL + "/popular_searches/ru";
+        Request request = createAuthRequestBuilder(endpoint).get().build();
+
+        httpClient.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                loadBookshelfByUuid("byugcjMZ", callback);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                if (!response.isSuccessful()) {
+                    loadBookshelfByUuid("byugcjMZ", callback);
+                    return;
+                }
+
+                try {
+                    String body = response.body().string();
+                    JSONObject json = new JSONObject(body);
+                    JSONObject pop = json.optJSONObject("popular_searches");
+                    String shelfUuid = "byugcjMZ";
+                    if (pop != null) {
+                        JSONArray res = pop.optJSONArray("resources");
+                        if (res != null && res.length() > 0) {
+                            for (int i = 0; i < res.length(); i++) {
+                                JSONObject item = res.getJSONObject(i);
+                                String url = item.optString("url", "");
+                                if (url.contains("/bookshelves/")) {
+                                    String[] parts = url.split("/bookshelves/");
+                                    if (parts.length > 1 && !parts[1].trim().isEmpty()) {
+                                        shelfUuid = parts[1].trim();
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    loadBookshelfByUuid(shelfUuid, callback);
+                } catch (Exception e) {
+                    loadBookshelfByUuid("byugcjMZ", callback);
+                }
+            }
+        });
+    }
+
+    private void loadBookshelfByUuid(String shelfUuid, final ApiCallback<List<Book>> callback) {
+        String endpoint = BASE_URL + "/bookshelves/" + shelfUuid + "/books";
+        Request request = createAuthRequestBuilder(endpoint).get().build();
+
+        httpClient.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                postError(callback, "Ошибка загрузки каталога: " + e.getMessage());
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                if (!response.isSuccessful()) {
+                    postError(callback, "Ошибка загрузки каталога: HTTP " + response.code());
+                    return;
+                }
+
+                try {
+                    String body = response.body().string();
+                    JSONObject json = new JSONObject(body);
+                    JSONArray booksArray = json.optJSONArray("books");
+                    List<Book> books = new ArrayList<>();
+                    if (booksArray != null) {
+                        for (int i = 0; i < booksArray.length(); i++) {
+                            JSONObject bObj = booksArray.getJSONObject(i);
+                            Book book = parseBookFromCard(bObj);
+                            if (book != null) {
+                                book.setShelfType("catalog");
+                                books.add(book);
+                            }
+                        }
+                    }
+                    postSuccess(callback, books);
+                } catch (Exception e) {
+                    postError(callback, "Ошибка парсинга каталога: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    /**
+     * Глобальный поиск книг по базе Яндекс Книг (GraphQL API).
+     */
+    public void searchBooks(final String query, final ApiCallback<List<Book>> callback) {
+        if (query == null || query.trim().isEmpty()) {
+            postSuccess(callback, new ArrayList<Book>());
+            return;
+        }
+
+        try {
+            JSONObject variables = new JSONObject();
+            JSONObject queryObj = new JSONObject();
+            queryObj.put("query", query.trim());
+            queryObj.put("noMisspell", false);
+            queryObj.put("cursor", "");
+            variables.put("query", queryObj);
+
+            JSONObject payload = new JSONObject();
+            payload.put("operationName", "Search");
+            payload.put("variables", variables);
+            payload.put("query", GQL_SEARCH);
+
+            RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, payload.toString());
+            Request request = createAuthRequestBuilder("https://api-gateway.bookmate.yandex.net/graphql")
+                    .post(body)
+                    .build();
+
+            httpClient.newCall(request).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    postError(callback, "Ошибка сети: " + e.getMessage());
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) throws IOException {
+                    if (!response.isSuccessful()) {
+                        postError(callback, "Ошибка поиска: HTTP " + response.code());
+                        return;
+                    }
+
+                    try {
+                        String bodyStr = response.body().string();
+                        JSONObject json = new JSONObject(bodyStr);
+                        JSONObject data = json.optJSONObject("data");
+                        if (data == null) {
+                            postSuccess(callback, new ArrayList<Book>());
+                            return;
+                        }
+                        JSONObject search = data.optJSONObject("search");
+                        if (search == null) {
+                            postSuccess(callback, new ArrayList<Book>());
+                            return;
+                        }
+                        JSONArray page = search.optJSONArray("page");
+                        List<Book> books = new ArrayList<>();
+                        if (page != null) {
+                            for (int i = 0; i < page.length(); i++) {
+                                JSONObject item = page.getJSONObject(i);
+                                String type = item.optString("__typename", "");
+                                JSONObject bObj = null;
+                                if ("TextBook".equals(type) || "ComicBook".equals(type) || "TextSerial".equals(type) || "AudioBook".equals(type)) {
+                                    bObj = item.optJSONObject("book");
+                                } else if ("Book".equals(type)) {
+                                    bObj = item;
+                                }
+                                if (bObj != null) {
+                                    String uuid = bObj.optString("uuid", "");
+                                    if (uuid.isEmpty()) continue;
+                                    String title = bObj.optString("name", bObj.optString("title", "Без названия"));
+
+                                    String authorText = "";
+                                    JSONArray authorsArr = bObj.optJSONArray("authors");
+                                    if (authorsArr != null && authorsArr.length() > 0) {
+                                        StringBuilder sb = new StringBuilder();
+                                        for (int a = 0; a < authorsArr.length(); a++) {
+                                            JSONObject aObj = authorsArr.optJSONObject(a);
+                                            if (aObj != null) {
+                                                String aName = aObj.optString("name", "");
+                                                if (!aName.isEmpty()) {
+                                                    if (sb.length() > 0) sb.append(", ");
+                                                    sb.append(aName);
+                                                }
+                                            }
+                                        }
+                                        authorText = sb.toString();
+                                    }
+                                    if (authorText.isEmpty()) {
+                                        authorText = parseAuthorString(bObj, null);
+                                    }
+
+                                    String coverUrl = "";
+                                    JSONObject coverObj = bObj.optJSONObject("cover");
+                                    if (coverObj != null) {
+                                        coverUrl = coverObj.optString("url", "");
+                                    }
+
+                                    String rawAnn = bObj.optString("annotation", bObj.optString("editorAnnotation", ""));
+                                    String cleanAnn = "";
+                                    if (!rawAnn.isEmpty()) {
+                                        cleanAnn = android.text.Html.fromHtml(rawAnn).toString().trim().replaceAll("\\s+", " ");
+                                    }
+
+                                    Book book = new Book();
+                                    book.setUuid(uuid);
+                                    book.setTitle(title);
+                                    book.setAuthor(authorText);
+                                    book.setAnnotation(cleanAnn);
+                                    book.setCoverUrl(coverUrl);
+                                    book.setShelfType("search");
+                                    books.add(book);
+                                }
+                            }
+                        }
+                        postSuccess(callback, books);
+                    } catch (Exception e) {
+                        postError(callback, "Ошибка обработки результатов: " + e.getMessage());
+                    }
+                }
+            });
+        } catch (Exception e) {
+            postError(callback, "Ошибка запроса поиска: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Добавление книги в личную библиотеку пользователя (на полку «В планах»).
+     */
+    public void addBookToLibrary(final String bookUuid, final ApiCallback<Boolean> callback) {
+        String endpoint = BASE_URL + "/profile/library_cards";
+        try {
+            JSONObject bodyJson = new JSONObject();
+            bodyJson.put("book_uuid", bookUuid);
+            RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString());
+            Request request = createAuthRequestBuilder(endpoint).post(body).build();
+
+            httpClient.newCall(request).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    postError(callback, "Ошибка сети: " + e.getMessage());
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) {
+                    if (response.isSuccessful()) {
+                        postSuccess(callback, true);
+                    } else {
+                        postError(callback, "Ошибка сервера: HTTP " + response.code());
+                    }
+                }
+            });
+        } catch (Exception e) {
+            postError(callback, "Ошибка отправки: " + e.getMessage());
         }
     }
 
