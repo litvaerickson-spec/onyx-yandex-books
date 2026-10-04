@@ -152,14 +152,93 @@ def test_device_flow_contract():
     print("✅ Тест контракта Device Flow успешно пройден!\n")
 
 
+def test_cloud_reading_progress_extraction():
+    print("--- [ТЕСТ 5] Извлечение и нормализация прогресса чтения Bookmate API ---")
+
+    def extract_progress(card, b_obj):
+        candidates = [
+            card.get("last_reading_position") if card else None,
+            card.get("reading_position") if card else None,
+            card.get("position") if card else None,
+            card.get("progress") if card else None,
+            card.get("reading_status") if card else None,
+            b_obj.get("last_reading_position") if b_obj else None,
+            b_obj.get("reading_position") if b_obj else None,
+            b_obj.get("position") if b_obj else None,
+            b_obj.get("progress") if b_obj else None,
+            card,
+            b_obj
+        ]
+
+        percent = 0.0
+        for obj in candidates:
+            if not obj or not isinstance(obj, dict):
+                continue
+            for key in ["percent", "reading_progress", "progress", "progress_percent", "percentage"]:
+                if key in obj:
+                    val = float(obj[key])
+                    if val > 0.0:
+                        if val <= 1.0:
+                            percent = val * 100.0
+                        else:
+                            percent = min(100.0, val)
+                        break
+            if percent > 0.0:
+                break
+
+        chapter = 0
+        for obj in candidates:
+            if not obj or not isinstance(obj, dict):
+                continue
+            for key in ["chapter_index", "chapter", "chap_index", "chapter_number"]:
+                if key in obj:
+                    chapter = int(obj[key])
+                    break
+            if chapter > 0:
+                break
+
+        return percent, chapter
+
+    # Кейс 1: карточка с долей 0.02 (2%)
+    card1 = {"uuid": "c1", "percent": 0.02, "state": "reading"}
+    p1, ch1 = extract_progress(card1, None)
+    assert abs(p1 - 2.0) < 0.001, f"Ожидалось 2.0%, получено {p1}"
+
+    # Кейс 2: карточка с last_reading_position (как в мобильном приложении на телефоне)
+    card2 = {
+        "uuid": "c2",
+        "state": "reading",
+        "last_reading_position": {"chapter_index": 2, "paragraph_index": 4, "percent": 0.154}
+    }
+    p2, ch2 = extract_progress(card2, None)
+    assert abs(p2 - 15.4) < 0.001, f"Ожидалось 15.4%, получено {p2}"
+    assert ch2 == 2, f"Ожидалась глава 2, получено {ch2}"
+
+    # Кейс 3: прогресс в объекте книги в процентах (25.0%)
+    card3 = {
+        "uuid": "c3",
+        "book": {
+            "percent": 25.0,
+            "reading_position": {"chapter": 5}
+        }
+    }
+    p3, ch3 = extract_progress(card3, card3["book"])
+    assert abs(p3 - 25.0) < 0.001, f"Ожидалось 25.0%, получено {p3}"
+    assert ch3 == 5, f"Ожидалась глава 5, получено {ch3}"
+
+    print("✅ Тест извлечения прогресса чтения Bookmate успешно пройден!\n")
+
+
 if __name__ == "__main__":
     print("==================================================")
     print("🚀 Запуск тотальной верификации ядра Яндекс Книги Lite")
-    print("==================================================\n")
+    print("==================================================")
+    print()
     test_tex_hyphenation()
     test_smart_conflict_resolution()
     test_paginator_math()
     test_device_flow_contract()
+    test_cloud_reading_progress_extraction()
     print("==================================================")
     print("🎉 ВСЕ ТЕСТЫ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

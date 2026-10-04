@@ -129,18 +129,24 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         double effectivePercent = book.getPercent();
         boolean effectiveDownloaded = book.isDownloaded();
         long effectiveTimestamp = book.getLastReadTimestamp();
+        int effectiveChapter = book.getCurrentChapterIndex();
+        int effectiveParagraph = book.getCurrentParagraphIndex();
 
-        // 1. Проверяем локальную БД: не перезаписываем уже прочитанное нулевым прогрессом
+        // 1. Проверяем локальную БД: не перезаписываем уже прочитанное меньшим прогрессом
         try {
-            Cursor c = db.rawQuery("SELECT percent, is_downloaded, last_read_timestamp FROM books WHERE uuid = ?", new String[]{book.getUuid()});
+            Cursor c = db.rawQuery("SELECT percent, is_downloaded, last_read_timestamp, current_chapter, current_paragraph FROM books WHERE uuid = ?", new String[]{book.getUuid()});
             if (c != null) {
                 if (c.moveToFirst()) {
                     double localPercent = c.getDouble(0);
                     int localDown = c.getInt(1);
                     long localTs = c.getLong(2);
+                    int localCh = c.getInt(3);
+                    int localPar = c.getInt(4);
 
                     if (localPercent > effectivePercent) {
                         effectivePercent = localPercent;
+                        effectiveChapter = localCh;
+                        effectiveParagraph = localPar;
                     }
                     if (localDown == 1) {
                         effectiveDownloaded = true;
@@ -153,13 +159,18 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             }
 
             // 2. Дополнительно сверяем с таблицей progress
-            Cursor pc = db.rawQuery("SELECT percent, timestamp FROM progress WHERE book_uuid = ?", new String[]{book.getUuid()});
+            Cursor pc = db.rawQuery("SELECT percent, timestamp, chapter_index, paragraph_index FROM progress WHERE book_uuid = ?", new String[]{book.getUuid()});
             if (pc != null) {
                 if (pc.moveToFirst()) {
                     double progPercent = pc.getDouble(0);
                     long progTs = pc.getLong(1);
+                    int progCh = pc.getInt(2);
+                    int progPar = pc.getInt(3);
+
                     if (progPercent > effectivePercent) {
                         effectivePercent = progPercent;
+                        effectiveChapter = progCh;
+                        effectiveParagraph = progPar;
                     }
                     if (progTs > effectiveTimestamp) {
                         effectiveTimestamp = progTs;
@@ -176,6 +187,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         cv.put("annotation", book.getAnnotation());
         cv.put("cover_url", book.getCoverUrl());
         cv.put("percent", effectivePercent);
+        cv.put("current_chapter", effectiveChapter);
+        cv.put("current_paragraph", effectiveParagraph);
         cv.put("shelf_type", overrideShelfType != null ? overrideShelfType : book.getShelfType());
         cv.put("is_downloaded", effectiveDownloaded ? 1 : 0);
         cv.put("last_read_timestamp", effectiveTimestamp);
@@ -184,18 +197,23 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
         if (effectivePercent > 0) {
             book.setPercent(effectivePercent);
+            book.setCurrentChapterIndex(effectiveChapter);
+            book.setCurrentParagraphIndex(effectiveParagraph);
             syncInitialCloudProgress(db, book);
         }
     }
 
     private void syncInitialCloudProgress(SQLiteDatabase db, Book book) {
         try {
-            Cursor c = db.rawQuery("SELECT percent, timestamp FROM progress WHERE book_uuid = ?", new String[]{book.getUuid()});
+            Cursor c = db.rawQuery("SELECT percent, timestamp, chapter_index FROM progress WHERE book_uuid = ?", new String[]{book.getUuid()});
             boolean shouldUpdate = true;
             if (c != null) {
                 if (c.moveToFirst()) {
                     double existingPercent = c.getDouble(0);
-                    if (existingPercent >= book.getPercent()) {
+                    int existingChapter = c.getInt(2);
+                    if (existingPercent > book.getPercent()) {
+                        shouldUpdate = false;
+                    } else if (existingPercent == book.getPercent() && existingChapter >= book.getCurrentChapterIndex()) {
                         shouldUpdate = false;
                     }
                 }
@@ -209,7 +227,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 pCv.put("chapter_index", book.getCurrentChapterIndex());
                 pCv.put("paragraph_index", book.getCurrentParagraphIndex());
                 pCv.put("page_index", 0);
-                pCv.put("timestamp", book.getLastReadTimestamp());
+                pCv.put("timestamp", book.getLastReadTimestamp() > 0 ? book.getLastReadTimestamp() : System.currentTimeMillis());
                 pCv.put("is_synced", 1);
                 db.insertWithOnConflict("progress", null, pCv, SQLiteDatabase.CONFLICT_REPLACE);
             }
@@ -275,6 +293,16 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
         b.setCoverUrl(c.getString(c.getColumnIndex("cover_url")));
         b.setPercent(c.getDouble(c.getColumnIndex("percent")));
+
+        int chIdx = c.getColumnIndex("current_chapter");
+        if (chIdx >= 0) {
+            b.setCurrentChapterIndex(c.getInt(chIdx));
+        }
+        int parIdx = c.getColumnIndex("current_paragraph");
+        if (parIdx >= 0) {
+            b.setCurrentParagraphIndex(c.getInt(parIdx));
+        }
+
         b.setShelfType(c.getString(c.getColumnIndex("shelf_type")));
         b.setDownloaded(c.getInt(c.getColumnIndex("is_downloaded")) == 1);
         b.setLastReadTimestamp(c.getLong(c.getColumnIndex("last_read_timestamp")));
@@ -330,9 +358,11 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         cv.put("is_synced", progress.isSyncedWithServer() ? 1 : 0);
         db.insertWithOnConflict("progress", null, cv, SQLiteDatabase.CONFLICT_REPLACE);
 
-        // Также обновляем процент в таблице books
+        // Также обновляем процент, главы и таймштамп в таблице books
         ContentValues bookCv = new ContentValues();
         bookCv.put("percent", progress.getPercent());
+        bookCv.put("current_chapter", progress.getChapterIndex());
+        bookCv.put("current_paragraph", progress.getParagraphIndex());
         bookCv.put("last_read_timestamp", progress.getTimestamp());
         db.update("books", bookCv, "uuid = ?", new String[]{progress.getBookUuid()});
     }

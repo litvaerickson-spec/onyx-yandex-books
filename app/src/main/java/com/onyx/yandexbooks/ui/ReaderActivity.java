@@ -11,6 +11,7 @@ import android.widget.Toast;
 
 import com.onyx.yandexbooks.R;
 import com.onyx.yandexbooks.core.api.YandexBooksApiClient;
+import com.onyx.yandexbooks.core.api.models.Book;
 import com.onyx.yandexbooks.core.api.models.Chapter;
 import com.onyx.yandexbooks.core.api.models.ReadingProgress;
 import com.onyx.yandexbooks.core.auth.TokenStorage;
@@ -194,6 +195,26 @@ public class ReaderActivity extends Activity {
                 forceEpdRefresh();
             }
         });
+
+        Button btnCloseMenu = (Button) findViewById(R.id.btn_reader_close_menu);
+        if (btnCloseMenu != null) {
+            btnCloseMenu.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    menuOverlay.setVisibility(View.GONE);
+                }
+            });
+        }
+
+        Button btnToLibrary = (Button) findViewById(R.id.btn_reader_to_library);
+        if (btnToLibrary != null) {
+            btnToLibrary.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    finish();
+                }
+            });
+        }
     }
 
     private String getMarginButtonText() {
@@ -227,11 +248,17 @@ public class ReaderActivity extends Activity {
     }
 
     private void loadBookData() {
-        // Загрузка сохраненного локального прогресса
+        // Загрузка сохраненного локального прогресса из progress или books
         ReadingProgress progress = dbHelper.getProgress(bookUuid);
-        if (progress != null) {
+        if (progress != null && progress.getPercent() > 0) {
             currentChapterIndex = Math.max(0, progress.getChapterIndex());
             currentPageIndex = Math.max(0, progress.getPageIndex());
+        } else {
+            Book book = dbHelper.getBookByUuid(bookUuid);
+            if (book != null && book.getPercent() > 0) {
+                currentChapterIndex = Math.max(0, book.getCurrentChapterIndex());
+                currentPageIndex = 0;
+            }
         }
 
         cacheManager.ensureBookReady(bookUuid, bookTitle, new CacheManager.BookReadyCallback() {
@@ -278,15 +305,32 @@ public class ReaderActivity extends Activity {
 
     private void resolveInitialPositionAndOpen() {
         ReadingProgress p = dbHelper.getProgress(bookUuid);
-        if (p != null && p.getPercent() > 0 && !chapters.isEmpty()) {
-            if (p.getChapterIndex() > 0 && p.getChapterIndex() < chapters.size()) {
-                currentChapterIndex = p.getChapterIndex();
+        double percent = 0.0;
+        int targetChapter = 0;
+        int targetPage = 0;
+
+        if (p != null && p.getPercent() > 0) {
+            percent = p.getPercent();
+            targetChapter = p.getChapterIndex();
+            targetPage = p.getPageIndex();
+        } else {
+            Book b = dbHelper.getBookByUuid(bookUuid);
+            if (b != null && b.getPercent() > 0) {
+                percent = b.getPercent();
+                targetChapter = b.getCurrentChapterIndex();
+                targetPage = 0;
+            }
+        }
+
+        if (percent > 0 && chapters != null && !chapters.isEmpty()) {
+            if (targetChapter > 0 && targetChapter < chapters.size()) {
+                currentChapterIndex = targetChapter;
             } else {
-                int estChapter = (int) Math.floor((p.getPercent() / 100.0) * chapters.size());
+                int estChapter = (int) Math.floor((percent / 100.0) * chapters.size());
                 if (estChapter >= chapters.size()) estChapter = chapters.size() - 1;
                 currentChapterIndex = Math.max(0, estChapter);
             }
-            currentPageIndex = Math.max(0, p.getPageIndex());
+            currentPageIndex = Math.max(0, targetPage);
         }
         loadChapter(currentChapterIndex);
     }
@@ -311,7 +355,7 @@ public class ReaderActivity extends Activity {
                 currentChapterIndex = targetCh;
                 currentPageIndex = Math.max(0, cloudProgress.getPageIndex());
                 loadChapter(currentChapterIndex);
-                Toast.makeText(ReaderActivity.this, String.format("Синхронизировано с облаком: %.0f%%", cloudProgress.getPercent()), Toast.LENGTH_SHORT).show();
+                Toast.makeText(ReaderActivity.this, String.format("Синхронизировано: %.0f%% (Гл. %d)", cloudProgress.getPercent(), currentChapterIndex + 1), Toast.LENGTH_SHORT).show();
             }
         }
     }

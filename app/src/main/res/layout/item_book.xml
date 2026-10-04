@@ -95,11 +95,11 @@
                 android:id="@+id/book_status_tag"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text=" • ☁ В сети"
+                android:text=" • ☁ Сеть"
                 android:textSize="10sp"
                 android:textColor="@color/eink_black"
                 android:singleLine="true"
-                android:layout_marginLeft="4dp" />
+                android:layout_marginLeft="3dp" />
         </LinearLayout>
     </LinearLayout>
 
@@ -109,11 +109,11 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:gravity="center"
-        android:layout_marginLeft="8dp">
+        android:layout_marginLeft="6dp">
 
         <Button
             android:id="@+id/book_read_btn"
-            android:layout_width="66dp"
+            android:layout_width="64dp"
             android:layout_height="32dp"
             android:minHeight="0dp"
             android:minWidth="0dp"
@@ -129,7 +129,7 @@
 
         <Button
             android:id="@+id/book_download_btn"
-            android:layout_width="66dp"
+            android:layout_width="64dp"
             android:layout_height="26dp"
             android:minHeight="0dp"
             android:minWidth="0dp"

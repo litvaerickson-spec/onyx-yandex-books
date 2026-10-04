@@ -162,6 +162,100 @@ public class YandexBooksApiClient {
         });
     }
 
+    public static class ParsedProgress {
+        public double percent = 0.0;
+        public int chapterIndex = 0;
+        public int paragraphIndex = 0;
+        public long timestamp = 0L;
+    }
+
+    public static ParsedProgress extractProgress(JSONObject card, JSONObject bObj) {
+        ParsedProgress result = new ParsedProgress();
+        JSONObject[] candidates = new JSONObject[] {
+            card != null ? card.optJSONObject("last_reading_position") : null,
+            card != null ? card.optJSONObject("reading_position") : null,
+            card != null ? card.optJSONObject("position") : null,
+            card != null ? card.optJSONObject("progress") : null,
+            card != null ? card.optJSONObject("reading_status") : null,
+            bObj != null ? bObj.optJSONObject("last_reading_position") : null,
+            bObj != null ? bObj.optJSONObject("reading_position") : null,
+            bObj != null ? bObj.optJSONObject("position") : null,
+            bObj != null ? bObj.optJSONObject("progress") : null,
+            card,
+            bObj
+        };
+
+        // 1. Поиск процента прочитанного
+        for (JSONObject obj : candidates) {
+            if (obj == null) continue;
+            double p = -1.0;
+            if (obj.has("percent")) p = obj.optDouble("percent", -1.0);
+            else if (obj.has("reading_progress")) p = obj.optDouble("reading_progress", -1.0);
+            else if (obj.has("progress")) p = obj.optDouble("progress", -1.0);
+            else if (obj.has("progress_percent")) p = obj.optDouble("progress_percent", -1.0);
+            else if (obj.has("percentage")) p = obj.optDouble("percentage", -1.0);
+
+            if (p > 0.0) {
+                if (p <= 1.0) {
+                    result.percent = p * 100.0;
+                } else {
+                    result.percent = Math.min(100.0, p);
+                }
+                break;
+            }
+        }
+
+        // 2. Поиск индекса главы
+        for (JSONObject obj : candidates) {
+            if (obj == null) continue;
+            int ch = -1;
+            if (obj.has("chapter_index")) ch = obj.optInt("chapter_index", -1);
+            else if (obj.has("chapter")) ch = obj.optInt("chapter", -1);
+            else if (obj.has("chap_index")) ch = obj.optInt("chap_index", -1);
+            else if (obj.has("chapter_number")) ch = obj.optInt("chapter_number", -1);
+
+            if (ch >= 0) {
+                result.chapterIndex = ch;
+                break;
+            }
+        }
+
+        // 3. Поиск параграфа / смещения
+        for (JSONObject obj : candidates) {
+            if (obj == null) continue;
+            int par = -1;
+            if (obj.has("paragraph_index")) par = obj.optInt("paragraph_index", -1);
+            else if (obj.has("paragraph")) par = obj.optInt("paragraph", -1);
+            else if (obj.has("point")) par = obj.optInt("point", -1);
+            else if (obj.has("offset")) par = obj.optInt("offset", -1);
+
+            if (par >= 0) {
+                result.paragraphIndex = par;
+                break;
+            }
+        }
+
+        // 4. Поиск временной метки
+        for (JSONObject obj : candidates) {
+            if (obj == null) continue;
+            long ts = 0L;
+            if (obj.has("timestamp")) ts = obj.optLong("timestamp", 0L);
+            else if (obj.has("updated_at")) ts = obj.optLong("updated_at", 0L);
+            else if (obj.has("last_read_at")) ts = obj.optLong("last_read_at", 0L);
+
+            if (ts > 0) {
+                if (ts < 10000000000L) ts *= 1000L;
+                result.timestamp = ts;
+                break;
+            }
+        }
+        if (result.timestamp <= 0) {
+            result.timestamp = System.currentTimeMillis();
+        }
+
+        return result;
+    }
+
     private Book parseBookFromCard(JSONObject card) {
         if (card == null) return null;
 
@@ -188,18 +282,8 @@ public class YandexBooksApiClient {
             coverUrl = bObj.optString("cover_url", bObj.optString("cover", ""));
         }
 
-        // Прогресс чтения (нормализация 0..1 в 0..100)
-        double prog = card.optDouble("reading_progress", 0.0);
-        if (prog <= 0.0) {
-            JSONObject pObj = card.optJSONObject("position");
-            if (pObj == null) pObj = card.optJSONObject("reading_position");
-            if (pObj != null) {
-                prog = pObj.optDouble("percent", pObj.optDouble("reading_progress", 0.0));
-            }
-        }
-        if (prog <= 1.0 && prog > 0.0) {
-            prog = prog * 100.0;
-        }
+        // Комплексный парсинг прогресса и позиции чтения из всех возможных полей Bookmate
+        ParsedProgress pr = extractProgress(card, bObj);
 
         // Определение полки по состоянию Bookmate
         String state = card.optString("state", "");
@@ -212,9 +296,9 @@ public class YandexBooksApiClient {
             mappedShelf = "done";
         } else {
             // Если state неизвестен, классифицируем по прогрессу
-            if (prog >= 99.0) {
+            if (pr.percent >= 99.0) {
                 mappedShelf = "done";
-            } else if (prog > 0.0) {
+            } else if (pr.percent > 0.0) {
                 mappedShelf = "reading";
             } else {
                 mappedShelf = "to_read";
@@ -228,27 +312,17 @@ public class YandexBooksApiClient {
             cleanAnn = android.text.Html.fromHtml(rawAnn).toString().trim().replaceAll("\\s+", " ");
         }
 
-        // Позиция чтения из облака
-        int chapterIndex = 0;
-        int paragraphIndex = 0;
-        JSONObject posObj = card.optJSONObject("position");
-        if (posObj == null) posObj = card.optJSONObject("reading_position");
-        if (posObj != null) {
-            chapterIndex = posObj.optInt("chapter_index", posObj.optInt("chapter", 0));
-            paragraphIndex = posObj.optInt("paragraph_index", posObj.optInt("paragraph", 0));
-        }
-
         Book book = new Book();
         book.setUuid(uuid);
         book.setTitle(title);
         book.setAuthor(authorText);
         book.setAnnotation(cleanAnn);
         book.setCoverUrl(coverUrl);
-        book.setPercent(prog);
-        book.setCurrentChapterIndex(chapterIndex);
-        book.setCurrentParagraphIndex(paragraphIndex);
+        book.setPercent(pr.percent);
+        book.setCurrentChapterIndex(pr.chapterIndex);
+        book.setCurrentParagraphIndex(pr.paragraphIndex);
         book.setShelfType(mappedShelf);
-        book.setLastReadTimestamp(System.currentTimeMillis());
+        book.setLastReadTimestamp(pr.timestamp);
 
         return book;
     }
@@ -347,13 +421,12 @@ public class YandexBooksApiClient {
      * Запрос актуальной позиции чтения из облака Яндекса.
      */
     public void getReadingProgress(final String bookUuid, final ApiCallback<ReadingProgress> callback) {
-        String endpoint = BASE_URL + "/books/" + bookUuid + "/progress";
+        String endpoint = BASE_URL + "/profile/library_cards?book_uuid=" + bookUuid;
         Request request = createAuthRequestBuilder(endpoint).get().build();
 
         httpClient.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-                // Запасной запрос через library_cards
                 getReadingProgressFallback(bookUuid, callback);
             }
 
@@ -366,22 +439,17 @@ public class YandexBooksApiClient {
                 try {
                     String body = response.body().string();
                     JSONObject json = new JSONObject(body);
-                    JSONObject pObj = json.optJSONObject("progress");
-                    if (pObj == null) pObj = json.optJSONObject("position");
-                    if (pObj == null) pObj = json;
-
-                    double pct = pObj.optDouble("percent", pObj.optDouble("reading_progress", 0.0));
-                    if (pct <= 1.0 && pct > 0.0) {
-                        pct = pct * 100.0;
+                    JSONArray arr = json.optJSONArray("library_cards");
+                    if (arr != null && arr.length() > 0) {
+                        JSONObject card = arr.getJSONObject(0);
+                        JSONObject bObj = card.optJSONObject("book");
+                        ParsedProgress pr = extractProgress(card, bObj);
+                        final ReadingProgress progress = new ReadingProgress(bookUuid, pr.percent, pr.chapterIndex, pr.paragraphIndex, 0, pr.timestamp);
+                        progress.setSyncedWithServer(true);
+                        postSuccess(callback, progress);
+                        return;
                     }
-
-                    int chIdx = pObj.optInt("chapter_index", pObj.optInt("chapter", 0));
-                    int parIdx = pObj.optInt("paragraph_index", pObj.optInt("paragraph", 0));
-                    long ts = pObj.optLong("timestamp", System.currentTimeMillis());
-
-                    final ReadingProgress progress = new ReadingProgress(bookUuid, pct, chIdx, parIdx, 0, ts);
-                    progress.setSyncedWithServer(true);
-                    postSuccess(callback, progress);
+                    getReadingProgressFallback(bookUuid, callback);
                 } catch (Exception e) {
                     getReadingProgressFallback(bookUuid, callback);
                 }
@@ -390,6 +458,36 @@ public class YandexBooksApiClient {
     }
 
     private void getReadingProgressFallback(final String bookUuid, final ApiCallback<ReadingProgress> callback) {
+        String endpoint = BASE_URL + "/books/" + bookUuid + "/reading_position";
+        Request request = createAuthRequestBuilder(endpoint).get().build();
+
+        httpClient.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                getReadingProgressFallbackCards(bookUuid, callback);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                if (!response.isSuccessful()) {
+                    getReadingProgressFallbackCards(bookUuid, callback);
+                    return;
+                }
+                try {
+                    String body = response.body().string();
+                    JSONObject json = new JSONObject(body);
+                    ParsedProgress pr = extractProgress(json, json.optJSONObject("book"));
+                    final ReadingProgress progress = new ReadingProgress(bookUuid, pr.percent, pr.chapterIndex, pr.paragraphIndex, 0, pr.timestamp);
+                    progress.setSyncedWithServer(true);
+                    postSuccess(callback, progress);
+                } catch (Exception e) {
+                    getReadingProgressFallbackCards(bookUuid, callback);
+                }
+            }
+        });
+    }
+
+    private void getReadingProgressFallbackCards(final String bookUuid, final ApiCallback<ReadingProgress> callback) {
         String endpoint = BASE_URL + "/profile/library_cards/" + bookUuid;
         Request request = createAuthRequestBuilder(endpoint).get().build();
 
@@ -410,26 +508,8 @@ public class YandexBooksApiClient {
                     JSONObject json = new JSONObject(body);
                     JSONObject card = json.optJSONObject("library_card");
                     if (card == null) card = json;
-
-                    double pct = card.optDouble("reading_progress", 0.0);
-                    JSONObject posObj = card.optJSONObject("position");
-                    if (posObj == null) posObj = card.optJSONObject("reading_position");
-                    if (posObj != null && pct <= 0.0) {
-                        pct = posObj.optDouble("percent", posObj.optDouble("reading_progress", 0.0));
-                    }
-                    if (pct <= 1.0 && pct > 0.0) {
-                        pct = pct * 100.0;
-                    }
-
-                    int chIdx = 0;
-                    int parIdx = 0;
-                    if (posObj != null) {
-                        chIdx = posObj.optInt("chapter_index", posObj.optInt("chapter", 0));
-                        parIdx = posObj.optInt("paragraph_index", posObj.optInt("paragraph", 0));
-                    }
-                    long ts = System.currentTimeMillis();
-
-                    final ReadingProgress progress = new ReadingProgress(bookUuid, pct, chIdx, parIdx, 0, ts);
+                    ParsedProgress pr = extractProgress(card, card.optJSONObject("book"));
+                    final ReadingProgress progress = new ReadingProgress(bookUuid, pr.percent, pr.chapterIndex, pr.paragraphIndex, 0, pr.timestamp);
                     progress.setSyncedWithServer(true);
                     postSuccess(callback, progress);
                 } catch (Exception e) {
