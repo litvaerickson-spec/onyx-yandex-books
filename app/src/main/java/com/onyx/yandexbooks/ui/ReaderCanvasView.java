@@ -47,7 +47,12 @@ public class ReaderCanvasView extends View {
     private int totalChapters = 1;
     private double globalPercent = 0.0;
     private OnReaderInteractionListener interactionListener;
+    public interface OnCanvasSizeChangeListener {
+        void onCanvasSizeChanged(int width, int height);
+    }
+
     private ImageLoader imageLoader;
+    private OnCanvasSizeChangeListener sizeChangeListener;
 
     // Координаты и время для распознавания жестов свайпа и тапов
     private float touchDownX = 0f;
@@ -57,6 +62,20 @@ public class ReaderCanvasView extends View {
     public ReaderCanvasView(Context context) {
         super(context);
         init();
+    }
+
+    public void setOnCanvasSizeChangeListener(OnCanvasSizeChangeListener listener) {
+        this.sizeChangeListener = listener;
+    }
+
+    @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        if (w > 0 && h > 0 && (w != oldw || h != oldh)) {
+            if (sizeChangeListener != null) {
+                sizeChangeListener.onCanvasSizeChanged(w, h);
+            }
+        }
     }
 
     public ReaderCanvasView(Context context, AttributeSet attrs) {

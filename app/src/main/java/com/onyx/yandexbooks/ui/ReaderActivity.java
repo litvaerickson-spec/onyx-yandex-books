@@ -143,6 +143,8 @@ public class ReaderActivity extends Activity {
     private final ExecutorService paginationExecutor = Executors.newSingleThreadExecutor();
     private final AtomicLong paginationTaskId = new AtomicLong(0);
     private volatile boolean isPaginating = false;
+    private int lastPaginatedWidth = 0;
+    private int lastPaginatedHeight = 0;
 
     // Индикатор подготовки книги
     private View readerLoadingOverlay;
@@ -268,7 +270,16 @@ public class ReaderActivity extends Activity {
         setupCanvasListeners();
         setupNeoReaderControls();
 
-        loadBookData();
+        if (readerCanvas != null) {
+            readerCanvas.post(new Runnable() {
+                @Override
+                public void run() {
+                    loadBookData();
+                }
+            });
+        } else {
+            loadBookData();
+        }
     }
 
     private void setupHardwareKeys() {
@@ -313,6 +324,18 @@ public class ReaderActivity extends Activity {
             @Override
             public void onCenterTap() {
                 toggleMenuOverlay();
+            }
+        });
+
+        readerCanvas.setOnCanvasSizeChangeListener(new ReaderCanvasView.OnCanvasSizeChangeListener() {
+            @Override
+            public void onCanvasSizeChanged(int width, int height) {
+                if (width > 0 && height > 0) {
+                    if (lastPaginatedWidth > 0 && lastPaginatedHeight > 0 &&
+                            (width != lastPaginatedWidth || height != lastPaginatedHeight)) {
+                        repaginateCurrentChapter();
+                    }
+                }
             }
         });
     }
@@ -381,7 +404,8 @@ public class ReaderActivity extends Activity {
             btnPrevChapter.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    if (currentChapterIndex > 0) {
+                    if (isPaginating) return;
+                    if (chapters != null && currentChapterIndex > 0) {
                         currentChapterIndex--;
                         currentPageIndex = 0;
                         isInitialLoading = false;
@@ -398,6 +422,7 @@ public class ReaderActivity extends Activity {
             btnNextChapter.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
+                    if (isPaginating) return;
                     if (chapters != null && currentChapterIndex + 1 < chapters.size()) {
                         currentChapterIndex++;
                         currentPageIndex = 0;
@@ -1852,6 +1877,8 @@ public class ReaderActivity extends Activity {
         }
         final int screenWidth = w;
         final int screenHeight = h;
+        lastPaginatedWidth = w;
+        lastPaginatedHeight = h;
 
         final TypographyConfig configCopy = new TypographyConfig();
         configCopy.setFontSizeSp(typographyConfig.getFontSizeSp());

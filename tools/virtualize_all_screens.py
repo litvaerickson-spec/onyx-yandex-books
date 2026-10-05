@@ -298,16 +298,13 @@ def main():
     # =========================================================================
     # 5. Тестирование валидности выходного APK v1.2.6
     # =========================================================================
-    print("\n[5/6] Проверка чистоты директории и валидности APK v1.2.6...")
-    target_apk = "yandex-books-lite-v1.2.6.apk"
-    assert os.path.exists(target_apk), f"APK {target_apk} не найден!"
+    print("\n[5/6] Проверка чистоты директории и валидности APK...")
+    apks = [f for f in os.listdir(".") if f.startswith("yandex-books-lite-v") and f.endswith(".apk")]
+    assert len(apks) == 1, f"Ожидался ровно один актуальный APK файл, найдено: {apks}"
+    target_apk = apks[0]
     apk_size = os.path.getsize(target_apk)
     print(f"   Файл {target_apk}: {apk_size / 1024 / 1024:.2f} МБ")
-
-    # Проверка отсутствия старых версий
-    old_apks = [f for f in os.listdir(".") if f.startswith("yandex-books-lite") and f.endswith(".apk") and f != target_apk]
-    assert len(old_apks) == 0, f"Обнаружены старые APK файлы: {old_apks}"
-    print("   ✅ Старые версии APK удалены, активна исключительно v1.2.6!")
+    print(f"   ✅ Активен актуальный релиз: {target_apk}!")
 
     # =========================================================================
     # 6. Тестирование передачи токена через облачный мост ntfy.sh
@@ -321,10 +318,15 @@ def main():
     resp_phone = urllib.request.urlopen(req_phone)
     print("   Смартфон отправил токен в облачный топик: HTTP", resp_phone.getcode())
 
-    poll_req = urllib.request.Request(f"https://ntfy.sh/{test_session}/raw?poll=1&since=all")
-    poll_body = urllib.request.urlopen(poll_req).read().decode("utf-8")
+    token_match = None
+    for _ in range(5):
+        time.sleep(0.6)
+        poll_req = urllib.request.Request(f"https://ntfy.sh/{test_session}/raw?poll=1&since=all")
+        poll_body = urllib.request.urlopen(poll_req).read().decode("utf-8")
+        token_match = re.search(r"y0_[A-Za-z0-9_-]{15,}", poll_body)
+        if token_match:
+            break
 
-    token_match = re.search(r"y0_[A-Za-z0-9_-]{15,}", poll_body)
     assert token_match and token_match.group(0) == fake_token, "Token extraction mismatch!"
     print("   🎉 Токен успешно извлечен:", token_match.group(0))
 
