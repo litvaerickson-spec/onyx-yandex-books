@@ -53,6 +53,7 @@ public class TextPaginator {
     public List<Page> paginate(String fullText, int screenWidth, int screenHeight, Paint paint, TypographyConfig config) {
         List<Page> pages = new ArrayList<>();
         if (fullText == null || fullText.isEmpty()) {
+            pages.add(new Page(0, new ArrayList<Line>(), 0, 0));
             return pages;
         }
 
@@ -200,6 +201,10 @@ public class TextPaginator {
         // Финальная страница
         if (!currentLines.isEmpty()) {
             pages.add(new Page(pageIndex, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
+        }
+
+        if (pages.isEmpty()) {
+            pages.add(new Page(0, new ArrayList<Line>(), 0, 0));
         }
 
         return pages;

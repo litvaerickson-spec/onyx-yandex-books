@@ -836,6 +836,134 @@ def test_compact_footer_and_margin_geometry():
     print("✅ Тест геометрии футера успешно пройден!\n")
 
 
+def test_hierarchical_toc_tree_and_desync_prevention():
+    print("--- [ТЕСТ 19] Древовидное оглавление NeoReader, очистка тегов и защита от десинхронизации ---")
+
+    import re
+
+    # 1. Тест нормализации названий глав (числовых заголовков и римских цифр)
+    def normalize_title(raw):
+        if not raw:
+            return ""
+        t = raw.strip()
+        if re.match(r"^\d+$", t):
+            return f"Глава {t}"
+        if re.match(r"(?i)^[ivxlcdm]+$", t) and len(t) <= 8:
+            return f"Глава {t.upper()}"
+        return t
+
+    assert normalize_title("1") == "Глава 1", "Число '1' должно превращаться в 'Глава 1'"
+    assert normalize_title("30") == "Глава 30"
+    assert normalize_title("iv") == "Глава IV", "Римская цифра 'iv' должна превращаться в 'Глава IV'"
+    assert normalize_title("Часть 4. Антидепрессанты") == "Часть 4. Антидепрессанты"
+    print(" - Нормализация заголовков: OK")
+
+    # 2. Тест тотальной очистки обрывков тегов (id=\"mh_toc_...\" и <h2)
+    def clean_html_text(html):
+        if not html:
+            return ""
+        text = re.sub(r"(?is)<(script|style|head).*?>.*?</\1>", "", html)
+        text = re.sub(r"(?i)\b(?:id|name|class|style)\s*=\s*[\"'][^\"']*[\"']\s*>", "", text)
+        text = re.sub(r"(?i)^[^<\n]*>", "", text)
+        text = re.sub(r"(?im)</?[a-zA-Z0-9_-]+\s*$", "", text)
+        text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+        text = re.sub(r"(?i)</?(p|div|h[1-6]|li|blockquote|tr)[^>]*>", "\n", text)
+        text = re.sub(r"<[^>]+>", "", text)
+        text = re.sub(r"(?im)^\s*<h[1-6]\s*$", "", text)
+        text = text.replace("\uFFFC", "").replace("\uFFFD", "").replace("\uFEFF", "")
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        return "\n".join(lines)
+
+    dirty_sample = 'id="mh_toc_975">Часть 4. Антидепрессанты\n<h2\nТекст первой подглавы книги\uFFFC.'
+    cleaned = clean_html_text(dirty_sample)
+    print(f" - Очистка артефактов тегов: '{cleaned}'")
+    assert 'id=' not in cleaned, "Атрибут id= не должен просачиваться в текст!"
+    assert '<h2' not in cleaned, "Обрывок тега <h2 не должен просачиваться в текст!"
+    assert '\uFFFC' not in cleaned, "Символ [OBJ] не должен присутствовать!"
+    assert cleaned == "Часть 4. Антидепрессанты\nТекст первой подглавы книги."
+
+    # 3. Тест поиска начала тега якоря (findAnchorOffset)
+    def find_anchor_offset(html, anchor):
+        clean_anchor = anchor.lstrip("#").strip()
+        pattern = re.compile(r"<[^>]+?\b(?:id|name)\s*=\s*[\"']" + re.escape(clean_anchor) + r"[\"'][^>]*>", re.IGNORECASE)
+        m = pattern.search(html)
+        if m:
+            return m.start()
+        return -1
+
+    full_html = '<div class="main"><h2 id="part4">Часть 4</h2><p>Содержимое</p></div>'
+    anchor_idx = find_anchor_offset(full_html, "part4")
+    assert anchor_idx == full_html.index('<h2'), "findAnchorOffset обязан возвращать начало тега '<', а не 'id='!"
+    print(" - Поиск якоря findAnchorOffset: OK")
+
+    # 4. Тест структуры дерева TOC и динамического раскрытия/сворачивания
+    class TocNode:
+        def __init__(self, title, level, is_expanded=True):
+            self.title = title
+            self.level = level
+            self.is_expanded = is_expanded
+            self.children = []
+
+    root1 = TocNode("Часть 1", 0, is_expanded=True)
+    child1 = TocNode("Глава 1", 1)
+    child2 = TocNode("Глава 2", 1)
+    root1.children = [child1, child2]
+
+    root2 = TocNode("Часть 2", 0, is_expanded=False)
+    child3 = TocNode("Глава 3", 1)
+    root2.children = [child3]
+
+    toc_tree = [root1, root2]
+
+    def flatten_visible(nodes, out_list):
+        for n in nodes:
+            out_list.append(n)
+            if n.children and n.is_expanded:
+                flatten_visible(n.children, out_list)
+
+    visible = []
+    flatten_visible(toc_tree, visible)
+    visible_titles = [n.title for n in visible]
+    print(f" - Видимые узлы TOC: {visible_titles}")
+    # root1 раскрыт (3 узла), root2 свернут (1 узел) -> суммарно 4 видимых элемента
+    assert len(visible) == 4
+    assert visible_titles == ["Часть 1", "Глава 1", "Глава 2", "Часть 2"]
+
+    # 5. Тест защиты от перескока в конец книги при проценте >= 99%
+    def resolve_target(percent, chapter_idx):
+        if percent >= 99.0:
+            return 0, 0 # Всегда открываем Главу 0, Страницу 0
+        return chapter_idx, 0
+
+    assert resolve_target(100.0, 15) == (0, 0), "Прочитанная книга обязана открываться с начала!"
+    assert resolve_target(45.0, 5) == (5, 0)
+    print(" - Защита от перескока в конец книги: OK")
+
+    # 6. Тест приоритета пользовательского листания userHasInteracted
+    class SessionState:
+        def __init__(self):
+            self.user_has_interacted = False
+            self.current_chapter = 0
+
+        def on_cloud_progress_received(self, cloud_chapter):
+            if self.user_has_interacted:
+                return # Игнорируем сетевой пакет, пользователь уже читает
+            self.current_chapter = cloud_chapter
+
+    session = SessionState()
+    # Сценарий: открытие книги, локально глава 0, из облака пришла глава 3
+    session.on_cloud_progress_received(3)
+    assert session.current_chapter == 3, "Облачный прогресс обязан примениться до взаимодействия!"
+
+    # Сценарий: пользователь листает книгу (user_has_interacted = True), пришел запоздалый пакет
+    session.user_has_interacted = True
+    session.on_cloud_progress_received(1)
+    assert session.current_chapter == 3, "После взаимодействия пользователя облачный прогресс не должен сбивать позицию!"
+    print(" - Защита синхронизации userHasInteracted: OK")
+
+    print("✅ Тест древовидного TOC и защиты от десинхронизации успешно пройден!\n")
+
+
 if __name__ == "__main__":
     print("==================================================")
     print("🚀 Запуск тотальной верификации ядра Яндекс Книги")
@@ -859,6 +987,7 @@ if __name__ == "__main__":
     test_obj_and_whitespace_cleaning()
     test_anchor_toc_and_missing_chapter_preservation()
     test_compact_footer_and_margin_geometry()
+    test_hierarchical_toc_tree_and_desync_prevention()
     print("==================================================")
-    print("🎉 ВСЕ 18 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 19 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

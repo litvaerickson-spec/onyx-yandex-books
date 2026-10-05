@@ -2,29 +2,39 @@ package com.onyx.yandexbooks.core.epub;
 
 import android.util.Log;
 
+import org.xmlpull.v1.XmlPullParser;
+import org.xmlpull.v1.XmlPullParserFactory;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.Serializable;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Stack;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 /**
- * Надежный встроенный парсер EPUB архивов для Android (KitKat 4.4+).
- * Извлекает подлинное оглавление (NCX / NAV), поддерживает якорную нарезку глав и частей (#anchor),
- * гарантирует сохранение всех частей книг (включая части, расположенные в общем spine-файле),
- * нарезает однофайловые книги по заголовкам h1/h2 и полностью очищает артефакты [OBJ].
+ * Высокопроизводительный парсер EPUB архивов для E-Ink ридеров Onyx Boox (Android KitKat 4.4+).
+ *
+ * Ключевые архитектурные принципы:
+ * 1. Сохранение целостности глав из <spine>: файлы книги не кромсаются искусственно,
+ *    что исключает появление обрывков HTML тегов (<h2, id="...") и пустых частей.
+ * 2. Иерархическое дерево оглавления (TocNode): извлекает многоуровневую структуру
+ *    из NCX и NAV, нормализует числовые главы ("1" -> "Глава 1"), связывает разделы
+ *    со spine-главами и точными символьными смещениями charOffset.
+ * 3. Тотальная очистка E-Ink текста: удаляет любые обрывки тегов, атрибутов,
+ *    символы [OBJ] (\uFFFC), BOM (\uFEFF) и нормализует межстрочные интервалы.
  */
 public class EpubParser {
 
@@ -34,16 +44,29 @@ public class EpubParser {
         public String id;
         public String title;
         public String textContent;
+        public String fileHref;
+        public int spineIndex;
     }
 
-    public static class TocItem {
+    public static class TocNode implements Serializable {
+        public String id;
         public String title;
         public String rawHref;     // Полная ссылка (например: text/part1.xhtml#part4)
         public String fileHref;    // Путь к файлу без якоря (например: text/part1.xhtml)
         public String anchor;      // Якорь (например: part4) или null
+        public int level;          // 0 = корневой раздел, 1 = подраздел, 2 = под-подраздел...
+        public int spineIndex;     // Индекс spine-главы в списке глав (0, 1, 2...)
+        public int charOffset;     // Точное символьное смещение в тексте главы (0 если начало)
+        public int pageNumber = 1; // Номер страницы в книге
+        public boolean hasChildren;
+        public boolean isExpanded;
+        public List<TocNode> children = new ArrayList<>();
 
-        public TocItem(String title, String rawHref) {
-            this.title = (title != null) ? title.trim() : "";
+        public TocNode() {}
+
+        public TocNode(String id, String title, String rawHref, int level) {
+            this.id = id;
+            this.title = normalizeTitle(title);
             this.rawHref = (rawHref != null) ? rawHref.trim() : "";
             if (this.rawHref.contains("#")) {
                 int hashIdx = this.rawHref.indexOf('#');
@@ -53,11 +76,35 @@ public class EpubParser {
                 this.fileHref = this.rawHref;
                 this.anchor = null;
             }
+            this.level = level;
+            this.isExpanded = (level == 0); // Раскрыт верхний уровень по умолчанию
+        }
+
+        public static String normalizeTitle(String raw) {
+            if (raw == null) return "";
+            String t = raw.trim();
+            if (t.matches("^\\d+$")) {
+                return "Глава " + t;
+            }
+            if (t.matches("(?i)^[ivxlcdm]+$") && t.length() <= 8) {
+                return "Глава " + t.toUpperCase();
+            }
+            return t;
         }
     }
 
+    public static class ParseResult {
+        public List<ChapterData> chapters = new ArrayList<>();
+        public List<TocNode> tocTree = new ArrayList<>();
+    }
+
     public static List<ChapterData> parseEpub(File epubFile) {
-        List<ChapterData> result = new ArrayList<>();
+        ParseResult result = parseEpubFull(epubFile);
+        return result.chapters;
+    }
+
+    public static ParseResult parseEpubFull(File epubFile) {
+        ParseResult result = new ParseResult();
         if (epubFile == null || !epubFile.exists() || epubFile.length() == 0) {
             Log.e(TAG, "EPUB file does not exist or is empty");
             return result;
@@ -103,31 +150,85 @@ public class EpubParser {
                 chapterHrefs.addAll(allHtml);
             }
 
-            // 3. Извлечение реального оглавления (NCX или EPUB 3 NAV)
-            List<TocItem> tocItems = new ArrayList<>();
+            // 3. Извлечение реального иерархического оглавления (NCX или EPUB 3 NAV)
+            List<TocNode> tocTree = new ArrayList<>();
             if (ncxPathFromOpf != null) {
-                tocItems = parseNcx(zip, ncxPathFromOpf);
+                tocTree = parseNcxTree(zip, ncxPathFromOpf);
             }
-            if (tocItems.isEmpty() && navPathFromOpf != null) {
-                tocItems = parseNav(zip, navPathFromOpf);
+            if (tocTree.isEmpty() && navPathFromOpf != null) {
+                tocTree = parseNavTree(zip, navPathFromOpf);
             }
-            if (tocItems.isEmpty()) {
-                // Поиск любого .ncx файла в архиве
+            if (tocTree.isEmpty()) {
                 String anyNcx = findAnyEntryByExtension(zip, ".ncx");
                 if (anyNcx != null) {
-                    tocItems = parseNcx(zip, anyNcx);
+                    tocTree = parseNcxTree(zip, anyNcx);
                 }
             }
 
-            // 4. Группировка файлов spine по оглавлению TOC (с поддержкой якорей и срезов)
-            if (!tocItems.isEmpty() && !chapterHrefs.isEmpty()) {
-                result = assembleChaptersFromToc(zip, chapterHrefs, tocItems);
+            // Быстрый поиск названия по fileHref из TOC
+            Map<String, String> tocFileTitleMap = new HashMap<>();
+            populateTocTitles(tocTree, tocFileTitleMap);
+
+            // 4. Загрузка глав непосредственно из spine
+            Map<Integer, String> rawHtmlCache = new HashMap<>();
+            List<ChapterData> chapters = new ArrayList<>();
+
+            if (chapterHrefs.size() == 1) {
+                // Если файл книги всего 1 большой HTML: проверяем деление по h1/h2
+                List<ChapterData> byHeadings = splitSingleFileByHeadings(zip, chapterHrefs.get(0));
+                if (byHeadings != null && byHeadings.size() > 1) {
+                    chapters = byHeadings;
+                }
             }
 
-            // 5. Fallback: если по оглавлению собрать не удалось, читаем файлы по порядку
-            if (result.isEmpty() && !chapterHrefs.isEmpty()) {
-                result = assembleChaptersFallback(zip, chapterHrefs);
+            if (chapters.isEmpty()) {
+                int chIndex = 1;
+                for (int s = 0; s < chapterHrefs.size(); s++) {
+                    String href = chapterHrefs.get(s);
+                    String rawHtml = readEntryRawHtml(zip, href);
+                    if (rawHtml == null) rawHtml = "";
+                    rawHtmlCache.put(s, rawHtml);
+
+                    String cleanText = cleanHtmlText(rawHtml);
+
+                    ChapterData cd = new ChapterData();
+                    cd.id = "ch_" + chIndex;
+                    cd.fileHref = href;
+                    cd.spineIndex = s;
+                    cd.textContent = cleanText;
+
+                    // Название главы
+                    String title = tocFileTitleMap.get(href);
+                    if (title == null) {
+                        String fname = href.contains("/") ? href.substring(href.lastIndexOf('/') + 1) : href;
+                        title = tocFileTitleMap.get(fname);
+                    }
+                    if (title == null || title.isEmpty()) {
+                        title = extractTitle(rawHtml, "Глава " + chIndex);
+                    }
+                    cd.title = TocNode.normalizeTitle(title);
+
+                    chapters.add(cd);
+                    chIndex++;
+                }
             }
+
+            // 5. Если оглавление TOC было пустым, генерируем базовое оглавление из глав
+            if (tocTree.isEmpty()) {
+                for (int i = 0; i < chapters.size(); i++) {
+                    ChapterData cd = chapters.get(i);
+                    TocNode node = new TocNode("toc_" + (i + 1), cd.title, cd.fileHref, 0);
+                    node.spineIndex = i;
+                    node.charOffset = 0;
+                    tocTree.add(node);
+                }
+            } else {
+                // Связываем дерево TOC со сформированными главами и символьными смещениями charOffset
+                resolveNodeOffsets(tocTree, chapters, chapterHrefs, rawHtmlCache);
+            }
+
+            result.chapters = chapters;
+            result.tocTree = tocTree;
 
         } catch (Throwable e) {
             Log.e(TAG, "Error parsing EPUB: " + epubFile.getAbsolutePath(), e);
@@ -142,190 +243,113 @@ public class EpubParser {
         return result;
     }
 
-    /**
-     * Сборка глав на основе оглавления TOC с полной поддержкой якорных переходов (#anchor).
-     * Корректно разделяет главы и части, расположенные в одном HTML-файле,
-     * объединяет связанные файлы spine и гарантирует, что ни одна часть (например, Часть 4) не потеряется.
-     */
-    private static List<ChapterData> assembleChaptersFromToc(ZipFile zip, List<String> spineHrefs, List<TocItem> tocItems) {
-        List<ChapterData> chapters = new ArrayList<>();
-
-        class TocSpinePoint {
-            TocItem item;
-            int spineIndex;
-            int offsetInFile = -1;
-            int originalOrder;
-
-            TocSpinePoint(TocItem item, int spineIndex, int originalOrder) {
-                this.item = item;
-                this.spineIndex = spineIndex;
-                this.originalOrder = originalOrder;
-            }
-        }
-
-        List<TocSpinePoint> matched = new ArrayList<>();
-        for (int i = 0; i < tocItems.size(); i++) {
-            TocItem ti = tocItems.get(i);
-            int idx = findSpineIndex(spineHrefs, ti.fileHref);
-            if (idx < 0 && ti.rawHref != null) {
-                idx = findSpineIndex(spineHrefs, ti.rawHref);
-            }
-            if (idx >= 0) {
-                matched.add(new TocSpinePoint(ti, idx, i));
-            }
-        }
-
-        if (matched.isEmpty()) {
-            return chapters;
-        }
-
-        // Если в оглавлении всего 1 элемент:
-        if (matched.size() <= 1) {
-            // Если файлов spine несколько, нарезаем по файлам
-            if (spineHrefs.size() > 1) {
-                return assembleChaptersFallback(zip, spineHrefs);
-            }
-            // Если и spine всего 1, пробуем нарезать по заголовкам h1/h2
-            List<ChapterData> byHeadings = splitSingleFileByHeadings(zip, spineHrefs.get(0));
-            if (byHeadings != null && byHeadings.size() > 1) {
-                return byHeadings;
-            }
-        }
-
-        // Читаем сырой HTML и находим смещения якорей/заголовков для каждого элемента
-        Map<Integer, String> spineHtmlCache = new HashMap<>();
-        for (TocSpinePoint pt : matched) {
-            String rawHtml = spineHtmlCache.get(pt.spineIndex);
-            if (rawHtml == null) {
-                rawHtml = readEntryRawHtml(zip, spineHrefs.get(pt.spineIndex));
-                if (rawHtml == null) rawHtml = "";
-                spineHtmlCache.put(pt.spineIndex, rawHtml);
-            }
-
-            int offset = -1;
-            if (pt.item.anchor != null) {
-                offset = findAnchorOffset(rawHtml, pt.item.anchor);
-            }
-            if (offset < 0 && pt.item.title != null) {
-                offset = findHeadingByTitleOffset(rawHtml, pt.item.title);
-            }
-            pt.offsetInFile = offset;
-        }
-
-        // Для каждого spine-файла упорядочиваем элементы по смещению, если смещения найдены
-        Collections.sort(matched, new Comparator<TocSpinePoint>() {
-            @Override
-            public int compare(TocSpinePoint a, TocSpinePoint b) {
-                if (a.spineIndex != b.spineIndex) {
-                    return Integer.compare(a.spineIndex, b.spineIndex);
+    private static void populateTocTitles(List<TocNode> nodes, Map<String, String> outMap) {
+        if (nodes == null) return;
+        for (TocNode n : nodes) {
+            if (n.fileHref != null && !n.fileHref.isEmpty() && n.title != null && !n.title.isEmpty()) {
+                if (!outMap.containsKey(n.fileHref)) {
+                    outMap.put(n.fileHref, n.title);
                 }
-                if (a.offsetInFile >= 0 && b.offsetInFile >= 0) {
-                    return Integer.compare(a.offsetInFile, b.offsetInFile);
-                }
-                return Integer.compare(a.originalOrder, b.originalOrder);
-            }
-        });
-
-        // 1. Фронт-материалы до первой главы TOC (титульный лист, выходные данные)
-        TocSpinePoint first = matched.get(0);
-        StringBuilder frontSb = new StringBuilder();
-        for (int s = 0; s < first.spineIndex; s++) {
-            String text = readEntryText(zip, spineHrefs.get(s));
-            if (text != null && !text.trim().isEmpty()) {
-                if (frontSb.length() > 0) frontSb.append("\n\n");
-                frontSb.append(text.trim());
-            }
-        }
-        if (first.offsetInFile > 300) {
-            String firstFileHtml = spineHtmlCache.get(first.spineIndex);
-            if (firstFileHtml != null && first.offsetInFile <= firstFileHtml.length()) {
-                String leading = cleanHtmlText(firstFileHtml.substring(0, first.offsetInFile));
-                if (leading.length() > 40) {
-                    if (frontSb.length() > 0) frontSb.append("\n\n");
-                    frontSb.append(leading);
+                String fname = n.fileHref.contains("/") ? n.fileHref.substring(n.fileHref.lastIndexOf('/') + 1) : n.fileHref;
+                if (!outMap.containsKey(fname)) {
+                    outMap.put(fname, n.title);
                 }
             }
-        }
-        if (frontSb.length() > 30) {
-            ChapterData cd = new ChapterData();
-            cd.id = "ch_0";
-            cd.title = "Начало книги";
-            cd.textContent = frontSb.toString();
-            chapters.add(cd);
-        }
-
-        // 2. Сборка каждой главы с точными границами
-        for (int m = 0; m < matched.size(); m++) {
-            TocSpinePoint cur = matched.get(m);
-            int startSpine = cur.spineIndex;
-            int startOffset = Math.max(0, cur.offsetInFile);
-
-            int endSpine;
-            int endOffset;
-            if (m + 1 < matched.size()) {
-                TocSpinePoint next = matched.get(m + 1);
-                endSpine = next.spineIndex;
-                endOffset = next.offsetInFile;
-            } else {
-                endSpine = spineHrefs.size() - 1;
-                endOffset = -1;
+            if (n.children != null && !n.children.isEmpty()) {
+                populateTocTitles(n.children, outMap);
             }
+        }
+    }
 
-            StringBuilder chSb = new StringBuilder();
+    private static void resolveNodeOffsets(List<TocNode> nodes, List<ChapterData> chapters, List<String> spineHrefs, Map<Integer, String> rawHtmlCache) {
+        if (nodes == null || chapters == null || chapters.isEmpty()) return;
 
-            for (int s = startSpine; s <= endSpine; s++) {
-                if (s < 0 || s >= spineHrefs.size()) continue;
+        for (TocNode node : nodes) {
+            int matchedChapter = -1;
 
-                String fileHtml = spineHtmlCache.get(s);
-                if (fileHtml == null) {
-                    fileHtml = readEntryRawHtml(zip, spineHrefs.get(s));
-                    if (fileHtml == null) fileHtml = "";
-                    spineHtmlCache.put(s, fileHtml);
-                }
-
-                int from = (s == startSpine) ? startOffset : 0;
-                int to;
-                if (s == endSpine && endOffset >= 0 && endOffset <= fileHtml.length()) {
-                    to = endOffset;
-                } else {
-                    to = fileHtml.length();
-                }
-
-                if (from < to && to <= fileHtml.length()) {
-                    String slice = fileHtml.substring(from, to);
-                    String clean = cleanHtmlText(slice);
-                    if (!clean.isEmpty()) {
-                        if (chSb.length() > 0) chSb.append("\n\n");
-                        chSb.append(clean);
+            // 1. Поиск прямого соответствия с главами
+            if (node.fileHref != null && !node.fileHref.isEmpty()) {
+                for (int i = 0; i < chapters.size(); i++) {
+                    ChapterData cd = chapters.get(i);
+                    if (cd.fileHref != null && hrefsMatch(cd.fileHref, node.fileHref)) {
+                        matchedChapter = i;
+                        break;
                     }
                 }
             }
 
-            String fullText = chSb.toString().trim();
-            // Если текст пуст (например, якорь стоял в самом конце файла), пробуем взять целый файл
-            if (fullText.isEmpty()) {
-                String fallbackText = readEntryText(zip, spineHrefs.get(startSpine));
-                if (fallbackText != null) fullText = fallbackText.trim();
+            // 2. Поиск по rawHref
+            if (matchedChapter < 0 && node.rawHref != null && !node.rawHref.isEmpty()) {
+                for (int i = 0; i < chapters.size(); i++) {
+                    ChapterData cd = chapters.get(i);
+                    if (cd.fileHref != null && hrefsMatch(cd.fileHref, node.rawHref)) {
+                        matchedChapter = i;
+                        break;
+                    }
+                }
             }
 
-            if (!fullText.isEmpty()) {
-                ChapterData cd = new ChapterData();
-                cd.id = "ch_" + (chapters.size() + 1);
-                String title = cur.item.title;
-                if (title == null || title.trim().isEmpty()) {
-                    title = "Глава " + (chapters.size() + 1);
+            // 3. Fallback: поиск по оригинальным spineHrefs
+            if (matchedChapter < 0) {
+                int spineIdx = findSpineIndex(spineHrefs, node.fileHref);
+                if (spineIdx >= 0) {
+                    String targetHref = spineHrefs.get(spineIdx);
+                    for (int i = 0; i < chapters.size(); i++) {
+                        if (hrefsMatch(chapters.get(i).fileHref, targetHref)) {
+                            matchedChapter = i;
+                            break;
+                        }
+                    }
                 }
-                cd.title = title.trim();
-                cd.textContent = fullText;
-                chapters.add(cd);
+            }
+
+            if (matchedChapter < 0) {
+                matchedChapter = 0;
+            }
+
+            node.spineIndex = matchedChapter;
+
+            // Расчет точного символьного смещения якоря charOffset
+            if (node.anchor != null && !node.anchor.isEmpty()) {
+                int spineFileIndex = findSpineIndex(spineHrefs, node.fileHref);
+                String rawHtml = (spineFileIndex >= 0) ? rawHtmlCache.get(spineFileIndex) : null;
+                if (rawHtml != null) {
+                    int anchorTagStart = findAnchorOffset(rawHtml, node.anchor);
+                    if (anchorTagStart > 0 && anchorTagStart < rawHtml.length()) {
+                        String leadingText = cleanHtmlText(rawHtml.substring(0, anchorTagStart));
+                        node.charOffset = leadingText.length();
+                    } else {
+                        node.charOffset = 0;
+                    }
+                } else {
+                    node.charOffset = 0;
+                }
+            } else {
+                node.charOffset = 0;
+            }
+
+            node.hasChildren = (node.children != null && !node.children.isEmpty());
+
+            if (node.children != null && !node.children.isEmpty()) {
+                resolveNodeOffsets(node.children, chapters, spineHrefs, rawHtmlCache);
             }
         }
+    }
 
-        return chapters;
+    private static boolean hrefsMatch(String a, String b) {
+        if (a == null || b == null) return false;
+        String ca = a.contains("#") ? a.substring(0, a.indexOf('#')).trim() : a.trim();
+        String cb = b.contains("#") ? b.substring(0, b.indexOf('#')).trim() : b.trim();
+        if (ca.equalsIgnoreCase(cb) || ca.endsWith("/" + cb) || cb.endsWith("/" + ca)) {
+            return true;
+        }
+        String fa = ca.contains("/") ? ca.substring(ca.lastIndexOf('/') + 1) : ca;
+        String fb = cb.contains("/") ? cb.substring(cb.lastIndexOf('/') + 1) : cb;
+        return fa.equalsIgnoreCase(fb);
     }
 
     /**
-     * Разделение единого большого XHTML-файла по тегам h1/h2 для книг без детального TOC.
+     * Разделение единого большого XHTML-файла по тегам h1/h2 для книг без детального spine.
      */
     private static List<ChapterData> splitSingleFileByHeadings(ZipFile zip, String href) {
         List<ChapterData> list = new ArrayList<>();
@@ -358,6 +382,7 @@ public class EpubParser {
                 if (front.length() > 30) {
                     ChapterData cd0 = new ChapterData();
                     cd0.id = "ch_0";
+                    cd0.fileHref = href;
                     cd0.title = "Начало книги";
                     cd0.textContent = front;
                     list.add(cd0);
@@ -372,7 +397,8 @@ public class EpubParser {
                 if (clean.length() > 10) {
                     ChapterData cd = new ChapterData();
                     cd.id = "ch_" + (list.size() + 1);
-                    cd.title = headings.get(i).title;
+                    cd.fileHref = href;
+                    cd.title = TocNode.normalizeTitle(headings.get(i).title);
                     cd.textContent = clean;
                     list.add(cd);
                 }
@@ -381,24 +407,10 @@ public class EpubParser {
         return list;
     }
 
-    private static List<ChapterData> assembleChaptersFallback(ZipFile zip, List<String> chapterHrefs) {
-        List<ChapterData> result = new ArrayList<>();
-        int chapterIndex = 1;
-        for (String href : chapterHrefs) {
-            String cleanText = readEntryText(zip, href);
-            if (cleanText != null && cleanText.trim().length() > 20) {
-                String rawHtml = readEntryRawHtml(zip, href);
-                ChapterData ch = new ChapterData();
-                ch.id = "ch_" + chapterIndex;
-                ch.title = extractTitle(rawHtml, "Глава " + chapterIndex);
-                ch.textContent = cleanText;
-                result.add(ch);
-                chapterIndex++;
-            }
-        }
-        return result;
-    }
-
+    /**
+     * Поиск начала открывающего тега <...>, содержащего id="anchor" или name="anchor".
+     * Гарантирует возврат индекса '<', исключая разрыв тега наполовину.
+     */
     public static int findAnchorOffset(String html, String anchor) {
         if (html == null || anchor == null || anchor.trim().isEmpty()) return -1;
         String cleanAnchor = anchor.trim();
@@ -407,46 +419,29 @@ public class EpubParser {
         }
         if (cleanAnchor.isEmpty()) return -1;
 
-        // 1. Поиск id="anchor" или name="anchor" с кавычками
-        Pattern p = Pattern.compile("(?:id|name)\\s*=\\s*[\"']" + Pattern.quote(cleanAnchor) + "[\"']", Pattern.CASE_INSENSITIVE);
+        // 1. Поиск открывающего тега с id="anchor" или name="anchor"
+        Pattern p = Pattern.compile("<[^>]+?\\b(?:id|name)\\s*=\\s*[\"']" + Pattern.quote(cleanAnchor) + "[\"'][^>]*>", Pattern.CASE_INSENSITIVE);
         Matcher m = p.matcher(html);
         if (m.find()) {
-            return m.start();
+            return m.start(); // Начало тега '<'
         }
 
         // 2. Поиск без кавычек
-        Pattern p2 = Pattern.compile("(?:id|name)\\s*=\\s*" + Pattern.quote(cleanAnchor) + "([\\s>]|$)", Pattern.CASE_INSENSITIVE);
+        Pattern p2 = Pattern.compile("<[^>]+?\\b(?:id|name)\\s*=\\s*" + Pattern.quote(cleanAnchor) + "([\\s>][^>]*)?>", Pattern.CASE_INSENSITIVE);
         Matcher m2 = p2.matcher(html);
         if (m2.find()) {
             return m2.start();
         }
 
-        // 3. Прямое строковое вхождение
+        // 3. Fallback: поиск строки в кавычках и предшествующего символа '<'
         int idx = html.indexOf("\"" + cleanAnchor + "\"");
-        if (idx >= 0) return idx;
-
-        idx = html.indexOf("'" + cleanAnchor + "'");
-        if (idx >= 0) return idx;
+        if (idx < 0) idx = html.indexOf("'" + cleanAnchor + "'");
+        if (idx >= 0) {
+            int tagStart = html.lastIndexOf('<', idx);
+            return (tagStart >= 0) ? tagStart : idx;
+        }
 
         return -1;
-    }
-
-    public static int findHeadingByTitleOffset(String html, String title) {
-        if (html == null || title == null || title.trim().isEmpty()) return -1;
-        String cleanTitle = title.trim();
-        if (cleanTitle.length() < 3) return -1;
-
-        String search = cleanTitle;
-        if (search.length() > 30) {
-            search = search.substring(0, 30);
-        }
-        Pattern p = Pattern.compile("<(?:h[1-6]|p|div)[^>]*>\\s*[^<]*?" + Pattern.quote(search), Pattern.CASE_INSENSITIVE);
-        Matcher m = p.matcher(html);
-        if (m.find()) {
-            return m.start();
-        }
-
-        return html.indexOf(search);
     }
 
     private static String readEntryRawHtml(ZipFile zip, String href) {
@@ -457,12 +452,6 @@ public class EpubParser {
         } catch (Exception e) {
             return null;
         }
-    }
-
-    private static String readEntryText(ZipFile zip, String href) {
-        String raw = readEntryRawHtml(zip, href);
-        if (raw == null) return null;
-        return cleanHtmlText(raw);
     }
 
     private static int findSpineIndex(List<String> spineHrefs, String targetHref) {
@@ -590,10 +579,13 @@ public class EpubParser {
         return null;
     }
 
-    private static List<TocItem> parseNcx(ZipFile zip, String ncxPath) {
-        List<TocItem> result = new ArrayList<>();
+    /**
+     * Построение подлинного иерархического дерева оглавления из NCX (DAISY).
+     */
+    private static List<TocNode> parseNcxTree(ZipFile zip, String ncxPath) {
+        List<TocNode> roots = new ArrayList<>();
         ZipEntry entry = findZipEntry(zip, ncxPath);
-        if (entry == null) return result;
+        if (entry == null) return roots;
 
         String ncxBaseDir = "";
         if (ncxPath.contains("/")) {
@@ -601,36 +593,93 @@ public class EpubParser {
         }
 
         try (InputStream is = zip.getInputStream(entry)) {
-            String xml = readStreamToString(is);
-            Pattern pattern = Pattern.compile(
-                    "<navLabel[^>]*>\\s*<text[^>]*>(.*?)</text>\\s*</navLabel>\\s*<content\\s+[^>]*?src\\s*=\\s*[\"']([^\"']+)[\"']",
-                    Pattern.DOTALL | Pattern.CASE_INSENSITIVE
-            );
-            Matcher matcher = pattern.matcher(xml);
+            XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
+            factory.setNamespaceAware(false);
+            XmlPullParser parser = factory.newPullParser();
+            parser.setInput(is, "UTF-8");
 
-            while (matcher.find()) {
-                String rawTitle = matcher.group(1);
-                String cleanTitle = cleanHtmlText(rawTitle).replaceAll("\\s+", " ").trim();
-                String src = matcher.group(2).trim();
-                try {
-                    src = URLDecoder.decode(src, "UTF-8");
-                } catch (Exception ignored) {}
+            Stack<TocNode> stack = new Stack<>();
+            int eventType = parser.getEventType();
+            String currentTag = "";
+            StringBuilder textBuffer = new StringBuilder();
 
-                String fullSrc = ncxBaseDir.isEmpty() ? src : (ncxBaseDir + src);
-                if (!cleanTitle.isEmpty() && !src.isEmpty()) {
-                    result.add(new TocItem(cleanTitle, fullSrc));
+            while (eventType != XmlPullParser.END_DOCUMENT) {
+                String name = parser.getName();
+                if (eventType == XmlPullParser.START_TAG) {
+                    currentTag = name;
+                    if ("navPoint".equalsIgnoreCase(name)) {
+                        String id = parser.getAttributeValue(null, "id");
+                        int level = stack.size();
+                        TocNode node = new TocNode();
+                        node.id = (id != null) ? id : ("np_" + (roots.size() + 1));
+                        node.level = level;
+                        node.isExpanded = (level == 0);
+                        stack.push(node);
+                    } else if ("content".equalsIgnoreCase(name)) {
+                        if (!stack.isEmpty()) {
+                            String src = parser.getAttributeValue(null, "src");
+                            if (src != null) {
+                                try {
+                                    src = URLDecoder.decode(src, "UTF-8");
+                                } catch (Exception ignored) {}
+                                String fullSrc = ncxBaseDir.isEmpty() ? src : (ncxBaseDir + src);
+                                TocNode top = stack.peek();
+                                top.rawHref = fullSrc;
+                                if (fullSrc.contains("#")) {
+                                    int hash = fullSrc.indexOf('#');
+                                    top.fileHref = fullSrc.substring(0, hash).trim();
+                                    top.anchor = fullSrc.substring(hash + 1).trim();
+                                } else {
+                                    top.fileHref = fullSrc.trim();
+                                    top.anchor = null;
+                                }
+                            }
+                        }
+                    } else if ("text".equalsIgnoreCase(name)) {
+                        textBuffer.setLength(0);
+                    }
+                } else if (eventType == XmlPullParser.TEXT) {
+                    if ("text".equalsIgnoreCase(currentTag)) {
+                        textBuffer.append(parser.getText());
+                    }
+                } else if (eventType == XmlPullParser.END_TAG) {
+                    if ("text".equalsIgnoreCase(name)) {
+                        if (!stack.isEmpty()) {
+                            String clean = cleanHtmlText(textBuffer.toString()).replaceAll("\\s+", " ").trim();
+                            stack.peek().title = TocNode.normalizeTitle(clean);
+                        }
+                    } else if ("navPoint".equalsIgnoreCase(name)) {
+                        if (!stack.isEmpty()) {
+                            TocNode finished = stack.pop();
+                            finished.hasChildren = (finished.children != null && !finished.children.isEmpty());
+                            if (finished.title == null || finished.title.isEmpty()) {
+                                finished.title = "Глава";
+                            }
+                            if (stack.isEmpty()) {
+                                roots.add(finished);
+                            } else {
+                                stack.peek().children.add(finished);
+                                stack.peek().hasChildren = true;
+                            }
+                        }
+                    }
+                    currentTag = "";
                 }
+                eventType = parser.next();
             }
-        } catch (Exception e) {
-            Log.w(TAG, "Failed to parse NCX TOC", e);
+        } catch (Throwable e) {
+            Log.w(TAG, "Failed to parse NCX tree", e);
         }
-        return result;
+        return roots;
     }
 
-    private static List<TocItem> parseNav(ZipFile zip, String navPath) {
-        List<TocItem> result = new ArrayList<>();
+    /**
+     * Построение подлинного иерархического дерева оглавления из NAV (EPUB 3).
+     */
+    private static List<TocNode> parseNavTree(ZipFile zip, String navPath) {
+        List<TocNode> roots = new ArrayList<>();
         ZipEntry entry = findZipEntry(zip, navPath);
-        if (entry == null) return result;
+        if (entry == null) return roots;
 
         String navBaseDir = "";
         if (navPath.contains("/")) {
@@ -638,30 +687,79 @@ public class EpubParser {
         }
 
         try (InputStream is = zip.getInputStream(entry)) {
-            String html = readStreamToString(is);
-            Pattern navBlockPattern = Pattern.compile("<nav[^>]*?\\b(toc)\\b[^>]*>(.*?)</nav>", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
-            Matcher blockMatcher = navBlockPattern.matcher(html);
-            String searchHtml = blockMatcher.find() ? blockMatcher.group(2) : html;
+            XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
+            factory.setNamespaceAware(false);
+            XmlPullParser parser = factory.newPullParser();
+            parser.setInput(is, "UTF-8");
 
-            Pattern pattern = Pattern.compile("<a\\s+[^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*>(.*?)</a>", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
-            Matcher matcher = pattern.matcher(searchHtml);
+            Stack<TocNode> stack = new Stack<>();
+            int eventType = parser.getEventType();
+            String currentTag = "";
+            StringBuilder textBuffer = new StringBuilder();
+            TocNode currentNode = null;
 
-            while (matcher.find()) {
-                String src = matcher.group(1).trim();
-                try {
-                    src = URLDecoder.decode(src, "UTF-8");
-                } catch (Exception ignored) {}
-                String rawTitle = matcher.group(2);
-                String cleanTitle = cleanHtmlText(rawTitle).replaceAll("\\s+", " ").trim();
-                String fullSrc = navBaseDir.isEmpty() ? src : (navBaseDir + src);
-                if (!cleanTitle.isEmpty() && !src.isEmpty()) {
-                    result.add(new TocItem(cleanTitle, fullSrc));
+            while (eventType != XmlPullParser.END_DOCUMENT) {
+                String name = parser.getName();
+                if (eventType == XmlPullParser.START_TAG) {
+                    currentTag = name;
+                    if ("ol".equalsIgnoreCase(name)) {
+                        if (currentNode != null) {
+                            stack.push(currentNode);
+                            currentNode = null;
+                        }
+                    } else if ("a".equalsIgnoreCase(name)) {
+                        String href = parser.getAttributeValue(null, "href");
+                        int level = stack.size();
+                        currentNode = new TocNode();
+                        currentNode.level = level;
+                        currentNode.isExpanded = (level == 0);
+                        if (href != null) {
+                            try {
+                                href = URLDecoder.decode(href, "UTF-8");
+                            } catch (Exception ignored) {}
+                            String fullSrc = navBaseDir.isEmpty() ? href : (navBaseDir + href);
+                            currentNode.rawHref = fullSrc;
+                            if (fullSrc.contains("#")) {
+                                int hash = fullSrc.indexOf('#');
+                                currentNode.fileHref = fullSrc.substring(0, hash).trim();
+                                currentNode.anchor = fullSrc.substring(hash + 1).trim();
+                            } else {
+                                currentNode.fileHref = fullSrc.trim();
+                                currentNode.anchor = null;
+                            }
+                        }
+                        textBuffer.setLength(0);
+                    }
+                } else if (eventType == XmlPullParser.TEXT) {
+                    if ("a".equalsIgnoreCase(currentTag)) {
+                        textBuffer.append(parser.getText());
+                    }
+                } else if (eventType == XmlPullParser.END_TAG) {
+                    if ("a".equalsIgnoreCase(name)) {
+                        if (currentNode != null) {
+                            String clean = cleanHtmlText(textBuffer.toString()).replaceAll("\\s+", " ").trim();
+                            currentNode.title = TocNode.normalizeTitle(clean);
+                            if (currentNode.title.isEmpty()) currentNode.title = "Глава";
+                            if (stack.isEmpty()) {
+                                roots.add(currentNode);
+                            } else {
+                                stack.peek().children.add(currentNode);
+                                stack.peek().hasChildren = true;
+                            }
+                        }
+                    } else if ("ol".equalsIgnoreCase(name)) {
+                        if (!stack.isEmpty()) {
+                            stack.pop();
+                        }
+                    }
+                    currentTag = "";
                 }
+                eventType = parser.next();
             }
-        } catch (Exception e) {
-            Log.w(TAG, "Failed to parse NAV TOC", e);
+        } catch (Throwable e) {
+            Log.w(TAG, "Failed to parse NAV tree", e);
         }
-        return result;
+        return roots;
     }
 
     private static String findAnyEntryByExtension(ZipFile zip, String ext) {
@@ -723,6 +821,7 @@ public class EpubParser {
     /**
      * Высокопроизводительный очиститель HTML для E-Ink ридеров:
      * - Исключает появление символов [OBJ] (\uFFFC) и битых глифов (\uFFFD, \uFEFF)
+     * - Исключает просачивание любых обрывков тегов и атрибутов (id="...", <h1, <h2)
      * - Формирует нормальное книжное расстояние между абзацами
      * - Сохраняет пропуск одной строки только для явных смысловых разделителей автора
      */
@@ -732,18 +831,30 @@ public class EpubParser {
             // 1. Удаление <head>, <style>, <script>
             String text = html.replaceAll("(?is)<(script|style|head).*?>.*?</\\1>", "");
 
-            // 2. Маркировка явных смысловых разделителей секций
+            // 2. Тотальное удаление любых обрывков атрибутов, заканчивающихся на '>' (например, id="mh_toc_975">)
+            text = text.replaceAll("(?i)\\b(?:id|name|class|style)\\s*=\\s*[\"'][^\"']*[\"']\\s*>", "");
+
+            // 3. Удаление начальных обрывков тегов без открывающей скобки (например, ^text">)
+            text = text.replaceAll("(?i)^[^<\\n]*>", "");
+
+            // 4. Удаление концевых незакрытых тегов (например, <h1, <h2, </div в конце строки)
+            text = text.replaceAll("(?im)</?[a-zA-Z0-9_-]+\\s*$", "");
+
+            // 5. Маркировка явных смысловых разделителей секций
             text = text.replaceAll("(?i)<hr\\s*/?>", "\n___SECTION_BREAK___\n");
             text = text.replaceAll("(?i)<p[^>]*>(\\s*|&nbsp;|<br\\s*/?>|\\*\\s*\\*\\s*\\*)</p>", "\n___SECTION_BREAK___\n");
 
-            // 3. Замена тегов переноса строк и закрытия структурных блоков на единичный \n
+            // 6. Замена тегов переноса строк и закрытия структурных блоков на единичный \n
             text = text.replaceAll("(?i)<br\\s*/?>", "\n");
             text = text.replaceAll("(?i)</?(p|div|h[1-6]|li|blockquote|tr)[^>]*>", "\n");
 
-            // 4. Удаление всех остальных тегов (включая <img>, <span>, <i>, <b> и др.)
+            // 7. Удаление всех остальных тегов (включая <img>, <span>, <i>, <b> и др.)
             text = text.replaceAll("<[^>]+>", "");
 
-            // 5. Тотальное удаление некорректных символов [OBJ], BOM, мягких переносов и непечатных кодов
+            // 8. Удаление отдельно стоящих обрывков тегов заголовков на своих строках
+            text = text.replaceAll("(?im)^\\s*<h[1-6]\\s*$", "");
+
+            // 9. Тотальное удаление некорректных символов [OBJ], BOM, мягких переносов и непечатных кодов
             text = text.replace("\uFFFC", ""); // Object Replacement Character ([OBJ])
             text = text.replace("\uFFFD", ""); // Unicode Replacement Character
             text = text.replace("\uFEFF", ""); // Byte Order Mark
@@ -752,7 +863,7 @@ public class EpubParser {
             text = text.replace("\u200D", ""); // Zero-width joiner
             text = text.replace("\u00AD", ""); // Soft hyphen
 
-            // 6. Декодирование типографических сущностей HTML
+            // 10. Декодирование типографических сущностей HTML
             text = text.replace("&nbsp;", " ");
             text = text.replace("&laquo;", "«");
             text = text.replace("&raquo;", "»");
@@ -770,7 +881,7 @@ public class EpubParser {
                 text = decodeNumericEntities(text);
             }
 
-            // 7. Построчная сборка текста
+            // 11. Построчная сборка текста с аккуратными книжными межстрочными отступами
             String[] lines = text.split("\n");
             StringBuilder result = new StringBuilder(text.length());
             boolean allowEmptyLine = false;

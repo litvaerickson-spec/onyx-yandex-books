@@ -9,6 +9,9 @@ import com.onyx.yandexbooks.core.api.YandexBooksApiClient;
 import com.onyx.yandexbooks.core.api.models.Chapter;
 import com.onyx.yandexbooks.core.epub.EpubParser;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -69,6 +72,109 @@ public class CacheManager {
             bDir.mkdirs();
         }
         return new File(bDir, "ch_" + chapterId + ".txt");
+    }
+
+    public File getTocFile(String bookUuid) {
+        File bDir = new File(booksDir, bookUuid);
+        if (!bDir.exists()) {
+            bDir.mkdirs();
+        }
+        return new File(bDir, "toc.json");
+    }
+
+    public void saveTocTree(String bookUuid, List<EpubParser.TocNode> tocTree) {
+        if (tocTree == null) return;
+        try {
+            JSONArray arr = new JSONArray();
+            for (EpubParser.TocNode node : tocTree) {
+                arr.put(tocNodeToJson(node));
+            }
+            File file = getTocFile(bookUuid);
+            try (FileOutputStream fos = new FileOutputStream(file);
+                 OutputStreamWriter writer = new OutputStreamWriter(fos, StandardCharsets.UTF_8)) {
+                writer.write(arr.toString());
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving TOC tree", e);
+        }
+    }
+
+    public List<EpubParser.TocNode> loadTocTree(String bookUuid) {
+        File file = getTocFile(bookUuid);
+        if (!file.exists()) return null;
+        try (FileInputStream fis = new FileInputStream(file);
+             BufferedReader reader = new BufferedReader(new InputStreamReader(fis, StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+            JSONArray arr = new JSONArray(sb.toString());
+            List<EpubParser.TocNode> list = new ArrayList<>();
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject obj = arr.optJSONObject(i);
+                if (obj != null) {
+                    list.add(tocNodeFromJson(obj));
+                }
+            }
+            return list;
+        } catch (Exception e) {
+            Log.e(TAG, "Error loading TOC tree", e);
+            return null;
+        }
+    }
+
+    private JSONObject tocNodeToJson(EpubParser.TocNode node) {
+        JSONObject obj = new JSONObject();
+        try {
+            obj.put("id", node.id != null ? node.id : "");
+            obj.put("title", node.title != null ? node.title : "");
+            obj.put("rawHref", node.rawHref != null ? node.rawHref : "");
+            obj.put("fileHref", node.fileHref != null ? node.fileHref : "");
+            obj.put("anchor", node.anchor != null ? node.anchor : "");
+            obj.put("level", node.level);
+            obj.put("spineIndex", node.spineIndex);
+            obj.put("charOffset", node.charOffset);
+            obj.put("pageNumber", node.pageNumber);
+            obj.put("hasChildren", node.hasChildren);
+            if (node.children != null && !node.children.isEmpty()) {
+                JSONArray arr = new JSONArray();
+                for (EpubParser.TocNode child : node.children) {
+                    arr.put(tocNodeToJson(child));
+                }
+                obj.put("children", arr);
+            }
+        } catch (Exception ignored) {}
+        return obj;
+    }
+
+    private EpubParser.TocNode tocNodeFromJson(JSONObject obj) {
+        EpubParser.TocNode node = new EpubParser.TocNode();
+        node.id = obj.optString("id", "");
+        node.title = obj.optString("title", "");
+        node.rawHref = obj.optString("rawHref", "");
+        node.fileHref = obj.optString("fileHref", "");
+        node.anchor = obj.optString("anchor", null);
+        if ("".equals(node.anchor) || "null".equals(node.anchor)) node.anchor = null;
+        node.level = obj.optInt("level", 0);
+        node.spineIndex = obj.optInt("spineIndex", 0);
+        node.charOffset = obj.optInt("charOffset", 0);
+        node.pageNumber = obj.optInt("pageNumber", 1);
+        node.hasChildren = obj.optBoolean("hasChildren", false);
+        node.isExpanded = (node.level == 0);
+        JSONArray arr = obj.optJSONArray("children");
+        if (arr != null) {
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject cObj = arr.optJSONObject(i);
+                if (cObj != null) {
+                    node.children.add(tocNodeFromJson(cObj));
+                }
+            }
+            if (!node.children.isEmpty()) {
+                node.hasChildren = true;
+            }
+        }
+        return node;
     }
 
     public long getChapterLength(String bookUuid, String chapterId) {
@@ -138,14 +244,16 @@ public class CacheManager {
                     @Override
                     protected List<Chapter> doInBackground(Void... voids) {
                         try {
-                            List<EpubParser.ChapterData> parsed = EpubParser.parseEpub(downloadedFile);
-                            if (parsed.isEmpty()) {
+                            EpubParser.ParseResult parsed = EpubParser.parseEpubFull(downloadedFile);
+                            if (parsed == null || parsed.chapters.isEmpty()) {
                                 return null;
                             }
 
+                            saveTocTree(bookUuid, parsed.tocTree);
+
                             List<Chapter> chapters = new ArrayList<>();
-                            for (int i = 0; i < parsed.size(); i++) {
-                                EpubParser.ChapterData cd = parsed.get(i);
+                            for (int i = 0; i < parsed.chapters.size(); i++) {
+                                EpubParser.ChapterData cd = parsed.chapters.get(i);
                                 String chId = String.valueOf(i);
                                 saveChapter(bookUuid, chId, cd.textContent);
 
@@ -245,11 +353,14 @@ public class CacheManager {
                 @Override
                 protected List<Chapter> doInBackground(Void... voids) {
                     try {
-                        List<EpubParser.ChapterData> parsed = EpubParser.parseEpub(epub);
-                        if (parsed.isEmpty()) return null;
+                        EpubParser.ParseResult parsed = EpubParser.parseEpubFull(epub);
+                        if (parsed == null || parsed.chapters.isEmpty()) return null;
+
+                        saveTocTree(bookUuid, parsed.tocTree);
+
                         List<Chapter> newChapters = new ArrayList<>();
-                        for (int i = 0; i < parsed.size(); i++) {
-                            EpubParser.ChapterData cd = parsed.get(i);
+                        for (int i = 0; i < parsed.chapters.size(); i++) {
+                            EpubParser.ChapterData cd = parsed.chapters.get(i);
                             String chId = String.valueOf(i);
                             saveChapter(bookUuid, chId, cd.textContent);
                             Chapter ch = new Chapter();
