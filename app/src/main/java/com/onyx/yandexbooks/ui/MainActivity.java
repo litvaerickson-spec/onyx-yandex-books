@@ -702,9 +702,11 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (tokenStorage.isAuthorized()) {
-            // Перезагружаем прогресс после возврата из читалки
-            currentBooks = dbHelper.getBooksByShelf(currentShelf);
-            adapter.notifyDataSetChanged();
+            // Перезагружаем прогресс после возврата из читалки (не затирая результаты поиска и каталога)
+            if (!"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
+                currentBooks = dbHelper.getBooksByShelf(currentShelf);
+                adapter.notifyDataSetChanged();
+            }
             updateTabBadges();
             updateShelfFooter();
         }
@@ -744,10 +746,38 @@ public class MainActivity extends Activity {
     }
 
     private void openBook(final Book book) {
-        if (appSettings.isOnyxReaderPreferred()) {
-            openInOnyxReader(book);
+        ensureBookSavedAndLinked(book, new Runnable() {
+            @Override
+            public void run() {
+                if (appSettings.isOnyxReaderPreferred()) {
+                    openInOnyxReader(book);
+                } else {
+                    openInLiteReader(book);
+                }
+            }
+        });
+    }
+
+    private void ensureBookSavedAndLinked(final Book book, final Runnable onReady) {
+        Book existing = dbHelper.getBookByUuid(book.getUuid());
+        if (existing == null) {
+            book.setShelfType("reading");
+            dbHelper.saveBooks(java.util.Collections.singletonList(book), "reading");
+            updateTabBadges();
+            apiClient.addBookToLibrary(book.getUuid(), new YandexBooksApiClient.ApiCallback<Boolean>() {
+                @Override
+                public void onSuccess(Boolean result) {
+                    runOnUiThread(onReady);
+                }
+
+                @Override
+                public void onError(String errorMessage) {
+                    // Даже если сетевая ошибка или книга уже в библиотеке, пробуем открыть
+                    runOnUiThread(onReady);
+                }
+            });
         } else {
-            openInLiteReader(book);
+            onReady.run();
         }
     }
 
@@ -756,7 +786,7 @@ public class MainActivity extends Activity {
         if (epub != null && epub.exists() && epub.length() > 0) {
             boolean ok = CacheManager.openInSystemReader(this, epub);
             if (!ok) {
-                Toast.makeText(this, "Читалка Onyx не найдена. Открываем в читалке Lite...", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Читалка Onyx не найдена. Открываем в читалке Онлайн...", Toast.LENGTH_SHORT).show();
                 openInLiteReader(book);
             }
             return;
@@ -786,7 +816,7 @@ public class MainActivity extends Activity {
             @Override
             public void onError(String message) {
                 dismissEinkLoadingDialog(dialog);
-                Toast.makeText(MainActivity.this, "Ошибка скачивания: " + message + ". Открываем в Lite.", Toast.LENGTH_LONG).show();
+                Toast.makeText(MainActivity.this, "Ошибка скачивания: " + message + ". Открываем в читалке Онлайн.", Toast.LENGTH_LONG).show();
                 openInLiteReader(book);
             }
         });
@@ -852,14 +882,7 @@ public class MainActivity extends Activity {
             author.setText(book.getAuthor());
 
             if (annotation != null) {
-                String ann = book.getAnnotation();
-                if (ann != null && !ann.trim().isEmpty()) {
-                    annotation.setText(ann);
-                    annotation.setVisibility(View.VISIBLE);
-                } else {
-                    annotation.setText("Нажмите «О книге» для описания");
-                    annotation.setVisibility(View.VISIBLE);
-                }
+                annotation.setVisibility(View.GONE);
             }
 
             final boolean downloaded = cacheManager.isBookDownloaded(book.getUuid());
@@ -928,14 +951,12 @@ public class MainActivity extends Activity {
         int padV = (int) (12 * density);
         root.setPadding(padH, padV, padH, padV);
 
-        // 1. Компактный заголовок книги (14sp bold, max 2 lines)
+        // 1. Полный заголовок книги без обрезки
         TextView titleView = new TextView(this);
         titleView.setText(book.getTitle());
         titleView.setTextSize(14);
         titleView.setTypeface(null, Typeface.BOLD);
         titleView.setTextColor(Color.BLACK);
-        titleView.setMaxLines(2);
-        titleView.setEllipsize(TextUtils.TruncateAt.END);
         root.addView(titleView);
 
         // 2. Метаданные (Автор и Прогресс/Статус) - две ультракомпактные строки
@@ -1015,7 +1036,12 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 dialog.dismiss();
-                openInOnyxReader(book);
+                ensureBookSavedAndLinked(book, new Runnable() {
+                    @Override
+                    public void run() {
+                        openInOnyxReader(book);
+                    }
+                });
             }
         });
         readRow.addView(btnOnyx);
@@ -1033,7 +1059,12 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 dialog.dismiss();
-                openInLiteReader(book);
+                ensureBookSavedAndLinked(book, new Runnable() {
+                    @Override
+                    public void run() {
+                        openInLiteReader(book);
+                    }
+                });
             }
         });
         readRow.addView(btnLite);
@@ -1066,30 +1097,35 @@ public class MainActivity extends Activity {
                     btnDownload.setEnabled(false);
                     btnDownload.setText("Загрузка...");
                     Toast.makeText(MainActivity.this, "Загрузка книги «" + book.getTitle() + "»...", Toast.LENGTH_SHORT).show();
-                    cacheManager.downloadBookAsync(book.getUuid(), book.getTitle(), new CacheManager.DownloadProgressCallback() {
+                    ensureBookSavedAndLinked(book, new Runnable() {
                         @Override
-                        public void onProgress(int downloadedCount, int totalCount) {}
-
-                        @Override
-                        public void onComplete() {
-                            runOnUiThread(new Runnable() {
+                        public void run() {
+                            cacheManager.downloadBookAsync(book.getUuid(), book.getTitle(), new CacheManager.DownloadProgressCallback() {
                                 @Override
-                                public void run() {
-                                    Toast.makeText(MainActivity.this, "«" + book.getTitle() + "» сохранена в памяти!", Toast.LENGTH_SHORT).show();
-                                    adapter.notifyDataSetChanged();
-                                    dialog.dismiss();
+                                public void onProgress(int downloadedCount, int totalCount) {}
+
+                                @Override
+                                public void onComplete() {
+                                    runOnUiThread(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            Toast.makeText(MainActivity.this, "«" + book.getTitle() + "» сохранена в памяти!", Toast.LENGTH_SHORT).show();
+                                            adapter.notifyDataSetChanged();
+                                            dialog.dismiss();
+                                        }
+                                    });
                                 }
-                            });
-                        }
 
-                        @Override
-                        public void onError(final String message) {
-                            runOnUiThread(new Runnable() {
                                 @Override
-                                public void run() {
-                                    Toast.makeText(MainActivity.this, "Ошибка скачивания: " + message, Toast.LENGTH_LONG).show();
-                                    btnDownload.setEnabled(true);
-                                    btnDownload.setText("Скачать EPUB");
+                                public void onError(final String message) {
+                                    runOnUiThread(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            Toast.makeText(MainActivity.this, "Ошибка скачивания: " + message, Toast.LENGTH_LONG).show();
+                                            btnDownload.setEnabled(true);
+                                            btnDownload.setText("Скачать EPUB");
+                                        }
+                                    });
                                 }
                             });
                         }
