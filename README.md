@@ -87,18 +87,6 @@ flowchart TD
 4. Приложение обновится поверх существующей версии — авторизация и скачанные книги сохранятся.
    *(Или воспользуйтесь кнопкой обновления прямо внутри приложения!)*
 
----
-
-## 📢 Материалы по продвижению и Tech PR
-
-Полный комплект готовых публикаций, инструкций и маркетинговых сценариев расположен в каталоге [`docs/marketing/`](docs/marketing/):
-* 📝 [**01_habr_longread.md**](docs/marketing/01_habr_longread.md) — готовая статья для Хабра с техническим разбором Conscrypt, StaticLayout и Bookmate API.
-* 💼 [**02_vc_dtf_article.md**](docs/marketing/02_vc_dtf_article.md) — статья для VC.ru и DTF с упором на потребительскую ценность подписки.
-* 📖 [**03_pikabu_story.md**](docs/marketing/03_pikabu_story.md) — пользовательская история от первого лица для Пикабу.
-* 💬 [**04_4pda_topic_template.bbcode**](docs/marketing/04_4pda_topic_template.bbcode) — 100% валидный шаблон оформления топика в каталоге программ 4PDA.
-* 🕵️‍♂️ [**05_crowd_marketing_playbook.md**](docs/marketing/05_crowd_marketing_playbook.md) — сценарии нативных ответов и правила безопасности (антибан).
-* 📡 [**06_social_listening_guide.md**](docs/marketing/06_social_listening_guide.md) — настройка мониторинга упоминаний и ботов.
-* 🗓️ [**07_30_day_roadmap.md**](docs/marketing/07_30_day_roadmap.md) — 30-дневный календарный план запуска.
 
 ---
 
@@ -113,7 +101,6 @@ flowchart TD
 ├── release_notes_v1.3.9.md # Описание релиза v1.3.9
 ├── .github/workflows/      # Автоматизация релизов (Telegram notifier)
 ├── docs/                   # Архитектурные спецификации и руководство пользователя
-│   ├── marketing/          # Готовый PR-пак (Хабр, VC, Пикабу, 4PDA, Крауд)
 │   ├── guides/             # Руководства пользователя
 │   ├── research/           # Исследования TLS и API
 │   └── specs/              # Архитектурные спецификации

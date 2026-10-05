@@ -21,3 +21,7 @@ build/
 # Python caches
 __pycache__/
 *.py[cod]
+
+# Internal marketing & PR drafts
+docs/marketing/
+marketing/
