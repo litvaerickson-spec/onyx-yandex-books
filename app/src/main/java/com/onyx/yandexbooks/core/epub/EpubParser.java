@@ -532,19 +532,19 @@ public class EpubParser {
             String opfXml = readStreamToString(is);
 
             // Сопоставление id -> href из <manifest>
-            Pattern itemPattern = Pattern.compile("<item\\s+[^>]*?id\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
+            Pattern itemPattern = Pattern.compile("<item\\s+[^>]*?id\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
             Matcher m = itemPattern.matcher(opfXml);
             while (m.find()) {
                 outManifestMap.put(m.group(1), m.group(2));
             }
-            Pattern itemPatternRev = Pattern.compile("<item\\s+[^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?id\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
+            Pattern itemPatternRev = Pattern.compile("<item\\s+[^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?id\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
             Matcher mRev = itemPatternRev.matcher(opfXml);
             while (mRev.find()) {
                 outManifestMap.put(mRev.group(2), mRev.group(1));
             }
 
             // Порядок чтения из <spine>
-            Pattern itemrefPattern = Pattern.compile("<itemref\\s+[^>]*?idref\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
+            Pattern itemrefPattern = Pattern.compile("<itemref\\s+[^>]*?idref\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
             Matcher mSpine = itemrefPattern.matcher(opfXml);
             while (mSpine.find()) {
                 String idref = mSpine.group(1);
@@ -978,28 +978,20 @@ public class EpubParser {
             mSvg.appendTail(sbSvg);
             text = sbSvg.toString();
 
-            // 2. Тотальное удаление любых обрывков атрибутов, заканчивающихся на '>' (например, id="mh_toc_975">)
-            text = text.replaceAll("(?i)\\b(?:id|name|class|style)\\s*=\\s*[\"'][^\"']*[\"']\\s*>", "");
-
-            // 3. Удаление начальных обрывков тегов без открывающей скобки (например, ^text">)
-            text = text.replaceAll("(?i)^[^<\\n]*>", "");
-
-            // 4. Удаление концевых незакрытых тегов (например, <h1, <h2, </div в конце строки)
-            text = text.replaceAll("(?im)</?[a-zA-Z0-9_-]+\\s*$", "");
-
-            // 5. Маркировка явных смысловых разделителей секций
+            // 2. Маркировка явных смысловых разделителей секций
             text = text.replaceAll("(?i)<hr\\s*/?>", "\n___SECTION_BREAK___\n");
             text = text.replaceAll("(?i)<p[^>]*>(\\s*|&nbsp;|<br\\s*/?>|\\*\\s*\\*\\s*\\*)</p>", "\n___SECTION_BREAK___\n");
 
-            // 6. Замена тегов переноса строк и закрытия структурных блоков на единичный \n
+            // 3. Замена тегов переноса строк и закрытия структурных блоков на единичный \n
             text = text.replaceAll("(?i)<br\\s*/?>", "\n");
-            text = text.replaceAll("(?i)</?(p|div|h[1-6]|li|blockquote|tr)[^>]*>", "\n");
+            text = text.replaceAll("(?i)</?(?:p|div|h[1-6]|li|blockquote|tr|section|article|header|footer)[^>]*>", "\n");
 
-            // 7. Удаление всех остальных тегов (включая <span>, <i>, <b> и др.)
+            // 4. Безопасное удаление всех остальных HTML-тегов с сохранением внутреннего текста
             text = text.replaceAll("<[^>]+>", "");
 
-            // 8. Удаление отдельно стоящих обрывков тегов заголовков на своих строках
-            text = text.replaceAll("(?im)^\\s*<h[1-6]\\s*$", "");
+            // 5. Очистка случайных изолированных осколков неполных тегов на границах
+            text = text.replaceAll("<[^>]*$", "");
+            text = text.replaceAll("^[^<]*>", "");
 
             // 9. Тотальное удаление некорректных символов [OBJ], BOM, мягких переносов и непечатных кодов
             text = text.replace("\uFFFC", ""); // Object Replacement Character ([OBJ])

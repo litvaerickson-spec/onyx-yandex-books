@@ -47,8 +47,11 @@ import com.onyx.yandexbooks.core.typography.TextPaginator;
 import com.onyx.yandexbooks.core.typography.TypographyConfig;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
@@ -149,6 +152,11 @@ public class ReaderActivity extends Activity {
     // Индикатор подготовки книги
     private View readerLoadingOverlay;
     private TextView readerLoadingText;
+
+    // Внутрипамятный кэш страниц и оглавления для мгновенного перелистывания (0 мс)
+    private final Map<Integer, List<TextPaginator.Page>> chapterPagesMemoryCache = new HashMap<>();
+    private final Map<Integer, String> chapterTextMemoryCache = new HashMap<>();
+    private List<EpubParser.TocNode> cachedTocTree = null;
 
     private TypographyConfig typographyConfig;
     private TextPaginator paginator;
@@ -1611,19 +1619,25 @@ public class ReaderActivity extends Activity {
     private void loadBookData() {
         // Проверяем, есть ли уже главы в локальной БД
         List<Chapter> localChapters = dbHelper.getChapters(bookUuid);
-
+        boolean isCacheValid = false;
         if (localChapters != null && !localChapters.isEmpty()) {
-            // Главы уже в базе данных: открываем МГНОВЕННО (< 50 мс) без повторного тяжелого парсинга EPUB!
+            isCacheValid = cacheManager.isChapterCacheValid(bookUuid, localChapters);
+        }
+
+        if (isCacheValid) {
+            // Главы уже в базе данных и валидны: открываем МГНОВЕННО (< 50 мс) без повторного тяжелого парсинга EPUB!
             chapters = localChapters;
+            cachedTocTree = cacheManager.loadTocTree(bookUuid);
             resolveInitialPositionAndOpen();
         } else {
-            // Главы еще не извлечены: показываем E-Ink оверлей подготовки и запускаем парсинг
+            // Главы еще не извлечены или повреждены предыдущей версией: запускаем парсинг
             showLoadingOverlay("Подготовка книги к чтению...");
             cacheManager.reparseAndSaveBook(bookUuid, bookTitle, new CacheManager.BookReadyCallback() {
                 @Override
                 public void onReady(List<Chapter> loadedChapters) {
                     hideLoadingOverlay();
                     chapters = loadedChapters;
+                    cachedTocTree = cacheManager.loadTocTree(bookUuid);
                     if (!chapters.isEmpty()) {
                         resolveInitialPositionAndOpen();
                     } else {
@@ -1635,6 +1649,7 @@ public class ReaderActivity extends Activity {
                 public void onError(String errorMessage) {
                     hideLoadingOverlay();
                     chapters = dbHelper.getChapters(bookUuid);
+                    cachedTocTree = cacheManager.loadTocTree(bookUuid);
                     if (chapters != null && !chapters.isEmpty()) {
                         resolveInitialPositionAndOpen();
                     } else {
@@ -1858,6 +1873,31 @@ public class ReaderActivity extends Activity {
         if (chapters == null || chapters.isEmpty()) return;
         if (index < 0 || index >= chapters.size()) return;
         currentChapterIndex = index;
+
+        // 1. ПРОВЕРКА ВНУТРИПАМЯТНОГО КЭША (МГНОВЕННЫЙ ПЕРЕХОД < 5 МС БЕЗ ЗАДЕРЖКИ)
+        if (chapterPagesMemoryCache.containsKey(index)) {
+            final List<TextPaginator.Page> cachedPages = chapterPagesMemoryCache.get(index);
+            final String cachedText = chapterTextMemoryCache.get(index);
+            if (cachedPages != null && !cachedPages.isEmpty()) {
+                isPaginating = false;
+                hideLoadingOverlay();
+                currentPages = cachedPages;
+                if (chapterPageCounts != null && index < chapterPageCounts.length) {
+                    chapterPageCounts[index] = currentPages.size();
+                }
+                if (cachedText != null && cachedText.length() > 0) {
+                    avgCharsPerPage = (double) cachedText.length() / (double) currentPages.size();
+                }
+                recalculateTotalBookPages();
+                resolveTargetPagePosition(targetPage, targetCharOffset, anchorFraction, cachedText);
+                renderCurrentPage();
+                updateMenuControls();
+                isInitialLoading = false;
+                preloadAdjacentChapters(index);
+                return;
+            }
+        }
+
         isPaginating = true;
 
         final Chapter ch = chapters.get(index);
@@ -1910,10 +1950,10 @@ public class ReaderActivity extends Activity {
 
                     if (text == null || text.trim().isEmpty()) {
                         String title = chTitle;
-                        if (title == null || title.trim().isEmpty()) {
-                            title = "Глава " + (index + 1);
+                        if (title == null || title.trim().isEmpty() || title.startsWith("ch_") || title.startsWith("ch-")) {
+                            title = "";
                         }
-                        text = "\n\n[" + title + "]\n\n";
+                        text = title;
                     }
 
                     // 2. ПАГИНАЦИЯ В ФОНОВОМ ПОТОКЕ
@@ -1941,6 +1981,10 @@ public class ReaderActivity extends Activity {
                             currentPages = pages;
 
                             if (currentPages != null && !currentPages.isEmpty()) {
+                                chapterPagesMemoryCache.put(index, pages);
+                                chapterTextMemoryCache.put(index, rawText);
+                                pruneMemoryCache(index);
+
                                 if (chapterPageCounts != null && currentChapterIndex < chapterPageCounts.length) {
                                     chapterPageCounts[currentChapterIndex] = currentPages.size();
                                 }
@@ -1948,58 +1992,13 @@ public class ReaderActivity extends Activity {
                                     avgCharsPerPage = (double) rawText.length() / (double) currentPages.size();
                                 }
                                 recalculateTotalBookPages();
-
-                                if (targetPage == -999) {
-                                    currentPageIndex = Math.max(0, currentPages.size() - 1);
-                                } else if (targetCharOffset >= 0) {
-                                    int resolvedP = 0;
-                                    boolean found = false;
-                                    for (int i = 0; i < currentPages.size(); i++) {
-                                        TextPaginator.Page p = currentPages.get(i);
-                                        if (targetCharOffset >= p.startCharOffset && targetCharOffset <= p.endCharOffset) {
-                                            resolvedP = i;
-                                            found = true;
-                                            break;
-                                        }
-                                    }
-                                    if (!found) {
-                                        if (!currentPages.isEmpty() && targetCharOffset >= currentPages.get(currentPages.size() - 1).endCharOffset) {
-                                            resolvedP = currentPages.size() - 1;
-                                        } else {
-                                            resolvedP = 0;
-                                        }
-                                    }
-                                    currentPageIndex = resolvedP;
-                                } else if (anchorFraction >= 0.0) {
-                                    int charOff = (int) Math.round(anchorFraction * rawText.length());
-                                    int resolvedP = 0;
-                                    boolean found = false;
-                                    for (int i = 0; i < currentPages.size(); i++) {
-                                        TextPaginator.Page p = currentPages.get(i);
-                                        if (charOff >= p.startCharOffset && charOff <= p.endCharOffset) {
-                                            resolvedP = i;
-                                            found = true;
-                                            break;
-                                        }
-                                    }
-                                    if (!found) {
-                                        if (!currentPages.isEmpty() && charOff >= currentPages.get(currentPages.size() - 1).endCharOffset) {
-                                            resolvedP = currentPages.size() - 1;
-                                        } else {
-                                            resolvedP = 0;
-                                        }
-                                    }
-                                    currentPageIndex = resolvedP;
-                                } else if (targetPage >= 0 && targetPage < currentPages.size()) {
-                                    currentPageIndex = targetPage;
-                                } else if (currentPageIndex >= currentPages.size()) {
-                                    currentPageIndex = Math.max(0, currentPages.size() - 1);
-                                }
+                                resolveTargetPagePosition(targetPage, targetCharOffset, anchorFraction, rawText);
                             }
 
                             renderCurrentPage();
                             updateMenuControls();
-                            isInitialLoading = false; // Первичная страница представлена пользователю
+                            isInitialLoading = false;
+                            preloadAdjacentChapters(index);
                         }
                     });
                 } catch (Throwable t) {
@@ -2014,6 +2013,129 @@ public class ReaderActivity extends Activity {
                 }
             }
         });
+    }
+
+    private void resolveTargetPagePosition(int targetPage, int targetCharOffset, double anchorFraction, String rawText) {
+        if (currentPages == null || currentPages.isEmpty()) {
+            currentPageIndex = 0;
+            return;
+        }
+        if (targetPage == -999) {
+            currentPageIndex = Math.max(0, currentPages.size() - 1);
+        } else if (targetCharOffset >= 0) {
+            int resolvedP = 0;
+            boolean found = false;
+            for (int i = 0; i < currentPages.size(); i++) {
+                TextPaginator.Page p = currentPages.get(i);
+                if (targetCharOffset >= p.startCharOffset && targetCharOffset <= p.endCharOffset) {
+                    resolvedP = i;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                if (targetCharOffset >= currentPages.get(currentPages.size() - 1).endCharOffset) {
+                    resolvedP = currentPages.size() - 1;
+                } else {
+                    resolvedP = 0;
+                }
+            }
+            currentPageIndex = resolvedP;
+        } else if (anchorFraction >= 0.0 && rawText != null && rawText.length() > 0) {
+            int charOff = (int) Math.round(anchorFraction * rawText.length());
+            int resolvedP = 0;
+            boolean found = false;
+            for (int i = 0; i < currentPages.size(); i++) {
+                TextPaginator.Page p = currentPages.get(i);
+                if (charOff >= p.startCharOffset && charOff <= p.endCharOffset) {
+                    resolvedP = i;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                if (charOff >= currentPages.get(currentPages.size() - 1).endCharOffset) {
+                    resolvedP = currentPages.size() - 1;
+                } else {
+                    resolvedP = 0;
+                }
+            }
+            currentPageIndex = resolvedP;
+        } else if (targetPage >= 0 && targetPage < currentPages.size()) {
+            currentPageIndex = targetPage;
+        } else if (currentPageIndex >= currentPages.size()) {
+            currentPageIndex = Math.max(0, currentPages.size() - 1);
+        }
+    }
+
+    private void preloadAdjacentChapters(final int curIndex) {
+        final int[] adj = new int[]{curIndex + 1, curIndex - 1};
+        for (final int targetIdx : adj) {
+            if (targetIdx >= 0 && chapters != null && targetIdx < chapters.size()) {
+                if (!chapterPagesMemoryCache.containsKey(targetIdx)) {
+                    final Chapter ch = chapters.get(targetIdx);
+                    final String chId = ch.getId();
+                    final String chTitle = ch.getTitle();
+                    paginationExecutor.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                if (chapterPagesMemoryCache.containsKey(targetIdx)) return;
+                                String text = cacheManager.loadChapter(bookUuid, chId);
+                                if (text == null) text = cacheManager.loadChapter(bookUuid, String.valueOf(targetIdx));
+                                if (text == null || text.trim().isEmpty()) {
+                                    text = (chTitle != null && !chTitle.startsWith("ch_")) ? chTitle : "";
+                                }
+                                Paint paint = new Paint(readerCanvas.getTextPaint());
+                                int w = lastPaginatedWidth > 0 ? lastPaginatedWidth : readerCanvas.getWidth();
+                                int h = lastPaginatedHeight > 0 ? lastPaginatedHeight : readerCanvas.getHeight();
+                                if (w <= 0 || h <= 0) {
+                                    w = getResources().getDisplayMetrics().widthPixels;
+                                    h = getResources().getDisplayMetrics().heightPixels;
+                                }
+                                TypographyConfig cfg = new TypographyConfig();
+                                cfg.setFontSizeSp(typographyConfig.getFontSizeSp());
+                                cfg.setFontFamily(typographyConfig.getFontFamily());
+                                cfg.setLineSpacingMultiplier(typographyConfig.getLineSpacingMultiplier());
+                                cfg.setParagraphIndentPx(typographyConfig.getParagraphIndentPx());
+                                cfg.setPaddingLeftPx(typographyConfig.getPaddingLeftPx());
+                                cfg.setPaddingRightPx(typographyConfig.getPaddingRightPx());
+                                cfg.setPaddingTopPx(typographyConfig.getPaddingTopPx());
+                                cfg.setPaddingBottomPx(typographyConfig.getPaddingBottomPx());
+                                cfg.setFooterReservedHeightPx(typographyConfig.getFooterReservedHeightPx());
+                                cfg.setHyphenationEnabled(typographyConfig.isHyphenationEnabled());
+                                cfg.setJustifyEnabled(typographyConfig.isJustifyEnabled());
+                                cfg.setBoldText(typographyConfig.isBoldText());
+                                cfg.setContrastMode(typographyConfig.getContrastMode());
+                                cfg.setVerticalMarginMode(typographyConfig.getVerticalMarginMode());
+
+                                List<TextPaginator.Page> pages = paginator.paginate(text, w, h, paint, cfg);
+                                if (pages != null && !pages.isEmpty()) {
+                                    chapterPagesMemoryCache.put(targetIdx, pages);
+                                    chapterTextMemoryCache.put(targetIdx, text);
+                                    if (chapterPageCounts != null && targetIdx < chapterPageCounts.length) {
+                                        chapterPageCounts[targetIdx] = pages.size();
+                                    }
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    private void pruneMemoryCache(int curIndex) {
+        if (chapterPagesMemoryCache.size() > 5) {
+            Iterator<Integer> it = chapterPagesMemoryCache.keySet().iterator();
+            while (it.hasNext()) {
+                int key = it.next();
+                if (Math.abs(key - curIndex) > 2) {
+                    it.remove();
+                    chapterTextMemoryCache.remove(key);
+                }
+            }
+        }
     }
 
     private void displayChapterText(String rawText, String title) {
@@ -2150,6 +2272,8 @@ public class ReaderActivity extends Activity {
     }
 
     private void repaginateCurrentChapter() {
+        chapterPagesMemoryCache.clear();
+        chapterTextMemoryCache.clear();
         if (chapters != null && currentChapterIndex >= 0 && currentChapterIndex < chapters.size()) {
             double fraction = -1.0;
             if (currentPages != null && !currentPages.isEmpty() && currentPageIndex < currentPages.size()) {
@@ -2160,31 +2284,57 @@ public class ReaderActivity extends Activity {
     }
 
     private double calculateCurrentGlobalPercent() {
-        if (chapters == null || chapters.isEmpty()) return 0.0;
-        if (totalBookLength <= 0 || chapterLengths == null || chapterLengths.length != chapters.size()) {
-            double chapterWeight = 100.0 / chapters.size();
-            double inChapterPercent = (currentPages == null || currentPages.isEmpty()) ? 0.0 : ((double) (currentPageIndex + 1) / currentPages.size());
-            return Math.min(100.0, Math.max(0.0, (currentChapterIndex * chapterWeight) + (inChapterPercent * chapterWeight)));
-        }
+        if (totalBookPages <= 0) return 0.0;
+        double p = ((double) globalPageIndex / (double) totalBookPages) * 100.0;
+        return Math.min(100.0, Math.max(0.0, p));
+    }
 
-        long precedingLength = 0;
-        for (int i = 0; i < currentChapterIndex; i++) {
-            precedingLength += chapterLengths[i];
+    private String getActiveChapterTitle() {
+        if (cachedTocTree != null && !cachedTocTree.isEmpty() && currentChapterIndex >= 0) {
+            int currentOffset = (currentPages != null && currentPageIndex < currentPages.size())
+                    ? currentPages.get(currentPageIndex).startCharOffset : 0;
+            String tocTitle = findActiveTocTitle(cachedTocTree, currentChapterIndex, currentOffset);
+            if (tocTitle != null && !tocTitle.trim().isEmpty()) {
+                return tocTitle;
+            }
         }
-        long curChapterLen = chapterLengths[currentChapterIndex];
-        double inChapterFraction = 0.0;
-        if (currentPages != null && !currentPages.isEmpty()) {
-            inChapterFraction = (double) (currentPageIndex + 1) / (double) currentPages.size();
+        if (chapters != null && currentChapterIndex >= 0 && currentChapterIndex < chapters.size()) {
+            String chTitle = chapters.get(currentChapterIndex).getTitle();
+            if (chTitle != null && !chTitle.trim().isEmpty() && !chTitle.startsWith("ch_") && !chTitle.startsWith("ch-")) {
+                return chTitle;
+            }
         }
-        double globalBytes = precedingLength + (inChapterFraction * curChapterLen);
-        double percent = (globalBytes / (double) totalBookLength) * 100.0;
-        return Math.min(100.0, Math.max(0.0, percent));
+        return bookTitle != null ? bookTitle : "";
+    }
+
+    private String findActiveTocTitle(List<EpubParser.TocNode> nodes, int curSpineIndex, int curCharOffset) {
+        List<EpubParser.TocNode> flat = new ArrayList<>();
+        flattenAllTocNodes(nodes, flat);
+        EpubParser.TocNode best = null;
+        for (EpubParser.TocNode node : flat) {
+            if (node.spineIndex < curSpineIndex || (node.spineIndex == curSpineIndex && node.charOffset <= curCharOffset)) {
+                best = node;
+            } else if (node.spineIndex > curSpineIndex) {
+                break;
+            }
+        }
+        return best != null ? best.title : null;
+    }
+
+    private void flattenAllTocNodes(List<EpubParser.TocNode> nodes, List<EpubParser.TocNode> out) {
+        if (nodes == null) return;
+        for (EpubParser.TocNode n : nodes) {
+            out.add(n);
+            if (n.children != null && !n.children.isEmpty()) {
+                flattenAllTocNodes(n.children, out);
+            }
+        }
     }
 
     private void renderCurrentPage() {
         recalculateTotalBookPages();
         if (!currentPages.isEmpty() && currentPageIndex < currentPages.size()) {
-            String title = (chapters != null && currentChapterIndex < chapters.size()) ? chapters.get(currentChapterIndex).getTitle() : bookTitle;
+            String title = getActiveChapterTitle();
             double percent = calculateCurrentGlobalPercent();
             int totalChapters = chapters != null ? chapters.size() : 1;
             readerCanvas.setPage(currentPages.get(currentPageIndex), globalPageIndex, totalBookPages, title, currentChapterIndex, totalChapters, percent);

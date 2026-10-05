@@ -220,6 +220,29 @@ public class CacheManager {
         return file.exists() && file.length() > 0;
     }
 
+    /**
+     * Проверка валидности кэшированных глав.
+     * Если большинство глав пусты (< 50 байт текста) или общий объем подозрительно мал,
+     * возвращает false для запуска автоматического самовосстановления из book.epub.
+     */
+    public boolean isChapterCacheValid(String bookUuid, List<Chapter> chapters) {
+        if (chapters == null || chapters.isEmpty()) return false;
+        long totalBytes = 0;
+        int nonZeroChapters = 0;
+        for (int i = 0; i < chapters.size(); i++) {
+            Chapter ch = chapters.get(i);
+            long len = getChapterLength(bookUuid, ch.getId());
+            if (len > 50) {
+                nonZeroChapters++;
+                totalBytes += len;
+            }
+        }
+        if (chapters.size() > 3 && (nonZeroChapters < chapters.size() / 3 || totalBytes < 5000)) {
+            return false;
+        }
+        return true;
+    }
+
     public void saveChapter(String bookUuid, String chapterId, String content) {
         try {
             File file = getChapterFile(bookUuid, chapterId);
@@ -247,12 +270,12 @@ public class CacheManager {
         }
 
         if (!file.exists()) {
-            // Файла нет на диске: на лету извлекаем из book.epub!
+            // Файла нет на диске: однократно извлекаем из book.epub
             String onTheFly = extractChapterOnTheFly(bookUuid, chapterId);
             if (onTheFly != null) {
                 return onTheFly;
             }
-            return null;
+            return "";
         }
 
         StringBuilder sb = new StringBuilder();
@@ -262,18 +285,10 @@ public class CacheManager {
             while ((line = reader.readLine()) != null) {
                 sb.append(line).append("\n");
             }
-            String content = sb.toString();
-            if (content.trim().isEmpty()) {
-                // Если файл оказался пустым (0 байт), извлекаем из EPUB
-                String onTheFly = extractChapterOnTheFly(bookUuid, chapterId);
-                if (onTheFly != null && !onTheFly.trim().isEmpty()) {
-                    return onTheFly;
-                }
-            }
-            return content;
+            return sb.toString();
         } catch (Exception e) {
             Log.e(TAG, "Error reading chapter " + chapterId, e);
-            return extractChapterOnTheFly(bookUuid, chapterId);
+            return "";
         }
     }
 
