@@ -17,6 +17,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
 
 mkdir -p build/classes build/lib
+rm -f "$PROJECT_DIR"/build/*.apk*
 
 echo "[1/6] Генерация R.java через AAPT..."
 "$BUILD_TOOLS/aapt" package -m \
@@ -57,8 +58,8 @@ cd ..
 echo "[5/6] Выравнивание байтов (zipalign)..."
 "$BUILD_TOOLS/zipalign" -f -p 4 build/unaligned.apk build/aligned.apk
 
-echo "[6/6] Удаление старых версий и подпись нового APK (v1 + v2 схемы)..."
-rm -f "$PROJECT_DIR"/yandex-books-lite*.apk* "$PROJECT_DIR"/build/*.apk*
+echo "[6/6] Подпись нового APK (v1 + v2 схемы)..."
+rm -f "$PROJECT_DIR"/yandex-books-lite*.apk*
 
 if [ ! -f debug.keystore ]; then
   "$JAVA_HOME/bin/keytool" -genkey -v -keystore debug.keystore \
