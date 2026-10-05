@@ -394,6 +394,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         SQLiteDatabase db = getWritableDatabase();
         db.beginTransaction();
         try {
+            db.delete("chapters", "book_uuid = ?", new String[]{bookUuid});
             for (Chapter ch : chapters) {
                 ContentValues cv = new ContentValues();
                 cv.put("id", ch.getId());

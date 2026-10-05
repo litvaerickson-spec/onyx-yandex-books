@@ -16,15 +16,15 @@ public class TypographyConfig implements Serializable {
     // Оптимальные компактные отступы для E-Ink Carta экрана Onyx Boox Darwin (758x1024)
     private int paddingLeftPx = 18;
     private int paddingRightPx = 18;
-    private int paddingTopPx = 14;
-    private int paddingBottomPx = 20;
+    private int paddingTopPx = 12;
+    private int paddingBottomPx = 6;
 
     // Резерв высоты под верхний колонтитул (название текущей главы)
-    private int headerReservedHeightPx = 28;
+    private int headerReservedHeightPx = 26;
 
     // Резерв высоты под нижний колонтитул (номер страницы, глава, глобальный процент),
     // исключающий физическое наложение текста книги на строку статуса
-    private int footerReservedHeightPx = 44;
+    private int footerReservedHeightPx = 20;
 
     private boolean isHyphenationEnabled = true;
     private boolean isJustifyEnabled = true;
@@ -84,13 +84,13 @@ public class TypographyConfig implements Serializable {
         this.verticalMarginMode = mode;
         if ("small".equalsIgnoreCase(mode)) {
             setPaddingTopPx(8);
-            setPaddingBottomPx(12);
+            setPaddingBottomPx(4);
         } else if ("large".equalsIgnoreCase(mode)) {
-            setPaddingTopPx(24);
-            setPaddingBottomPx(32);
+            setPaddingTopPx(18);
+            setPaddingBottomPx(12);
         } else {
-            setPaddingTopPx(14);
-            setPaddingBottomPx(20);
+            setPaddingTopPx(12);
+            setPaddingBottomPx(6);
         }
     }
 

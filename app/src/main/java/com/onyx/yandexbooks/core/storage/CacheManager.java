@@ -202,57 +202,9 @@ public class CacheManager {
         final File epub = getEpubFile(bookUuid);
         List<Chapter> chapters = dbHelper.getChapters(bookUuid);
 
-        // Если EPUB файл уже на устройстве, но список глав пуст (миграция v5 оглавления TOC):
-        if (epub.exists() && epub.length() > 0 && (chapters == null || chapters.isEmpty())) {
-            new AsyncTask<Void, Void, List<Chapter>>() {
-                @Override
-                protected List<Chapter> doInBackground(Void... voids) {
-                    try {
-                        List<EpubParser.ChapterData> parsed = EpubParser.parseEpub(epub);
-                        if (parsed.isEmpty()) return null;
-                        List<Chapter> newChapters = new ArrayList<>();
-                        for (int i = 0; i < parsed.size(); i++) {
-                            EpubParser.ChapterData cd = parsed.get(i);
-                            String chId = String.valueOf(i);
-                            saveChapter(bookUuid, chId, cd.textContent);
-                            Chapter ch = new Chapter();
-                            ch.setId(chId);
-                            ch.setBookUuid(bookUuid);
-                            ch.setChapterIndex(i);
-                            ch.setTitle(cd.title);
-                            newChapters.add(ch);
-                        }
-                        dbHelper.saveChapters(bookUuid, newChapters);
-                        dbHelper.updateBookDownloaded(bookUuid, true);
-                        return newChapters;
-                    } catch (Throwable e) {
-                        return null;
-                    }
-                }
-
-                @Override
-                protected void onPostExecute(List<Chapter> res) {
-                    if (res != null && !res.isEmpty()) {
-                        callback.onReady(res);
-                    } else {
-                        // Если локальный перепарсинг не удался, скачиваем заново
-                        downloadBookAsync(bookUuid, bookTitle, new DownloadProgressCallback() {
-                            @Override
-                            public void onProgress(int downloadedCount, int totalCount) {}
-                            @Override
-                            public void onComplete() {
-                                List<Chapter> chs = dbHelper.getChapters(bookUuid);
-                                if (chs != null && !chs.isEmpty()) callback.onReady(chs);
-                                else callback.onError("Книга загружена, но главы не найдены");
-                            }
-                            @Override
-                            public void onError(String message) {
-                                callback.onError(message);
-                            }
-                        });
-                    }
-                }
-            }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+        // Если EPUB файл уже на устройстве, но список глав пуст или подозрительно мал (1 глава, миграция якорного оглавления TOC):
+        if (epub.exists() && epub.length() > 0 && (chapters == null || chapters.size() <= 1)) {
+            reparseAndSaveBook(bookUuid, bookTitle, callback);
             return;
         }
 
@@ -281,6 +233,80 @@ public class CacheManager {
                 callback.onError(message);
             }
         });
+    }
+
+    /**
+     * Принудительно парсит существующий локальный EPUB файл и обновляет список глав в базе данных.
+     */
+    public void reparseAndSaveBook(final String bookUuid, final String bookTitle, final BookReadyCallback callback) {
+        final File epub = getEpubFile(bookUuid);
+        if (epub != null && epub.exists() && epub.length() > 0) {
+            new AsyncTask<Void, Void, List<Chapter>>() {
+                @Override
+                protected List<Chapter> doInBackground(Void... voids) {
+                    try {
+                        List<EpubParser.ChapterData> parsed = EpubParser.parseEpub(epub);
+                        if (parsed.isEmpty()) return null;
+                        List<Chapter> newChapters = new ArrayList<>();
+                        for (int i = 0; i < parsed.size(); i++) {
+                            EpubParser.ChapterData cd = parsed.get(i);
+                            String chId = String.valueOf(i);
+                            saveChapter(bookUuid, chId, cd.textContent);
+                            Chapter ch = new Chapter();
+                            ch.setId(chId);
+                            ch.setBookUuid(bookUuid);
+                            ch.setChapterIndex(i);
+                            ch.setTitle(cd.title);
+                            newChapters.add(ch);
+                        }
+                        dbHelper.saveChapters(bookUuid, newChapters);
+                        dbHelper.updateBookDownloaded(bookUuid, true);
+                        return newChapters;
+                    } catch (Throwable e) {
+                        Log.e(TAG, "Error reparsing EPUB", e);
+                        return null;
+                    }
+                }
+
+                @Override
+                protected void onPostExecute(List<Chapter> res) {
+                    if (res != null && !res.isEmpty()) {
+                        if (callback != null) callback.onReady(res);
+                    } else {
+                        // Если повторный парсинг не удался, скачиваем заново
+                        downloadBookAsync(bookUuid, bookTitle, new DownloadProgressCallback() {
+                            @Override
+                            public void onProgress(int downloadedCount, int totalCount) {}
+                            @Override
+                            public void onComplete() {
+                                List<Chapter> chs = dbHelper.getChapters(bookUuid);
+                                if (chs != null && !chs.isEmpty()) callback.onReady(chs);
+                                else callback.onError("Книга загружена, но главы не найдены");
+                            }
+                            @Override
+                            public void onError(String message) {
+                                callback.onError(message);
+                            }
+                        });
+                    }
+                }
+            }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+        } else {
+            downloadBookAsync(bookUuid, bookTitle, new DownloadProgressCallback() {
+                @Override
+                public void onProgress(int downloadedCount, int totalCount) {}
+                @Override
+                public void onComplete() {
+                    List<Chapter> chs = dbHelper.getChapters(bookUuid);
+                    if (chs != null && !chs.isEmpty()) callback.onReady(chs);
+                    else callback.onError("Книга загружена, но главы не найдены");
+                }
+                @Override
+                public void onError(String message) {
+                    callback.onError(message);
+                }
+            });
+        }
     }
 
     public File getPublicEpubFile(String title) {

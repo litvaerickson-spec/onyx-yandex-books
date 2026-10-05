@@ -92,4 +92,7 @@ public class AppSettings {
 
     public String getVerticalMarginMode() { return prefs.getString(KEY_VERTICAL_MARGIN, "normal"); }
     public void setVerticalMarginMode(String mode) { prefs.edit().putString(KEY_VERTICAL_MARGIN, mode).apply(); }
+
+    public int getInt(String key, int defValue) { return prefs.getInt(key, defValue); }
+    public void putInt(String key, int value) { prefs.edit().putInt(key, value).apply(); }
 }

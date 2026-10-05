@@ -209,7 +209,7 @@ public class ReaderCanvasView extends View {
         }
 
         // 2. Нижний колонтитул: Сквозная нумерация от всей книги и процент
-        float footerY = getHeight() - 12;
+        float footerY = getHeight() - 8;
         String pageInfo = "Стр. " + globalPageIndex + " из " + totalBookPages + String.format(java.util.Locale.getDefault(), " (%.0f%%)", globalPercent);
         float pageInfoWidth = footerPaint.measureText(pageInfo);
 

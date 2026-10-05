@@ -63,6 +63,8 @@ public class MainActivity extends Activity {
     private Button btnSearchSubmit;
     private TextView loadingTextView;
     private View emptyStateContainer;
+    private TextView emptyShelfTitleView;
+    private TextView emptyShelfHintView;
     private Button btnRefreshShelf;
 
     private TokenStorage tokenStorage;
@@ -113,6 +115,8 @@ public class MainActivity extends Activity {
 
         loadingTextView = (TextView) findViewById(R.id.loading_text);
         emptyStateContainer = findViewById(R.id.empty_state_container);
+        emptyShelfTitleView = (TextView) findViewById(R.id.empty_shelf_title_view);
+        emptyShelfHintView = (TextView) findViewById(R.id.empty_shelf_hint_view);
         btnRefreshShelf = (Button) findViewById(R.id.btn_refresh_shelf);
 
         shelfFooterStatus = (TextView) findViewById(R.id.shelf_footer_status);
@@ -490,7 +494,59 @@ public class MainActivity extends Activity {
         }
     }
 
+    private boolean isNetworkAvailable() {
+        try {
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm != null) {
+                android.net.NetworkInfo netInfo = cm.getActiveNetworkInfo();
+                return netInfo != null && netInfo.isConnected();
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    private void showNoInternetDialog(final Runnable onRetry) {
+        if (isFinishing()) return;
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Нет подключения к интернету");
+        builder.setMessage("Для работы каталога и поиска книг требуется подключение к сети Wi-Fi.\n\nПожалуйста, включите Wi-Fi на устройстве и попробуйте снова.");
+        builder.setPositiveButton("Повторить попытку", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                dialog.dismiss();
+                if (onRetry != null) {
+                    onRetry.run();
+                }
+            }
+        });
+        builder.setNegativeButton("Закрыть", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                dialog.dismiss();
+            }
+        });
+        builder.setCancelable(true);
+        AlertDialog dialog = builder.create();
+        dialog.show();
+        EpdController.requestFullRefresh(this, null);
+    }
+
     private void loadCatalog() {
+        if (!isNetworkAvailable()) {
+            currentBooks.clear();
+            adapter.notifyDataSetChanged();
+            loadingTextView.setVisibility(View.GONE);
+            updateEmptyState();
+            updateShelfFooter();
+            showNoInternetDialog(new Runnable() {
+                @Override
+                public void run() {
+                    loadCatalog();
+                }
+            });
+            return;
+        }
+
         currentBooks.clear();
         adapter.notifyDataSetChanged();
         updateEmptyState();
@@ -519,12 +575,17 @@ public class MainActivity extends Activity {
                 loadingTextView.setVisibility(View.GONE);
                 updateEmptyState();
                 updateShelfFooter();
-                Toast.makeText(MainActivity.this, "Ошибка каталога: " + errorMessage, Toast.LENGTH_SHORT).show();
+                showNoInternetDialog(new Runnable() {
+                    @Override
+                    public void run() {
+                        loadCatalog();
+                    }
+                });
             }
         });
     }
 
-    private void executeSearch(String query) {
+    private void executeSearch(final String query) {
         if (query == null || query.trim().isEmpty()) {
             Toast.makeText(this, "Введите поисковый запрос", Toast.LENGTH_SHORT).show();
             return;
@@ -536,6 +597,21 @@ public class MainActivity extends Activity {
                 imm.hideSoftInputFromWindow(searchQueryInput.getWindowToken(), 0);
             }
         } catch (Exception ignored) {}
+
+        if (!isNetworkAvailable()) {
+            currentBooks.clear();
+            adapter.notifyDataSetChanged();
+            loadingTextView.setVisibility(View.GONE);
+            updateEmptyState();
+            updateShelfFooter();
+            showNoInternetDialog(new Runnable() {
+                @Override
+                public void run() {
+                    executeSearch(query);
+                }
+            });
+            return;
+        }
 
         loadingTextView.setText("Поиск «" + query.trim() + "»...");
         loadingTextView.setVisibility(View.VISIBLE);
@@ -563,7 +639,12 @@ public class MainActivity extends Activity {
                 loadingTextView.setVisibility(View.GONE);
                 updateEmptyState();
                 updateShelfFooter();
-                Toast.makeText(MainActivity.this, "Ошибка поиска: " + errorMessage, Toast.LENGTH_SHORT).show();
+                showNoInternetDialog(new Runnable() {
+                    @Override
+                    public void run() {
+                        executeSearch(query);
+                    }
+                });
             }
         });
     }
@@ -673,6 +754,34 @@ public class MainActivity extends Activity {
         if (currentBooks.isEmpty()) {
             emptyStateContainer.setVisibility(View.VISIBLE);
             booksListView.setVisibility(View.GONE);
+
+            if (emptyShelfTitleView != null && emptyShelfHintView != null) {
+                if ("catalog".equals(currentShelf)) {
+                    if (!isNetworkAvailable()) {
+                        emptyShelfTitleView.setText("Нет подключения к интернету");
+                        emptyShelfHintView.setText("Каталог и рекомендации доступны онлайн.\nПодключитесь к Wi-Fi и нажмите кнопку ниже.");
+                        if (btnRefreshShelf != null) btnRefreshShelf.setText("Повторить попытку");
+                    } else {
+                        emptyShelfTitleView.setText("Каталог пуст");
+                        emptyShelfHintView.setText("Не удалось загрузить рекомендации книг.\nНажмите кнопку ниже для повторной загрузки.");
+                        if (btnRefreshShelf != null) btnRefreshShelf.setText("Обновить каталог");
+                    }
+                } else if ("search".equals(currentShelf)) {
+                    if (!isNetworkAvailable()) {
+                        emptyShelfTitleView.setText("Нет подключения к интернету");
+                        emptyShelfHintView.setText("Для поиска книг требуется подключение к сети Wi-Fi.");
+                        if (btnRefreshShelf != null) btnRefreshShelf.setText("Повторить поиск");
+                    } else {
+                        emptyShelfTitleView.setText("Ничего не найдено");
+                        emptyShelfHintView.setText("Попробуйте изменить поисковый запрос или имя автора.");
+                        if (btnRefreshShelf != null) btnRefreshShelf.setText("Очистить поиск");
+                    }
+                } else {
+                    emptyShelfTitleView.setText(R.string.empty_shelf_title);
+                    emptyShelfHintView.setText(R.string.empty_shelf_hint);
+                    if (btnRefreshShelf != null) btnRefreshShelf.setText("Обновить список книг");
+                }
+            }
         } else {
             emptyStateContainer.setVisibility(View.GONE);
             booksListView.setVisibility(View.VISIBLE);

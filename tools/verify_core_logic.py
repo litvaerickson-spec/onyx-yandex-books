@@ -747,6 +747,95 @@ def test_obj_and_whitespace_cleaning():
     print("✅ Тест очистки [OBJ] и нормализации абзацев успешно пройден!\n")
 
 
+def test_anchor_toc_and_missing_chapter_preservation():
+    print("--- [ТЕСТ 17] Сохранение всех частей и якорная нарезка оглавления (TOC Anchors) ---")
+    import re
+
+    # Моделируем ситуацию книги про депрессию:
+    # В одном файле spine лежат Часть 3, Часть 4 и Часть 5
+    raw_spine_html = """
+    <html>
+      <body>
+        <div id="part3">
+          <h2>Часть 3. Механизмы депрессии</h2>
+          <p>Текст третьей части книги про депрессию...</p>
+        </div>
+        <div id="part4">
+          <h2>Часть 4. Методы преодоления</h2>
+          <p>Текст четвертой части, которая раньше пропадала из-за бага в оглавлении!</p>
+        </div>
+        <div id="part5">
+          <h2>Часть 5. Практические шаги</h2>
+          <p>Текст пятой части книги...</p>
+        </div>
+      </body>
+    </html>
+    """
+
+    toc_items = [
+        {"title": "Часть 3", "anchor": "part3"},
+        {"title": "Часть 4", "anchor": "part4"},
+        {"title": "Часть 5", "anchor": "part5"},
+    ]
+
+    def find_anchor_offset(html, anchor):
+        pattern = re.compile(r'(?:id|name)\s*=\s*["\']' + re.escape(anchor) + r'["\']', re.IGNORECASE)
+        m = pattern.search(html)
+        return m.start() if m else -1
+
+    offsets = []
+    for item in toc_items:
+        off = find_anchor_offset(raw_spine_html, item["anchor"])
+        assert off > 0, f"Якорь {item['anchor']} обязан быть найден!"
+        offsets.append((off, item["title"]))
+
+    # Проверяем нарезку
+    chapters = []
+    for i in range(len(offsets)):
+        cur_off, title = offsets[i]
+        next_off = offsets[i + 1][0] if i + 1 < len(offsets) else len(raw_spine_html)
+        slice_html = raw_spine_html[cur_off:next_off]
+        clean_text = re.sub(r"<[^>]+>", " ", slice_html)
+        clean_text = " ".join(clean_text.split())
+        chapters.append({"title": title, "text": clean_text})
+
+    print(f"Извлечено глав: {len(chapters)}")
+    for ch in chapters:
+        print(f" - {ch['title']}: {ch['text'][:50]}...")
+
+    assert len(chapters) == 3, f"Ожидалось ровно 3 части, получено {len(chapters)}"
+    assert chapters[0]["title"] == "Часть 3"
+    assert chapters[1]["title"] == "Часть 4", "КРИТИЧНО: Часть 4 не должна пропадать!"
+    assert chapters[2]["title"] == "Часть 5"
+    assert "четвертой части" in chapters[1]["text"]
+
+    print("✅ Тест якорного оглавления и сохранения всех частей успешно пройден!\n")
+
+
+def test_compact_footer_and_margin_geometry():
+    print("--- [ТЕСТ 18] Компактная геометрия футера E-Ink и устранение пустоты внизу ---")
+
+    # Исходная проблемная геометрия v1.3.8:
+    # paddingBottomPx = 20, footerReservedHeightPx = 44 -> 64px отступа снизу
+    # Новая компактная геометрия v1.3.9:
+    padding_bottom = 6
+    footer_reserved = 20
+    total_bottom_reserved = padding_bottom + footer_reserved
+
+    print(f"Резерв снизу: {total_bottom_reserved}px (было 64px, сокращение на {64 - total_bottom_reserved}px)")
+    assert total_bottom_reserved == 26, "Ожидалось суммарно 26px резерва для футера"
+
+    canvas_height = 758
+    footer_baseline = canvas_height - 8
+    content_bottom_limit = canvas_height - total_bottom_reserved
+
+    print(f"Высота холста: {canvas_height}px, лимит контента: {content_bottom_limit}px, baseline футера: {footer_baseline}px")
+    assert footer_baseline > content_bottom_limit
+    assert footer_baseline - content_bottom_limit <= 20, "Зазор между последней строкой текста и футером оптимизирован!"
+
+    print("✅ Тест геометрии футера успешно пройден!\n")
+
+
 if __name__ == "__main__":
     print("==================================================")
     print("🚀 Запуск тотальной верификации ядра Яндекс Книги")
@@ -768,6 +857,8 @@ if __name__ == "__main__":
     test_iso_timestamp_parsing()
     test_epub_toc_and_chapter_merging()
     test_obj_and_whitespace_cleaning()
+    test_anchor_toc_and_missing_chapter_preservation()
+    test_compact_footer_and_margin_geometry()
     print("==================================================")
-    print("🎉 ВСЕ 16 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 18 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

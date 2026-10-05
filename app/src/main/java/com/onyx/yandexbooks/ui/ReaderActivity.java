@@ -2,6 +2,8 @@ package com.onyx.yandexbooks.ui;
 
 import android.app.Activity;
 import android.app.Dialog;
+import android.content.DialogInterface;
+import java.io.File;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Typeface;
@@ -316,6 +318,7 @@ public class ReaderActivity extends Activity {
         if (readerTopDivider != null) readerTopDivider.setVisibility(View.GONE);
         if (readerBottomBar != null) readerBottomBar.setVisibility(View.GONE);
         if (readerFormatPanel != null) readerFormatPanel.setVisibility(View.GONE);
+        forceEpdRefresh();
     }
 
     private void setupNeoReaderControls() {
@@ -1252,7 +1255,14 @@ public class ReaderActivity extends Activity {
             int h = (int) (dm.heightPixels * 0.88);
             dialog.getWindow().setLayout(w, h);
         }
+        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface d) {
+                forceEpdRefresh();
+            }
+        });
         dialog.show();
+        forceEpdRefresh();
         } catch (Throwable t) {
             Log.e(TAG, "Error displaying TOC dialog", t);
             Toast.makeText(this, "Ошибка отображения оглавления", Toast.LENGTH_SHORT).show();
@@ -1349,7 +1359,14 @@ public class ReaderActivity extends Activity {
             int w = (int) (dm.widthPixels * 0.85);
             dialog.getWindow().setLayout(w, ViewGroup.LayoutParams.WRAP_CONTENT);
         }
+        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface d) {
+                forceEpdRefresh();
+            }
+        });
         dialog.show();
+        forceEpdRefresh();
     }
 
     private void calculateChapterLengths() {
@@ -1410,13 +1427,19 @@ public class ReaderActivity extends Activity {
     private void loadBookData() {
         // Проверяем, есть ли уже главы в локальной БД
         List<Chapter> localChapters = dbHelper.getChapters(bookUuid);
-        if (localChapters != null && !localChapters.isEmpty()) {
+        File epubFile = cacheManager.getEpubFile(bookUuid);
+        int lastTocVersion = appSettings.getInt("toc_ver_" + bookUuid, 0);
+        boolean hasLocalEpub = epubFile != null && epubFile.exists() && epubFile.length() > 0;
+        boolean needsMigration = hasLocalEpub && (lastTocVersion < 6 || localChapters == null || localChapters.size() <= 1);
+
+        if (localChapters != null && !localChapters.isEmpty() && !needsMigration) {
             chapters = localChapters;
             resolveInitialPositionAndOpen();
         } else {
-            cacheManager.ensureBookReady(bookUuid, bookTitle, new CacheManager.BookReadyCallback() {
+            cacheManager.reparseAndSaveBook(bookUuid, bookTitle, new CacheManager.BookReadyCallback() {
                 @Override
                 public void onReady(List<Chapter> loadedChapters) {
+                    appSettings.putInt("toc_ver_" + bookUuid, 6);
                     chapters = loadedChapters;
                     if (!chapters.isEmpty()) {
                         resolveInitialPositionAndOpen();
