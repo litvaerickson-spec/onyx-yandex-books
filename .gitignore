@@ -25,3 +25,7 @@ __pycache__/
 # Internal marketing & PR drafts
 docs/marketing/
 marketing/
+
+# Test generated artifacts
+docs/physical_test_*
+
