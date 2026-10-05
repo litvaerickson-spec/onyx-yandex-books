@@ -874,6 +874,9 @@ public class MainActivity extends Activity {
         Intent intent = new Intent(MainActivity.this, ReaderActivity.class);
         intent.putExtra("book_uuid", book.getUuid());
         intent.putExtra("book_title", book.getTitle());
+        intent.putExtra("book_percent", book.getPercent());
+        intent.putExtra("book_chapter", book.getCurrentChapterIndex());
+        intent.putExtra("book_paragraph", book.getCurrentParagraphIndex());
         startActivity(intent);
     }
 

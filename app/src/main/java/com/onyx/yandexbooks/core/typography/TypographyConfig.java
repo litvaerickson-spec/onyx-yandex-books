@@ -26,6 +26,9 @@ public class TypographyConfig implements Serializable {
     private boolean isHyphenationEnabled = true;
     private boolean isJustifyEnabled = true;
     private boolean isBoldText = true; // Высокий контраст для E-Ink Carta
+    private String fontFamily = "serif"; // serif, sans-serif, monospace
+    private String contrastMode = "high"; // high, normal
+    private String verticalMarginMode = "normal"; // small, normal, large
     private String customFontPath = null;
     private int epdFullRefreshInterval = 8; // Полный сброс артефактов E-Ink каждые 8 страниц
 
@@ -63,6 +66,27 @@ public class TypographyConfig implements Serializable {
 
     public boolean isBoldText() { return isBoldText; }
     public void setBoldText(boolean boldText) { isBoldText = boldText; }
+
+    public String getFontFamily() { return fontFamily != null ? fontFamily : "serif"; }
+    public void setFontFamily(String fontFamily) { this.fontFamily = fontFamily; }
+
+    public String getContrastMode() { return contrastMode != null ? contrastMode : "high"; }
+    public void setContrastMode(String contrastMode) { this.contrastMode = contrastMode; }
+
+    public String getVerticalMarginMode() { return verticalMarginMode != null ? verticalMarginMode : "normal"; }
+    public void setVerticalMarginMode(String mode) {
+        this.verticalMarginMode = mode;
+        if ("small".equalsIgnoreCase(mode)) {
+            setPaddingTopPx(8);
+            setPaddingBottomPx(12);
+        } else if ("large".equalsIgnoreCase(mode)) {
+            setPaddingTopPx(24);
+            setPaddingBottomPx(32);
+        } else {
+            setPaddingTopPx(14);
+            setPaddingBottomPx(20);
+        }
+    }
 
     public String getCustomFontPath() { return customFontPath; }
     public void setCustomFontPath(String customFontPath) { this.customFontPath = customFontPath; }

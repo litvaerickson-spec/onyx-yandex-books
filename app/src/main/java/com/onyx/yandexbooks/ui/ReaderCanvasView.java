@@ -81,6 +81,21 @@ public class ReaderCanvasView extends View {
         textPaint.setTextSize(spToPx(config.getFontSizeSp()));
         textPaint.setFakeBoldText(config.isBoldText());
 
+        Typeface baseTf = Typeface.SERIF;
+        if ("sans-serif".equalsIgnoreCase(config.getFontFamily())) {
+            baseTf = Typeface.SANS_SERIF;
+        } else if ("monospace".equalsIgnoreCase(config.getFontFamily())) {
+            baseTf = Typeface.MONOSPACE;
+        }
+        textPaint.setTypeface(baseTf);
+
+        if ("high".equalsIgnoreCase(config.getContrastMode())) {
+            textPaint.setStrokeWidth(0.5f);
+            textPaint.setStyle(Paint.Style.FILL_AND_STROKE);
+        } else {
+            textPaint.setStyle(Paint.Style.FILL);
+        }
+
         if (config.getCustomFontPath() != null) {
             File fontFile = new File(config.getCustomFontPath());
             if (fontFile.exists()) {

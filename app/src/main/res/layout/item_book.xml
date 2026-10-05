@@ -44,7 +44,7 @@
             android:layout_height="wrap_content"
             android:text="Автор"
             android:textSize="11sp"
-            android:textStyle="bold"
+            android:textStyle="normal"
             android:textColor="@color/eink_black"
             android:layout_marginTop="1dp"
             android:includeFontPadding="false"

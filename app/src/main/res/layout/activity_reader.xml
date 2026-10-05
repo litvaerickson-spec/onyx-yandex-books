@@ -229,137 +229,402 @@
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
                 android:background="@color/eink_black"
-                android:layout_marginBottom="6dp" />
+                android:layout_marginBottom="4dp" />
 
-            <!-- Управление размером шрифта -->
+            <!-- Верхняя панель подвкладок панели Формат: Вид | Формат | Между строк -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="32dp"
                 android:orientation="horizontal"
                 android:gravity="center_vertical">
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Шрифт:"
-                    android:textSize="12sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/eink_black"
-                    android:layout_marginRight="8dp" />
-
                 <Button
-                    android:id="@+id/btn_font_decrease"
-                    android:layout_width="40dp"
-                    android:layout_height="28dp"
-                    android:minHeight="0dp"
-                    android:minWidth="0dp"
-                    android:text="A-"
-                    android:textSize="12sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/btn_eink_text_color"
-                    android:background="@drawable/btn_eink"
-                    android:includeFontPadding="false" />
-
-                <TextView
-                    android:id="@+id/font_size_label"
-                    android:layout_width="36dp"
-                    android:layout_height="wrap_content"
-                    android:gravity="center"
-                    android:text="18"
-                    android:textSize="13sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/eink_black" />
-
-                <Button
-                    android:id="@+id/btn_font_increase"
-                    android:layout_width="40dp"
-                    android:layout_height="28dp"
-                    android:minHeight="0dp"
-                    android:minWidth="0dp"
-                    android:text="A+"
-                    android:textSize="12sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/btn_eink_text_color"
-                    android:background="@drawable/btn_eink"
-                    android:includeFontPadding="false" />
-
-                <View
-                    android:layout_width="0dp"
-                    android:layout_height="1dp"
-                    android:layout_weight="1" />
-
-                <Button
-                    android:id="@+id/btn_toggle_line_spacing"
-                    android:layout_width="wrap_content"
-                    android:layout_height="28dp"
-                    android:minHeight="0dp"
-                    android:minWidth="0dp"
-                    android:text="Интервал: 1.25x"
-                    android:textSize="11sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/btn_eink_text_color"
-                    android:background="@drawable/btn_eink"
-                    android:paddingLeft="6dp"
-                    android:paddingRight="6dp"
-                    android:includeFontPadding="false" />
-            </LinearLayout>
-
-            <!-- Сетка параметров: Поля, Переносы, Контраст -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="30dp"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginTop="5dp">
-
-                <Button
-                    android:id="@+id/btn_toggle_margins"
+                    android:id="@+id/btn_subtab_view"
                     android:layout_width="0dp"
                     android:layout_height="match_parent"
                     android:layout_weight="1"
                     android:minHeight="0dp"
                     android:minWidth="0dp"
-                    android:text="Поля: Узкие"
-                    android:textSize="11sp"
+                    android:text="Вид"
+                    android:textSize="12sp"
                     android:textStyle="bold"
                     android:textColor="@color/btn_eink_text_color"
                     android:background="@drawable/btn_eink"
-                    android:singleLine="true"
                     android:includeFontPadding="false"
                     android:layout_marginRight="3dp" />
 
                 <Button
-                    android:id="@+id/btn_toggle_hyphenation"
+                    android:id="@+id/btn_subtab_format"
                     android:layout_width="0dp"
                     android:layout_height="match_parent"
                     android:layout_weight="1"
                     android:minHeight="0dp"
                     android:minWidth="0dp"
-                    android:text="Переносы: Вкл"
-                    android:textSize="11sp"
+                    android:text="Формат"
+                    android:textSize="12sp"
                     android:textStyle="bold"
                     android:textColor="@color/btn_eink_text_color"
                     android:background="@drawable/btn_eink"
-                    android:singleLine="true"
                     android:includeFontPadding="false"
-                    android:layout_marginLeft="3dp"
-                    android:layout_marginRight="3dp" />
+                    android:layout_marginLeft="2dp"
+                    android:layout_marginRight="2dp" />
 
                 <Button
-                    android:id="@+id/btn_toggle_contrast"
+                    android:id="@+id/btn_subtab_spacing"
                     android:layout_width="0dp"
                     android:layout_height="match_parent"
                     android:layout_weight="1"
                     android:minHeight="0dp"
                     android:minWidth="0dp"
-                    android:text="Жирный: Вкл"
-                    android:textSize="11sp"
+                    android:text="Между строк"
+                    android:textSize="12sp"
                     android:textStyle="bold"
                     android:textColor="@color/btn_eink_text_color"
                     android:background="@drawable/btn_eink"
-                    android:singleLine="true"
                     android:includeFontPadding="false"
                     android:layout_marginLeft="3dp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/eink_gray"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="6dp" />
+
+            <!-- Контейнер подвкладки 1: Вид -->
+            <LinearLayout
+                android:id="@+id/layout_subtab_view_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="visible">
+
+                <!-- Размер шрифта: ползунок со стрелками/кнопками — и + -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="32dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="95dp"
+                        android:layout_height="wrap_content"
+                        android:text="Размер шрифта"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/eink_black" />
+
+                    <Button
+                        android:id="@+id/btn_font_decrease"
+                        android:layout_width="32dp"
+                        android:layout_height="28dp"
+                        android:minHeight="0dp"
+                        android:minWidth="0dp"
+                        android:text="—"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/btn_eink_text_color"
+                        android:background="@drawable/btn_eink"
+                        android:includeFontPadding="false" />
+
+                    <SeekBar
+                        android:id="@+id/seekbar_font_size"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="24"
+                        android:progress="6"
+                        android:paddingLeft="8dp"
+                        android:paddingRight="8dp" />
+
+                    <Button
+                        android:id="@+id/btn_font_increase"
+                        android:layout_width="32dp"
+                        android:layout_height="28dp"
+                        android:minHeight="0dp"
+                        android:minWidth="0dp"
+                        android:text="+"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/btn_eink_text_color"
+                        android:background="@drawable/btn_eink"
+                        android:includeFontPadding="false" />
+
+                    <TextView
+                        android:id="@+id/font_size_label"
+                        android:layout_width="32dp"
+                        android:layout_height="wrap_content"
+                        android:gravity="center"
+                        android:text="18"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/eink_black" />
+                </LinearLayout>
+
+                <!-- Вид шрифта (Font Family: Serif, Sans-Serif, Monospace) -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="32dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="4dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Вид шрифта"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/eink_black" />
+
+                    <Button
+                        android:id="@+id/btn_toggle_font_family"
+                        android:layout_width="140dp"
+                        android:layout_height="28dp"
+                        android:minHeight="0dp"
+                        android:minWidth="0dp"
+                        android:text="Serif ∨"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/btn_eink_text_color"
+                        android:background="@drawable/btn_eink"
+                        android:includeFontPadding="false" />
+                </LinearLayout>
+
+                <!-- Красная строка / Абзац -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="32dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="4dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Абзацный отступ"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/eink_black" />
+
+                    <Button
+                        android:id="@+id/btn_toggle_indent"
+                        android:layout_width="140dp"
+                        android:layout_height="28dp"
+                        android:minHeight="0dp"
+                        android:minWidth="0dp"
+                        android:text="20 px ∨"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/btn_eink_text_color"
+                        android:background="@drawable/btn_eink"
+                        android:includeFontPadding="false" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Контейнер подвкладки 2: Формат -->
+            <LinearLayout
+                android:id="@+id/layout_subtab_format_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <!-- Жирность шрифта -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="32dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Жирность текста"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/eink_black" />
+
+                    <Button
+                        android:id="@+id/btn_toggle_contrast"
+                        android:layout_width="140dp"
+                        android:layout_height="28dp"
+                        android:minHeight="0dp"
+                        android:minWidth="0dp"
+                        android:text="Жирный"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/btn_eink_text_color"
+                        android:background="@drawable/btn_eink"
+                        android:includeFontPadding="false" />
+                </LinearLayout>
+
+                <!-- Переносы слов TeX -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="32dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="4dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Переносы слов (TeX)"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/eink_black" />
+
+                    <Button
+                        android:id="@+id/btn_toggle_hyphenation"
+                        android:layout_width="140dp"
+                        android:layout_height="28dp"
+                        android:minHeight="0dp"
+                        android:minWidth="0dp"
+                        android:text="Включены"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/btn_eink_text_color"
+                        android:background="@drawable/btn_eink"
+                        android:includeFontPadding="false" />
+                </LinearLayout>
+
+                <!-- Контрастность E-Ink -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="32dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="4dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Контраст E-Ink"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/eink_black" />
+
+                    <Button
+                        android:id="@+id/btn_toggle_eink_contrast"
+                        android:layout_width="140dp"
+                        android:layout_height="28dp"
+                        android:minHeight="0dp"
+                        android:minWidth="0dp"
+                        android:text="Высокий"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/btn_eink_text_color"
+                        android:background="@drawable/btn_eink"
+                        android:includeFontPadding="false" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Контейнер подвкладки 3: Между строк -->
+            <LinearLayout
+                android:id="@+id/layout_subtab_spacing_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <!-- Межстрочный интервал -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="32dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Межстрочный интервал"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/eink_black" />
+
+                    <Button
+                        android:id="@+id/btn_toggle_line_spacing"
+                        android:layout_width="140dp"
+                        android:layout_height="28dp"
+                        android:minHeight="0dp"
+                        android:minWidth="0dp"
+                        android:text="1.25x ∨"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/btn_eink_text_color"
+                        android:background="@drawable/btn_eink"
+                        android:includeFontPadding="false" />
+                </LinearLayout>
+
+                <!-- Боковые поля страницы -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="32dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="4dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Боковые поля (Л/П)"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/eink_black" />
+
+                    <Button
+                        android:id="@+id/btn_toggle_margins"
+                        android:layout_width="140dp"
+                        android:layout_height="28dp"
+                        android:minHeight="0dp"
+                        android:minWidth="0dp"
+                        android:text="Узкие (18) ∨"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/btn_eink_text_color"
+                        android:background="@drawable/btn_eink"
+                        android:includeFontPadding="false" />
+                </LinearLayout>
+
+                <!-- Верхние и нижние поля -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="32dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="4dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Верх/низ поля"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/eink_black" />
+
+                    <Button
+                        android:id="@+id/btn_toggle_vert_margins"
+                        android:layout_width="140dp"
+                        android:layout_height="28dp"
+                        android:minHeight="0dp"
+                        android:minWidth="0dp"
+                        android:text="Стандарт ∨"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/btn_eink_text_color"
+                        android:background="@drawable/btn_eink"
+                        android:includeFontPadding="false" />
+                </LinearLayout>
             </LinearLayout>
         </LinearLayout>
 

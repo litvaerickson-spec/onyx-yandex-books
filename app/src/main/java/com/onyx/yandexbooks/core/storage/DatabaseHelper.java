@@ -92,6 +92,17 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 "paragraph_index INTEGER," +
                 "timestamp INTEGER" +
                 ")");
+
+        // Закладки пользователя
+        db.execSQL("CREATE TABLE IF NOT EXISTS bookmarks (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                "book_uuid TEXT," +
+                "chapter_index INTEGER," +
+                "page_index INTEGER," +
+                "title TEXT," +
+                "snippet TEXT," +
+                "timestamp INTEGER" +
+                ")");
     }
 
     @Override
@@ -420,5 +431,53 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     public synchronized void clearSyncQueue() {
         SQLiteDatabase db = getWritableDatabase();
         db.delete("sync_queue", null, null);
+    }
+
+    public static class Bookmark {
+        public long id;
+        public String bookUuid;
+        public int chapterIndex;
+        public int pageIndex;
+        public String title;
+        public String snippet;
+        public long timestamp;
+    }
+
+    public synchronized long addBookmark(String bookUuid, int chapterIndex, int pageIndex, String title, String snippet) {
+        SQLiteDatabase db = getWritableDatabase();
+        ContentValues cv = new ContentValues();
+        cv.put("book_uuid", bookUuid);
+        cv.put("chapter_index", chapterIndex);
+        cv.put("page_index", pageIndex);
+        cv.put("title", title);
+        cv.put("snippet", snippet);
+        cv.put("timestamp", System.currentTimeMillis());
+        return db.insert("bookmarks", null, cv);
+    }
+
+    public synchronized List<Bookmark> getBookmarks(String bookUuid) {
+        List<Bookmark> list = new ArrayList<>();
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor c = db.rawQuery("SELECT * FROM bookmarks WHERE book_uuid = ? ORDER BY timestamp DESC", new String[]{bookUuid});
+        if (c != null) {
+            while (c.moveToNext()) {
+                Bookmark b = new Bookmark();
+                b.id = c.getLong(c.getColumnIndex("id"));
+                b.bookUuid = c.getString(c.getColumnIndex("book_uuid"));
+                b.chapterIndex = c.getInt(c.getColumnIndex("chapter_index"));
+                b.pageIndex = c.getInt(c.getColumnIndex("page_index"));
+                b.title = c.getString(c.getColumnIndex("title"));
+                b.snippet = c.getString(c.getColumnIndex("snippet"));
+                b.timestamp = c.getLong(c.getColumnIndex("timestamp"));
+                list.add(b);
+            }
+            c.close();
+        }
+        return list;
+    }
+
+    public synchronized void deleteBookmark(long id) {
+        SQLiteDatabase db = getWritableDatabase();
+        db.delete("bookmarks", "id = ?", new String[]{String.valueOf(id)});
     }
 }

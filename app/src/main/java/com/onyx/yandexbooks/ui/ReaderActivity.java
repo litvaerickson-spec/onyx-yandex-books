@@ -23,6 +23,9 @@ import android.widget.ListView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.text.TextUtils;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 
 import com.onyx.yandexbooks.R;
 import com.onyx.yandexbooks.core.api.YandexBooksApiClient;
@@ -81,14 +84,32 @@ public class ReaderActivity extends Activity {
     private Button btnTabProgress;
     private Button btnTabFormat;
 
-    // Элементы форматирования
+    // Подвкладки панели Формат
+    private Button btnSubtabView;
+    private Button btnSubtabFormat;
+    private Button btnSubtabSpacing;
+    private View layoutSubtabViewContainer;
+    private View layoutSubtabFormatContainer;
+    private View layoutSubtabSpacingContainer;
+    private String activeSubtab = "view"; // "view", "format", "spacing"
+
+    // Элементы подвкладки «Вид»
     private TextView fontSizeLabel;
     private Button btnFontDecrease;
     private Button btnFontIncrease;
+    private SeekBar seekbarFontSize;
+    private Button btnToggleFontFamily;
+    private Button btnToggleIndent;
+
+    // Элементы подвкладки «Формат»
+    private Button btnToggleContrast; // Утолщение текста
+    private Button btnToggleHyphenation; // Переносы слов TeX
+    private Button btnToggleEinkContrast; // Контраст E-Ink
+
+    // Элементы подвкладки «Между строк»
     private Button btnToggleLineSpacing;
     private Button btnToggleMargins;
-    private Button btnToggleHyphenation;
-    private Button btnToggleContrast;
+    private Button btnToggleVertMargins;
 
     private String bookUuid;
     private String bookTitle;
@@ -98,6 +119,11 @@ public class ReaderActivity extends Activity {
     private int currentPageIndex = 0;
     private int pageTurnCounter = 0;
     private boolean hasPerformedInitialRefresh = false;
+
+    // Взвешенный расчет прогресса по длине глав (исключает ложные перескоки в конец книги)
+    private long[] chapterLengths;
+    private long totalBookLength = 0;
+    private boolean isInitialLoading = true; // Защита от перезаписи облачного прогресса при старте
 
     // Фоновый исполнитель пагинации: полностью исключает блокировку UI-потока и ANR
     private final ExecutorService paginationExecutor = Executors.newSingleThreadExecutor();
@@ -145,13 +171,32 @@ public class ReaderActivity extends Activity {
         btnTabProgress = (Button) findViewById(R.id.btn_tab_progress);
         btnTabFormat = (Button) findViewById(R.id.btn_tab_format);
 
+        // Подвкладки панели Формат
+        btnSubtabView = (Button) findViewById(R.id.btn_subtab_view);
+        btnSubtabFormat = (Button) findViewById(R.id.btn_subtab_format);
+        btnSubtabSpacing = (Button) findViewById(R.id.btn_subtab_spacing);
+
+        layoutSubtabViewContainer = findViewById(R.id.layout_subtab_view_container);
+        layoutSubtabFormatContainer = findViewById(R.id.layout_subtab_format_container);
+        layoutSubtabSpacingContainer = findViewById(R.id.layout_subtab_spacing_container);
+
+        // Контролы подвкладки «Вид»
         fontSizeLabel = (TextView) findViewById(R.id.font_size_label);
         btnFontDecrease = (Button) findViewById(R.id.btn_font_decrease);
         btnFontIncrease = (Button) findViewById(R.id.btn_font_increase);
+        seekbarFontSize = (SeekBar) findViewById(R.id.seekbar_font_size);
+        btnToggleFontFamily = (Button) findViewById(R.id.btn_toggle_font_family);
+        btnToggleIndent = (Button) findViewById(R.id.btn_toggle_indent);
+
+        // Контролы подвкладки «Формат»
+        btnToggleContrast = (Button) findViewById(R.id.btn_toggle_contrast);
+        btnToggleHyphenation = (Button) findViewById(R.id.btn_toggle_hyphenation);
+        btnToggleEinkContrast = (Button) findViewById(R.id.btn_toggle_eink_contrast);
+
+        // Контролы подвкладки «Между строк»
         btnToggleLineSpacing = (Button) findViewById(R.id.btn_toggle_line_spacing);
         btnToggleMargins = (Button) findViewById(R.id.btn_toggle_margins);
-        btnToggleHyphenation = (Button) findViewById(R.id.btn_toggle_hyphenation);
-        btnToggleContrast = (Button) findViewById(R.id.btn_toggle_contrast);
+        btnToggleVertMargins = (Button) findViewById(R.id.btn_toggle_vert_margins);
 
         if (readerBookTitleTop != null) {
             readerBookTitleTop.setText(bookTitle != null ? bookTitle : "Яндекс Книги");
@@ -159,10 +204,24 @@ public class ReaderActivity extends Activity {
 
         appSettings = new com.onyx.yandexbooks.core.storage.AppSettings(this);
         typographyConfig = new TypographyConfig();
+        typographyConfig.setFontSizeSp(appSettings.getFontSizeSp());
+        typographyConfig.setFontFamily(appSettings.getFontFamily());
+        typographyConfig.setLineSpacingMultiplier(appSettings.getLineSpacingMultiplier());
+        typographyConfig.setParagraphIndentPx(appSettings.getParagraphIndentPx());
+        typographyConfig.setHyphenationEnabled(appSettings.isHyphenationEnabled());
+        typographyConfig.setBoldText(appSettings.isBoldText());
+        typographyConfig.setContrastMode(appSettings.getContrastMode());
+        typographyConfig.setVerticalMarginMode(appSettings.getVerticalMarginMode());
+
         int marginPx = appSettings.getMarginPaddingPx();
         typographyConfig.setPaddingLeftPx(marginPx);
         typographyConfig.setPaddingRightPx(marginPx);
+
         paginator = new TextPaginator();
+
+        if (readerCanvas != null) {
+            readerCanvas.setTypographyConfig(typographyConfig);
+        }
 
         TokenStorage tokenStorage = new TokenStorage(this);
         apiClient = new YandexBooksApiClient(tokenStorage);
@@ -289,6 +348,7 @@ public class ReaderActivity extends Activity {
                     if (currentChapterIndex > 0) {
                         currentChapterIndex--;
                         currentPageIndex = 0;
+                        isInitialLoading = false;
                         loadChapter(currentChapterIndex);
                     } else {
                         Toast.makeText(ReaderActivity.this, "Это первая глава книги", Toast.LENGTH_SHORT).show();
@@ -304,6 +364,7 @@ public class ReaderActivity extends Activity {
                     if (chapters != null && currentChapterIndex + 1 < chapters.size()) {
                         currentChapterIndex++;
                         currentPageIndex = 0;
+                        isInitialLoading = false;
                         loadChapter(currentChapterIndex);
                     } else {
                         Toast.makeText(ReaderActivity.this, "Это последняя глава книги", Toast.LENGTH_SHORT).show();
@@ -348,6 +409,7 @@ public class ReaderActivity extends Activity {
                 public void onStopTrackingTouch(SeekBar seekBar) {
                     if (currentPages != null && !currentPages.isEmpty()) {
                         currentPageIndex = Math.max(0, Math.min(seekBar.getProgress(), currentPages.size() - 1));
+                        isInitialLoading = false;
                         renderCurrentPage();
                         EpdController.requestFullRefresh(ReaderActivity.this, readerCanvas);
                     }
@@ -387,18 +449,77 @@ public class ReaderActivity extends Activity {
             });
         }
 
-        // Управление форматированием
+        // Переключение подвкладок панели Формат: [ Вид ] | [ Формат ] | [ Между строк ]
+        if (btnSubtabView != null) {
+            btnSubtabView.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    switchFormatSubtab("view");
+                }
+            });
+        }
+        if (btnSubtabFormat != null) {
+            btnSubtabFormat.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    switchFormatSubtab("format");
+                }
+            });
+        }
+        if (btnSubtabSpacing != null) {
+            btnSubtabSpacing.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    switchFormatSubtab("spacing");
+                }
+            });
+        }
+        switchFormatSubtab("view");
+
+        // Подвкладка 1: Вид (Размер шрифта, Гарнитура, Абзацный отступ)
         if (fontSizeLabel != null) {
             fontSizeLabel.setText(String.valueOf(typographyConfig.getFontSizeSp()));
+        }
+
+        if (seekbarFontSize != null) {
+            seekbarFontSize.setMax(24); // 12sp .. 36sp
+            seekbarFontSize.setProgress(Math.max(0, Math.min(24, typographyConfig.getFontSizeSp() - 12)));
+            seekbarFontSize.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override
+                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    if (fromUser) {
+                        int size = 12 + progress;
+                        typographyConfig.setFontSizeSp(size);
+                        if (fontSizeLabel != null) fontSizeLabel.setText(String.valueOf(size));
+                    }
+                }
+
+                @Override
+                public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override
+                public void onStopTrackingTouch(SeekBar seekBar) {
+                    int size = 12 + seekBar.getProgress();
+                    typographyConfig.setFontSizeSp(size);
+                    appSettings.setFontSizeSp(size);
+                    repaginateCurrentChapter();
+                }
+            });
         }
 
         if (btnFontIncrease != null) {
             btnFontIncrease.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    typographyConfig.setFontSizeSp(typographyConfig.getFontSizeSp() + 1);
-                    if (fontSizeLabel != null) fontSizeLabel.setText(String.valueOf(typographyConfig.getFontSizeSp()));
-                    repaginateCurrentChapter();
+                    int cur = typographyConfig.getFontSizeSp();
+                    if (cur < 36) {
+                        int next = cur + 1;
+                        typographyConfig.setFontSizeSp(next);
+                        appSettings.setFontSizeSp(next);
+                        if (fontSizeLabel != null) fontSizeLabel.setText(String.valueOf(next));
+                        if (seekbarFontSize != null) seekbarFontSize.setProgress(next - 12);
+                        repaginateCurrentChapter();
+                    }
                 }
             });
         }
@@ -407,15 +528,91 @@ public class ReaderActivity extends Activity {
             btnFontDecrease.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    typographyConfig.setFontSizeSp(typographyConfig.getFontSizeSp() - 1);
-                    if (fontSizeLabel != null) fontSizeLabel.setText(String.valueOf(typographyConfig.getFontSizeSp()));
+                    int cur = typographyConfig.getFontSizeSp();
+                    if (cur > 12) {
+                        int next = cur - 1;
+                        typographyConfig.setFontSizeSp(next);
+                        appSettings.setFontSizeSp(next);
+                        if (fontSizeLabel != null) fontSizeLabel.setText(String.valueOf(next));
+                        if (seekbarFontSize != null) seekbarFontSize.setProgress(next - 12);
+                        repaginateCurrentChapter();
+                    }
+                }
+            });
+        }
+
+        updateFontFamilyButtonText();
+        if (btnToggleFontFamily != null) {
+            btnToggleFontFamily.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    cycleFontFamily();
+                }
+            });
+        }
+
+        updateIndentButtonText();
+        if (btnToggleIndent != null) {
+            btnToggleIndent.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    cycleIndent();
+                }
+            });
+        }
+
+        // Подвкладка 2: Формат (Жирный/Обычный, Переносы слов TeX, Контраст E-Ink)
+        updateContrastButtonText();
+        if (btnToggleContrast != null) {
+            btnToggleContrast.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    boolean bold = !typographyConfig.isBoldText();
+                    typographyConfig.setBoldText(bold);
+                    appSettings.setBoldText(bold);
+                    updateContrastButtonText();
+                    if (readerCanvas != null) readerCanvas.setTypographyConfig(typographyConfig);
                     repaginateCurrentChapter();
                 }
             });
         }
 
+        updateHyphenationButtonText();
+        if (btnToggleHyphenation != null) {
+            btnToggleHyphenation.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    boolean enabled = !typographyConfig.isHyphenationEnabled();
+                    typographyConfig.setHyphenationEnabled(enabled);
+                    appSettings.setHyphenationEnabled(enabled);
+                    updateHyphenationButtonText();
+                    repaginateCurrentChapter();
+                }
+            });
+        }
+
+        updateEinkContrastButtonText();
+        if (btnToggleEinkContrast != null) {
+            btnToggleEinkContrast.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    String cur = typographyConfig.getContrastMode();
+                    String next = "high".equalsIgnoreCase(cur) ? "normal" : "high";
+                    typographyConfig.setContrastMode(next);
+                    appSettings.setContrastMode(next);
+                    updateEinkContrastButtonText();
+                    if (readerCanvas != null) {
+                        readerCanvas.setTypographyConfig(typographyConfig);
+                        readerCanvas.invalidate();
+                    }
+                    forceEpdRefresh();
+                }
+            });
+        }
+
+        // Подвкладка 3: Между строк (Межстрочный интервал, Боковые поля, Верх/низ поля)
+        updateLineSpacingButtonText();
         if (btnToggleLineSpacing != null) {
-            btnToggleLineSpacing.setText(String.format(Locale.US, "Интервал: %.2fx", typographyConfig.getLineSpacingMultiplier()));
             btnToggleLineSpacing.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
@@ -434,31 +631,189 @@ public class ReaderActivity extends Activity {
             });
         }
 
-        if (btnToggleHyphenation != null) {
-            btnToggleHyphenation.setText(typographyConfig.isHyphenationEnabled() ? "Переносы: Вкл" : "Переносы: Выкл");
-            btnToggleHyphenation.setOnClickListener(new View.OnClickListener() {
+        updateVertMarginButtonText();
+        if (btnToggleVertMargins != null) {
+            btnToggleVertMargins.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    boolean enabled = !typographyConfig.isHyphenationEnabled();
-                    typographyConfig.setHyphenationEnabled(enabled);
-                    btnToggleHyphenation.setText(enabled ? "Переносы: Вкл" : "Переносы: Выкл");
-                    repaginateCurrentChapter();
+                    cycleVertMarginMode();
                 }
             });
+        }
+    }
+
+    private void switchFormatSubtab(String subtab) {
+        activeSubtab = subtab;
+        if (layoutSubtabViewContainer != null) {
+            layoutSubtabViewContainer.setVisibility("view".equals(subtab) ? View.VISIBLE : View.GONE);
+        }
+        if (layoutSubtabFormatContainer != null) {
+            layoutSubtabFormatContainer.setVisibility("format".equals(subtab) ? View.VISIBLE : View.GONE);
+        }
+        if (layoutSubtabSpacingContainer != null) {
+            layoutSubtabSpacingContainer.setVisibility("spacing".equals(subtab) ? View.VISIBLE : View.GONE);
         }
 
-        if (btnToggleContrast != null) {
-            btnToggleContrast.setText(typographyConfig.isBoldText() ? "Жирный: Вкл" : "Жирный: Выкл");
-            btnToggleContrast.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    boolean bold = !typographyConfig.isBoldText();
-                    typographyConfig.setBoldText(bold);
-                    btnToggleContrast.setText(bold ? "Жирный: Вкл" : "Жирный: Выкл");
-                    repaginateCurrentChapter();
-                }
-            });
+        if (btnSubtabView != null) {
+            boolean active = "view".equals(subtab);
+            btnSubtabView.setBackgroundResource(active ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
+            btnSubtabView.setTextColor(active ? Color.WHITE : Color.BLACK);
         }
+        if (btnSubtabFormat != null) {
+            boolean active = "format".equals(subtab);
+            btnSubtabFormat.setBackgroundResource(active ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
+            btnSubtabFormat.setTextColor(active ? Color.WHITE : Color.BLACK);
+        }
+        if (btnSubtabSpacing != null) {
+            boolean active = "spacing".equals(subtab);
+            btnSubtabSpacing.setBackgroundResource(active ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
+            btnSubtabSpacing.setTextColor(active ? Color.WHITE : Color.BLACK);
+        }
+    }
+
+    private void updateFontFamilyButtonText() {
+        if (btnToggleFontFamily == null) return;
+        String f = typographyConfig.getFontFamily();
+        if ("sans-serif".equalsIgnoreCase(f)) {
+            btnToggleFontFamily.setText("Sans-Serif ∨");
+        } else if ("monospace".equalsIgnoreCase(f)) {
+            btnToggleFontFamily.setText("Monospace ∨");
+        } else {
+            btnToggleFontFamily.setText("Serif ∨");
+        }
+    }
+
+    private void cycleFontFamily() {
+        String f = typographyConfig.getFontFamily();
+        String next;
+        if ("serif".equalsIgnoreCase(f)) {
+            next = "sans-serif";
+        } else if ("sans-serif".equalsIgnoreCase(f)) {
+            next = "monospace";
+        } else {
+            next = "serif";
+        }
+        typographyConfig.setFontFamily(next);
+        appSettings.setFontFamily(next);
+        updateFontFamilyButtonText();
+        if (readerCanvas != null) readerCanvas.setTypographyConfig(typographyConfig);
+        repaginateCurrentChapter();
+    }
+
+    private void updateIndentButtonText() {
+        if (btnToggleIndent == null) return;
+        btnToggleIndent.setText(typographyConfig.getParagraphIndentPx() + " px ∨");
+    }
+
+    private void cycleIndent() {
+        int cur = typographyConfig.getParagraphIndentPx();
+        int next;
+        if (cur == 0) next = 20;
+        else if (cur <= 20) next = 32;
+        else if (cur <= 32) next = 44;
+        else next = 0;
+        typographyConfig.setParagraphIndentPx(next);
+        appSettings.setParagraphIndentPx(next);
+        updateIndentButtonText();
+        repaginateCurrentChapter();
+    }
+
+    private void updateContrastButtonText() {
+        if (btnToggleContrast == null) return;
+        btnToggleContrast.setText(typographyConfig.isBoldText() ? "Жирный" : "Обычный");
+    }
+
+    private void updateHyphenationButtonText() {
+        if (btnToggleHyphenation == null) return;
+        btnToggleHyphenation.setText(typographyConfig.isHyphenationEnabled() ? "Включены" : "Отключены");
+    }
+
+    private void updateEinkContrastButtonText() {
+        if (btnToggleEinkContrast == null) return;
+        btnToggleEinkContrast.setText("high".equalsIgnoreCase(typographyConfig.getContrastMode()) ? "Высокий" : "Обычный");
+    }
+
+    private void updateLineSpacingButtonText() {
+        if (btnToggleLineSpacing == null) return;
+        btnToggleLineSpacing.setText(String.format(Locale.US, "%.2fx ∨", typographyConfig.getLineSpacingMultiplier()));
+    }
+
+    private void cycleLineSpacing() {
+        float current = typographyConfig.getLineSpacingMultiplier();
+        float next;
+        if (current <= 1.05f) {
+            next = 1.25f;
+        } else if (current <= 1.30f) {
+            next = 1.50f;
+        } else if (current <= 1.55f) {
+            next = 1.75f;
+        } else {
+            next = 1.00f;
+        }
+        typographyConfig.setLineSpacingMultiplier(next);
+        appSettings.setLineSpacingMultiplier(next);
+        updateLineSpacingButtonText();
+        if (readerCanvas != null) readerCanvas.setTypographyConfig(typographyConfig);
+        repaginateCurrentChapter();
+    }
+
+    private String getMarginButtonText() {
+        String mode = appSettings.getMarginMode();
+        if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_MEDIUM.equalsIgnoreCase(mode)) {
+            return "Средние (32) ∨";
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_WIDE.equalsIgnoreCase(mode)) {
+            return "Широкие (48) ∨";
+        } else {
+            return "Узкие (18) ∨";
+        }
+    }
+
+    private void cycleMarginMode() {
+        String current = appSettings.getMarginMode();
+        String nextMode;
+        if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_NARROW.equalsIgnoreCase(current)) {
+            nextMode = com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_MEDIUM;
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_MEDIUM.equalsIgnoreCase(current)) {
+            nextMode = com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_WIDE;
+        } else {
+            nextMode = com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_NARROW;
+        }
+        appSettings.setMarginMode(nextMode);
+        int px = appSettings.getMarginPaddingPx();
+        typographyConfig.setPaddingLeftPx(px);
+        typographyConfig.setPaddingRightPx(px);
+        if (btnToggleMargins != null) btnToggleMargins.setText(getMarginButtonText());
+        if (readerCanvas != null) readerCanvas.setTypographyConfig(typographyConfig);
+        repaginateCurrentChapter();
+    }
+
+    private void updateVertMarginButtonText() {
+        if (btnToggleVertMargins == null) return;
+        String mode = typographyConfig.getVerticalMarginMode();
+        if ("small".equalsIgnoreCase(mode)) {
+            btnToggleVertMargins.setText("Малые ∨");
+        } else if ("large".equalsIgnoreCase(mode)) {
+            btnToggleVertMargins.setText("Большие ∨");
+        } else {
+            btnToggleVertMargins.setText("Стандарт ∨");
+        }
+    }
+
+    private void cycleVertMarginMode() {
+        String cur = typographyConfig.getVerticalMarginMode();
+        String next;
+        if ("small".equalsIgnoreCase(cur)) {
+            next = "normal";
+        } else if ("normal".equalsIgnoreCase(cur)) {
+            next = "large";
+        } else {
+            next = "small";
+        }
+        typographyConfig.setVerticalMarginMode(next);
+        appSettings.setVerticalMarginMode(next);
+        updateVertMarginButtonText();
+        if (readerCanvas != null) readerCanvas.setTypographyConfig(typographyConfig);
+        repaginateCurrentChapter();
     }
 
     private void updateMenuControls() {
@@ -491,54 +846,6 @@ public class ReaderActivity extends Activity {
         }
     }
 
-    private String getMarginButtonText() {
-        String mode = appSettings.getMarginMode();
-        if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_MEDIUM.equalsIgnoreCase(mode)) {
-            return "Поля: Средние";
-        } else if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_WIDE.equalsIgnoreCase(mode)) {
-            return "Поля: Широкие";
-        } else {
-            return "Поля: Узкие";
-        }
-    }
-
-    private void cycleMarginMode() {
-        String current = appSettings.getMarginMode();
-        String nextMode;
-        if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_NARROW.equalsIgnoreCase(current)) {
-            nextMode = com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_MEDIUM;
-        } else if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_MEDIUM.equalsIgnoreCase(current)) {
-            nextMode = com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_WIDE;
-        } else {
-            nextMode = com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_NARROW;
-        }
-        appSettings.setMarginMode(nextMode);
-        int px = appSettings.getMarginPaddingPx();
-        typographyConfig.setPaddingLeftPx(px);
-        typographyConfig.setPaddingRightPx(px);
-        if (btnToggleMargins != null) btnToggleMargins.setText(getMarginButtonText());
-        readerCanvas.setTypographyConfig(typographyConfig);
-        repaginateCurrentChapter();
-    }
-
-    private void cycleLineSpacing() {
-        float current = typographyConfig.getLineSpacingMultiplier();
-        float next;
-        if (current <= 1.15f) {
-            next = 1.25f;
-        } else if (current <= 1.30f) {
-            next = 1.40f;
-        } else {
-            next = 1.10f;
-        }
-        typographyConfig.setLineSpacingMultiplier(next);
-        if (btnToggleLineSpacing != null) {
-            btnToggleLineSpacing.setText(String.format(Locale.US, "Интервал: %.2fx", next));
-        }
-        readerCanvas.setTypographyConfig(typographyConfig);
-        repaginateCurrentChapter();
-    }
-
     private void showTableOfContentsDialog() {
         if (chapters == null || chapters.isEmpty()) {
             Toast.makeText(this, "Оглавление недоступно", Toast.LENGTH_SHORT).show();
@@ -548,34 +855,67 @@ public class ReaderActivity extends Activity {
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
 
-        float density = getResources().getDisplayMetrics().density;
+        final float density = getResources().getDisplayMetrics().density;
         DisplayMetrics dm = getResources().getDisplayMetrics();
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.WHITE);
-        int pad = (int) (14 * density);
+        int pad = (int) (12 * density);
         root.setPadding(pad, pad, pad, pad);
 
         TextView titleView = new TextView(this);
-        titleView.setText("Содержание (" + chapters.size() + " глав)");
+        titleView.setText("Содержание и закладки");
         titleView.setTextSize(14);
         titleView.setTypeface(null, Typeface.BOLD);
         titleView.setTextColor(Color.BLACK);
         titleView.setGravity(Gravity.CENTER);
-        titleView.setPadding(0, 0, 0, (int) (8 * density));
+        titleView.setPadding(0, 0, 0, (int) (6 * density));
         root.addView(titleView);
+
+        // Сегментированные вкладки: [ Оглавление ] | [ Закладки ]
+        LinearLayout tabsLayout = new LinearLayout(this);
+        tabsLayout.setOrientation(LinearLayout.HORIZONTAL);
+        tabsLayout.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (32 * density)));
+        tabsLayout.setGravity(Gravity.CENTER);
+
+        final Button btnTabChapters = new Button(this);
+        btnTabChapters.setText("Оглавление (" + chapters.size() + ")");
+        btnTabChapters.setTextSize(12);
+        btnTabChapters.setTypeface(null, Typeface.BOLD);
+        btnTabChapters.setBackgroundResource(R.drawable.btn_eink_primary);
+        btnTabChapters.setTextColor(Color.WHITE);
+        LinearLayout.LayoutParams tabLp1 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
+        tabLp1.setMargins(0, 0, (int) (4 * density), 0);
+        btnTabChapters.setLayoutParams(tabLp1);
+
+        final Button btnTabBookmarks = new Button(this);
+        List<DatabaseHelper.Bookmark> initialBookmarks = dbHelper.getBookmarks(bookUuid);
+        btnTabBookmarks.setText("Закладки (" + initialBookmarks.size() + ")");
+        btnTabBookmarks.setTextSize(12);
+        btnTabBookmarks.setTypeface(null, Typeface.BOLD);
+        btnTabBookmarks.setBackgroundResource(R.drawable.btn_eink);
+        btnTabBookmarks.setTextColor(Color.BLACK);
+        LinearLayout.LayoutParams tabLp2 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
+        tabLp2.setMargins((int) (4 * density), 0, 0, 0);
+        btnTabBookmarks.setLayoutParams(tabLp2);
+
+        tabsLayout.addView(btnTabChapters);
+        tabsLayout.addView(btnTabBookmarks);
+        root.addView(tabsLayout);
 
         View divider = new View(this);
         divider.setBackgroundColor(Color.BLACK);
-        root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
+        LinearLayout.LayoutParams divLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density));
+        divLp.setMargins(0, (int) (6 * density), 0, (int) (6 * density));
+        root.addView(divider, divLp);
 
-        ListView listView = new ListView(this);
-        listView.setDivider(new ColorDrawable(Color.LTGRAY));
-        listView.setDividerHeight((int) Math.max(1, density));
+        // Контейнер 1: Оглавление
+        final ListView listChaptersView = new ListView(this);
+        listChaptersView.setDivider(new ColorDrawable(Color.LTGRAY));
+        listChaptersView.setDividerHeight((int) Math.max(1, density));
         LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
-        listLp.setMargins(0, (int) (6 * density), 0, (int) (6 * density));
-        listView.setLayoutParams(listLp);
+        listChaptersView.setLayoutParams(listLp);
 
         BaseAdapter tocAdapter = new BaseAdapter() {
             @Override
@@ -611,18 +951,241 @@ public class ReaderActivity extends Activity {
                 return tv;
             }
         };
-        listView.setAdapter(tocAdapter);
-        listView.setSelection(Math.max(0, currentChapterIndex - 2));
+        listChaptersView.setAdapter(tocAdapter);
+        listChaptersView.setSelection(Math.max(0, currentChapterIndex - 2));
 
-        listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+        listChaptersView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                 dialog.dismiss();
                 hideMenuOverlay();
+                currentPageIndex = 0;
+                isInitialLoading = false;
                 loadChapter(position);
             }
         });
-        root.addView(listView);
+        root.addView(listChaptersView);
+
+        // Контейнер 2: Закладки
+        final LinearLayout bookmarksContainer = new LinearLayout(this);
+        bookmarksContainer.setOrientation(LinearLayout.VERTICAL);
+        bookmarksContainer.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));
+        bookmarksContainer.setVisibility(View.GONE);
+
+        Button btnAddBookmark = new Button(this);
+        btnAddBookmark.setText("+ Добавить текущую страницу в закладки");
+        btnAddBookmark.setTextSize(12);
+        btnAddBookmark.setTypeface(null, Typeface.BOLD);
+        btnAddBookmark.setTextColor(Color.BLACK);
+        btnAddBookmark.setBackgroundResource(R.drawable.btn_eink);
+        btnAddBookmark.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (34 * density)));
+        bookmarksContainer.addView(btnAddBookmark);
+
+        final ListView listBookmarksView = new ListView(this);
+        listBookmarksView.setDivider(new ColorDrawable(Color.LTGRAY));
+        listBookmarksView.setDividerHeight((int) Math.max(1, density));
+        LinearLayout.LayoutParams bmListLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
+        bmListLp.setMargins(0, (int) (6 * density), 0, 0);
+        listBookmarksView.setLayoutParams(bmListLp);
+        bookmarksContainer.addView(listBookmarksView);
+
+        final TextView emptyBookmarksView = new TextView(this);
+        emptyBookmarksView.setText("Закладок пока нет.\nНажмите кнопку выше, чтобы сохранить место чтения.");
+        emptyBookmarksView.setTextSize(13);
+        emptyBookmarksView.setTextColor(Color.DKGRAY);
+        emptyBookmarksView.setGravity(Gravity.CENTER);
+        emptyBookmarksView.setPadding((int) (12 * density), (int) (32 * density), (int) (12 * density), (int) (32 * density));
+        bookmarksContainer.addView(emptyBookmarksView);
+
+        root.addView(bookmarksContainer);
+
+        // Адаптер закладок
+        final List<DatabaseHelper.Bookmark> bookmarksList = new ArrayList<>(initialBookmarks);
+        final BaseAdapter bookmarksAdapter = new BaseAdapter() {
+            private final SimpleDateFormat sdf = new SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault());
+            @Override
+            public int getCount() { return bookmarksList.size(); }
+            @Override
+            public Object getItem(int pos) { return bookmarksList.get(pos); }
+            @Override
+            public long getItemId(int pos) { return bookmarksList.get(pos).id; }
+            @Override
+            public View getView(final int pos, View convertView, ViewGroup parent) {
+                LinearLayout itemLayout;
+                if (convertView instanceof LinearLayout) {
+                    itemLayout = (LinearLayout) convertView;
+                } else {
+                    itemLayout = new LinearLayout(ReaderActivity.this);
+                    itemLayout.setOrientation(LinearLayout.HORIZONTAL);
+                    itemLayout.setGravity(Gravity.CENTER_VERTICAL);
+                    int pV = (int) (8 * density);
+                    int pH = (int) (4 * density);
+                    itemLayout.setPadding(pH, pV, pH, pV);
+
+                    LinearLayout textCol = new LinearLayout(ReaderActivity.this);
+                    textCol.setOrientation(LinearLayout.VERTICAL);
+                    textCol.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+
+                    TextView tvTitle = new TextView(ReaderActivity.this);
+                    tvTitle.setTag("title");
+                    tvTitle.setTextSize(13);
+                    tvTitle.setTypeface(null, Typeface.BOLD);
+                    tvTitle.setTextColor(Color.BLACK);
+                    textCol.addView(tvTitle);
+
+                    TextView tvSnippet = new TextView(ReaderActivity.this);
+                    tvSnippet.setTag("snippet");
+                    tvSnippet.setTextSize(11);
+                    tvSnippet.setTextColor(Color.DKGRAY);
+                    tvSnippet.setMaxLines(2);
+                    tvSnippet.setEllipsize(TextUtils.TruncateAt.END);
+                    textCol.addView(tvSnippet);
+
+                    TextView tvDate = new TextView(ReaderActivity.this);
+                    tvDate.setTag("date");
+                    tvDate.setTextSize(10);
+                    tvDate.setTextColor(Color.GRAY);
+                    textCol.addView(tvDate);
+
+                    itemLayout.addView(textCol);
+
+                    Button btnDel = new Button(ReaderActivity.this);
+                    btnDel.setTag("delete");
+                    btnDel.setText("✕");
+                    btnDel.setTextSize(13);
+                    btnDel.setTypeface(null, Typeface.BOLD);
+                    btnDel.setTextColor(Color.BLACK);
+                    btnDel.setBackgroundResource(R.drawable.btn_eink);
+                    LinearLayout.LayoutParams delLp = new LinearLayout.LayoutParams((int) (32 * density), (int) (32 * density));
+                    delLp.setMargins((int) (6 * density), 0, 0, 0);
+                    btnDel.setLayoutParams(delLp);
+                    itemLayout.addView(btnDel);
+                }
+
+                final DatabaseHelper.Bookmark bm = bookmarksList.get(pos);
+                TextView tvTitle = (TextView) itemLayout.findViewWithTag("title");
+                TextView tvSnippet = (TextView) itemLayout.findViewWithTag("snippet");
+                TextView tvDate = (TextView) itemLayout.findViewWithTag("date");
+                Button btnDel = (Button) itemLayout.findViewWithTag("delete");
+
+                tvTitle.setText(bm.title != null ? bm.title : ("Глава " + (bm.chapterIndex + 1) + ", стр. " + (bm.pageIndex + 1)));
+                tvSnippet.setText(bm.snippet != null ? bm.snippet : "");
+                tvDate.setText(sdf.format(new Date(bm.timestamp)));
+
+                btnDel.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        dbHelper.deleteBookmark(bm.id);
+                        bookmarksList.remove(pos);
+                        notifyDataSetChanged();
+                        btnTabBookmarks.setText("Закладки (" + bookmarksList.size() + ")");
+                        if (bookmarksList.isEmpty()) {
+                            listBookmarksView.setVisibility(View.GONE);
+                            emptyBookmarksView.setVisibility(View.VISIBLE);
+                        }
+                        Toast.makeText(ReaderActivity.this, "Закладка удалена", Toast.LENGTH_SHORT).show();
+                    }
+                });
+
+                return itemLayout;
+            }
+        };
+        listBookmarksView.setAdapter(bookmarksAdapter);
+
+        final Runnable updateBookmarksVisibility = new Runnable() {
+            @Override
+            public void run() {
+                if (bookmarksList.isEmpty()) {
+                    listBookmarksView.setVisibility(View.GONE);
+                    emptyBookmarksView.setVisibility(View.VISIBLE);
+                } else {
+                    listBookmarksView.setVisibility(View.VISIBLE);
+                    emptyBookmarksView.setVisibility(View.GONE);
+                }
+            }
+        };
+        updateBookmarksVisibility.run();
+
+        listBookmarksView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                DatabaseHelper.Bookmark bm = bookmarksList.get(position);
+                dialog.dismiss();
+                hideMenuOverlay();
+                isInitialLoading = false;
+                loadChapter(bm.chapterIndex, bm.pageIndex);
+            }
+        });
+
+        // Добавление закладки
+        btnAddBookmark.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String chTitle = "Глава " + (currentChapterIndex + 1);
+                if (chapters != null && currentChapterIndex < chapters.size()) {
+                    String t = chapters.get(currentChapterIndex).getTitle();
+                    if (t != null && !t.trim().isEmpty()) {
+                        chTitle = t;
+                    }
+                }
+                String title = chTitle + ", стр. " + (currentPageIndex + 1);
+                String snippet = "";
+                if (currentPages != null && currentPageIndex < currentPages.size()) {
+                    TextPaginator.Page page = currentPages.get(currentPageIndex);
+                    if (page.lines != null && !page.lines.isEmpty()) {
+                        StringBuilder sb = new StringBuilder();
+                        for (TextPaginator.Line line : page.lines) {
+                            if (line != null && line.text != null) sb.append(line.text).append(" ");
+                            if (sb.length() > 90) break;
+                        }
+                        snippet = sb.toString().trim();
+                        if (snippet.length() > 90) {
+                            snippet = snippet.substring(0, 90) + "...";
+                        }
+                    }
+                }
+                long newId = dbHelper.addBookmark(bookUuid, currentChapterIndex, currentPageIndex, title, snippet);
+                DatabaseHelper.Bookmark newBm = new DatabaseHelper.Bookmark();
+                newBm.id = newId;
+                newBm.bookUuid = bookUuid;
+                newBm.chapterIndex = currentChapterIndex;
+                newBm.pageIndex = currentPageIndex;
+                newBm.title = title;
+                newBm.snippet = snippet;
+                newBm.timestamp = System.currentTimeMillis();
+
+                bookmarksList.add(0, newBm);
+                bookmarksAdapter.notifyDataSetChanged();
+                btnTabBookmarks.setText("Закладки (" + bookmarksList.size() + ")");
+                updateBookmarksVisibility.run();
+                Toast.makeText(ReaderActivity.this, "Закладка сохранена: " + title, Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        // Переключение вкладок Оглавление / Закладки
+        btnTabChapters.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                btnTabChapters.setBackgroundResource(R.drawable.btn_eink_primary);
+                btnTabChapters.setTextColor(Color.WHITE);
+                btnTabBookmarks.setBackgroundResource(R.drawable.btn_eink);
+                btnTabBookmarks.setTextColor(Color.BLACK);
+                listChaptersView.setVisibility(View.VISIBLE);
+                bookmarksContainer.setVisibility(View.GONE);
+            }
+        });
+
+        btnTabBookmarks.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                btnTabBookmarks.setBackgroundResource(R.drawable.btn_eink_primary);
+                btnTabBookmarks.setTextColor(Color.WHITE);
+                btnTabChapters.setBackgroundResource(R.drawable.btn_eink);
+                btnTabChapters.setTextColor(Color.BLACK);
+                listChaptersView.setVisibility(View.GONE);
+                bookmarksContainer.setVisibility(View.VISIBLE);
+            }
+        });
 
         Button btnClose = new Button(this);
         btnClose.setText("Закрыть");
@@ -630,7 +1193,9 @@ public class ReaderActivity extends Activity {
         btnClose.setTypeface(null, Typeface.BOLD);
         btnClose.setTextColor(Color.BLACK);
         btnClose.setBackgroundResource(R.drawable.btn_eink);
-        btnClose.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (36 * density)));
+        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (36 * density));
+        closeLp.setMargins(0, (int) (6 * density), 0, 0);
+        btnClose.setLayoutParams(closeLp);
         btnClose.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -642,8 +1207,8 @@ public class ReaderActivity extends Activity {
         dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.WHITE));
-            int w = (int) (dm.widthPixels * 0.90);
-            int h = (int) (dm.heightPixels * 0.85);
+            int w = (int) (dm.widthPixels * 0.92);
+            int h = (int) (dm.heightPixels * 0.88);
             dialog.getWindow().setLayout(w, h);
         }
         dialog.show();
@@ -742,20 +1307,26 @@ public class ReaderActivity extends Activity {
         dialog.show();
     }
 
-    private void loadBookData() {
-        // Загрузка сохраненного локального прогресса из progress или books
-        ReadingProgress progress = dbHelper.getProgress(bookUuid);
-        if (progress != null && progress.getPercent() > 0) {
-            currentChapterIndex = Math.max(0, progress.getChapterIndex());
-            currentPageIndex = Math.max(0, progress.getPageIndex());
-        } else {
-            Book book = dbHelper.getBookByUuid(bookUuid);
-            if (book != null && book.getPercent() > 0) {
-                currentChapterIndex = Math.max(0, book.getCurrentChapterIndex());
-                currentPageIndex = 0;
-            }
+    private void calculateChapterLengths() {
+        if (chapters == null || chapters.isEmpty()) {
+            chapterLengths = new long[0];
+            totalBookLength = 0;
+            return;
         }
+        chapterLengths = new long[chapters.size()];
+        totalBookLength = 0;
+        for (int i = 0; i < chapters.size(); i++) {
+            Chapter ch = chapters.get(i);
+            long len = cacheManager.getChapterLength(bookUuid, ch.getId());
+            if (len <= 0) {
+                len = 10000; // Оценочная длина по умолчанию
+            }
+            chapterLengths[i] = len;
+            totalBookLength += len;
+        }
+    }
 
+    private void loadBookData() {
         // Проверяем, есть ли уже главы в локальной БД
         List<Chapter> localChapters = dbHelper.getChapters(bookUuid);
         if (localChapters != null && !localChapters.isEmpty()) {
@@ -800,16 +1371,21 @@ public class ReaderActivity extends Activity {
 
             @Override
             public void onError(String errorMessage) {
-                // Офлайн или сетевой сбой - продолжаем чтение по локальным данным
+                // Офлайн или сбой сети - остаемся на локальном месте
             }
         });
     }
 
     private void resolveInitialPositionAndOpen() {
+        calculateChapterLengths();
+
         ReadingProgress p = dbHelper.getProgress(bookUuid);
         double percent = 0.0;
         int targetChapter = 0;
         int targetPage = 0;
+
+        double intentPercent = getIntent().getDoubleExtra("book_percent", 0.0);
+        int intentChapter = getIntent().getIntExtra("book_chapter", -1);
 
         if (p != null && p.getPercent() > 0) {
             percent = p.getPercent();
@@ -824,52 +1400,100 @@ public class ReaderActivity extends Activity {
             }
         }
 
-        if (percent > 0 && chapters != null && !chapters.isEmpty()) {
-            if (targetChapter > 0 && targetChapter < chapters.size()) {
+        if (intentPercent > percent) {
+            percent = intentPercent;
+            if (intentChapter >= 0) {
+                targetChapter = intentChapter;
+            }
+        }
+
+        if (percent > 0 && totalBookLength > 0 && chapters != null && !chapters.isEmpty()) {
+            long targetGlobalOffset = (long) ((percent / 100.0) * totalBookLength);
+            long acc = 0;
+            int matchedCh = 0;
+            int matchedOffset = 0;
+            for (int i = 0; i < chapters.size(); i++) {
+                long chLen = chapterLengths[i];
+                if (targetGlobalOffset <= acc + chLen || i == chapters.size() - 1) {
+                    matchedCh = i;
+                    matchedOffset = (int) Math.max(0, targetGlobalOffset - acc);
+                    break;
+                }
+                acc += chLen;
+            }
+            currentChapterIndex = matchedCh;
+            loadChapterWithOffset(currentChapterIndex, matchedOffset);
+        } else {
+            if (targetChapter > 0 && chapters != null && targetChapter < chapters.size()) {
                 currentChapterIndex = targetChapter;
             } else {
-                int estChapter = (int) Math.floor((percent / 100.0) * chapters.size());
-                if (estChapter >= chapters.size()) estChapter = chapters.size() - 1;
-                currentChapterIndex = Math.max(0, estChapter);
+                currentChapterIndex = 0;
             }
             currentPageIndex = Math.max(0, targetPage);
+            loadChapter(currentChapterIndex, currentPageIndex);
         }
-        loadChapter(currentChapterIndex);
     }
 
     private void applyCloudProgressIfNewer(ReadingProgress cloudProgress) {
         if (chapters == null || chapters.isEmpty()) return;
         ReadingProgress local = dbHelper.getProgress(bookUuid);
+        double curPercent = calculateCurrentGlobalPercent();
+        double cloudPercent = cloudProgress.getPercent();
+
         boolean isNewer = (local == null) ||
                 (cloudProgress.getTimestamp() > local.getTimestamp()) ||
-                (cloudProgress.getPercent() > local.getPercent() + 0.5);
+                (cloudPercent > curPercent + 1.0);
 
-        if (isNewer) {
-            int targetCh = cloudProgress.getChapterIndex();
-            if (targetCh <= 0 && cloudProgress.getPercent() > 0) {
-                targetCh = (int) Math.floor((cloudProgress.getPercent() / 100.0) * chapters.size());
+        if (isNewer && cloudPercent > 0) {
+            if (chapterLengths == null || chapterLengths.length != chapters.size()) {
+                calculateChapterLengths();
             }
-            if (targetCh >= chapters.size()) targetCh = chapters.size() - 1;
-            targetCh = Math.max(0, targetCh);
+            if (totalBookLength > 0) {
+                long targetGlobalOffset = (long) ((cloudPercent / 100.0) * totalBookLength);
+                long acc = 0;
+                int matchedCh = 0;
+                int matchedOffset = 0;
+                for (int i = 0; i < chapters.size(); i++) {
+                    long chLen = chapterLengths[i];
+                    if (targetGlobalOffset <= acc + chLen || i == chapters.size() - 1) {
+                        matchedCh = i;
+                        matchedOffset = (int) Math.max(0, targetGlobalOffset - acc);
+                        break;
+                    }
+                    acc += chLen;
+                }
 
-            if (targetCh != currentChapterIndex || cloudProgress.getPageIndex() != currentPageIndex) {
-                currentChapterIndex = targetCh;
-                currentPageIndex = Math.max(0, cloudProgress.getPageIndex());
-                loadChapter(currentChapterIndex);
-                Toast.makeText(ReaderActivity.this, String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)", cloudProgress.getPercent(), currentChapterIndex + 1), Toast.LENGTH_SHORT).show();
+                if (matchedCh != currentChapterIndex || Math.abs(cloudPercent - curPercent) > 1.0) {
+                    currentChapterIndex = matchedCh;
+                    loadChapterWithOffset(currentChapterIndex, matchedOffset);
+                    Toast.makeText(ReaderActivity.this, String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)", cloudPercent, currentChapterIndex + 1), Toast.LENGTH_SHORT).show();
+                }
             }
         }
     }
 
     private void loadChapter(final int index) {
+        loadChapter(index, 0);
+    }
+
+    private void loadChapter(final int index, final int targetPage) {
+        loadChapterInternal(index, -1, targetPage);
+    }
+
+    private void loadChapterWithOffset(final int index, final int anchorOffset) {
+        loadChapterInternal(index, anchorOffset, 0);
+    }
+
+    private void loadChapterInternal(final int index, final int anchorOffset, final int targetPage) {
         if (chapters == null || chapters.isEmpty()) return;
         if (index < 0 || index >= chapters.size()) return;
         currentChapterIndex = index;
+        currentPageIndex = Math.max(0, targetPage);
         final Chapter ch = chapters.get(index);
 
         String text = cacheManager.loadChapter(bookUuid, ch.getId());
         if (text != null && !text.isEmpty()) {
-            displayChapterText(text, ch.getTitle());
+            displayChapterText(text, ch.getTitle(), anchorOffset);
         } else {
             Toast.makeText(ReaderActivity.this, "Текст главы не найден", Toast.LENGTH_SHORT).show();
         }
@@ -880,7 +1504,7 @@ public class ReaderActivity extends Activity {
     }
 
     private void displayChapterText(final String rawText, final String title, final int anchorCharOffset) {
-        // Синхронизируем типографику с View
+        // Синхронизируем конфигурацию с холстом
         readerCanvas.setTypographyConfig(typographyConfig);
 
         final Paint paint = new Paint(readerCanvas.getTextPaint());
@@ -896,6 +1520,7 @@ public class ReaderActivity extends Activity {
 
         final TypographyConfig configCopy = new TypographyConfig();
         configCopy.setFontSizeSp(typographyConfig.getFontSizeSp());
+        configCopy.setFontFamily(typographyConfig.getFontFamily());
         configCopy.setLineSpacingMultiplier(typographyConfig.getLineSpacingMultiplier());
         configCopy.setParagraphIndentPx(typographyConfig.getParagraphIndentPx());
         configCopy.setPaddingLeftPx(typographyConfig.getPaddingLeftPx());
@@ -906,6 +1531,8 @@ public class ReaderActivity extends Activity {
         configCopy.setHyphenationEnabled(typographyConfig.isHyphenationEnabled());
         configCopy.setJustifyEnabled(typographyConfig.isJustifyEnabled());
         configCopy.setBoldText(typographyConfig.isBoldText());
+        configCopy.setContrastMode(typographyConfig.getContrastMode());
+        configCopy.setVerticalMarginMode(typographyConfig.getVerticalMarginMode());
 
         final long taskId = paginationTaskId.incrementAndGet();
 
@@ -948,6 +1575,7 @@ public class ReaderActivity extends Activity {
 
                         renderCurrentPage();
                         updateMenuControls();
+                        isInitialLoading = false; // Первичная страница представлена пользователю
                     }
                 });
             }
@@ -970,9 +1598,30 @@ public class ReaderActivity extends Activity {
 
     private double calculateCurrentGlobalPercent() {
         if (chapters == null || chapters.isEmpty()) return 0.0;
-        double chapterWeight = 100.0 / chapters.size();
-        double inChapterPercent = (currentPages == null || currentPages.isEmpty()) ? 0.0 : ((double) (currentPageIndex + 1) / currentPages.size());
-        double percent = (currentChapterIndex * chapterWeight) + (inChapterPercent * chapterWeight);
+        if (totalBookLength <= 0 || chapterLengths == null || chapterLengths.length != chapters.size()) {
+            double chapterWeight = 100.0 / chapters.size();
+            double inChapterPercent = (currentPages == null || currentPages.isEmpty()) ? 0.0 : ((double) (currentPageIndex + 1) / currentPages.size());
+            return Math.min(100.0, Math.max(0.0, (currentChapterIndex * chapterWeight) + (inChapterPercent * chapterWeight)));
+        }
+
+        long precedingLength = 0;
+        for (int i = 0; i < currentChapterIndex; i++) {
+            precedingLength += chapterLengths[i];
+        }
+        long curChapterLen = chapterLengths[currentChapterIndex];
+        double inChapterFraction = 0.0;
+        if (currentPages != null && !currentPages.isEmpty()) {
+            if (currentPageIndex < currentPages.size()) {
+                TextPaginator.Page page = currentPages.get(currentPageIndex);
+                if (curChapterLen > 0) {
+                    inChapterFraction = (double) page.startCharOffset / (double) curChapterLen;
+                } else {
+                    inChapterFraction = (double) currentPageIndex / (double) currentPages.size();
+                }
+            }
+        }
+        double globalOffset = precedingLength + (inChapterFraction * curChapterLen);
+        double percent = (globalOffset / (double) totalBookLength) * 100.0;
         return Math.min(100.0, Math.max(0.0, percent));
     }
 
@@ -995,10 +1644,13 @@ public class ReaderActivity extends Activity {
             forceEpdRefresh();
         }
 
-        saveProgress();
+        if (!isInitialLoading) {
+            saveProgress();
+        }
     }
 
     private void flipPageForward() {
+        isInitialLoading = false;
         if (currentPageIndex + 1 < currentPages.size()) {
             currentPageIndex++;
             renderCurrentPage();
@@ -1011,6 +1663,7 @@ public class ReaderActivity extends Activity {
     }
 
     private void flipPageBackward() {
+        isInitialLoading = false;
         if (currentPageIndex > 0) {
             currentPageIndex--;
             renderCurrentPage();

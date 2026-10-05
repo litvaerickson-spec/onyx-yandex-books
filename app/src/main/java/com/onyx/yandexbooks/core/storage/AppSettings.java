@@ -59,4 +59,37 @@ public class AppSettings {
             return 18; // Узкие по умолчанию
         }
     }
+
+    public static final String KEY_FONT_SIZE = "font_size_sp";
+    public static final String KEY_FONT_FAMILY = "font_family";
+    public static final String KEY_LINE_SPACING = "line_spacing_mult";
+    public static final String KEY_PARAGRAPH_INDENT = "paragraph_indent_px";
+    public static final String KEY_HYPHENATION = "hyphenation_enabled";
+    public static final String KEY_BOLD_TEXT = "bold_text_enabled";
+    public static final String KEY_CONTRAST_MODE = "contrast_mode";
+    public static final String KEY_VERTICAL_MARGIN = "vertical_margin_mode";
+
+    public int getFontSizeSp() { return prefs.getInt(KEY_FONT_SIZE, 18); }
+    public void setFontSizeSp(int size) { prefs.edit().putInt(KEY_FONT_SIZE, size).apply(); }
+
+    public String getFontFamily() { return prefs.getString(KEY_FONT_FAMILY, "serif"); }
+    public void setFontFamily(String family) { prefs.edit().putString(KEY_FONT_FAMILY, family).apply(); }
+
+    public float getLineSpacingMultiplier() { return prefs.getFloat(KEY_LINE_SPACING, 1.25f); }
+    public void setLineSpacingMultiplier(float mult) { prefs.edit().putFloat(KEY_LINE_SPACING, mult).apply(); }
+
+    public int getParagraphIndentPx() { return prefs.getInt(KEY_PARAGRAPH_INDENT, 20); }
+    public void setParagraphIndentPx(int px) { prefs.edit().putInt(KEY_PARAGRAPH_INDENT, px).apply(); }
+
+    public boolean isHyphenationEnabled() { return prefs.getBoolean(KEY_HYPHENATION, true); }
+    public void setHyphenationEnabled(boolean enabled) { prefs.edit().putBoolean(KEY_HYPHENATION, enabled).apply(); }
+
+    public boolean isBoldText() { return prefs.getBoolean(KEY_BOLD_TEXT, true); }
+    public void setBoldText(boolean bold) { prefs.edit().putBoolean(KEY_BOLD_TEXT, bold).apply(); }
+
+    public String getContrastMode() { return prefs.getString(KEY_CONTRAST_MODE, "high"); }
+    public void setContrastMode(String mode) { prefs.edit().putString(KEY_CONTRAST_MODE, mode).apply(); }
+
+    public String getVerticalMarginMode() { return prefs.getString(KEY_VERTICAL_MARGIN, "normal"); }
+    public void setVerticalMarginMode(String mode) { prefs.edit().putString(KEY_VERTICAL_MARGIN, mode).apply(); }
 }

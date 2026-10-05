@@ -63,12 +63,20 @@ public class CacheManager {
         return new File(bDir, "book.epub");
     }
 
-    private File getChapterFile(String bookUuid, String chapterId) {
+    public File getChapterFile(String bookUuid, String chapterId) {
         File bDir = new File(booksDir, bookUuid);
         if (!bDir.exists()) {
             bDir.mkdirs();
         }
         return new File(bDir, "ch_" + chapterId + ".txt");
+    }
+
+    public long getChapterLength(String bookUuid, String chapterId) {
+        File f = getChapterFile(bookUuid, chapterId);
+        if (f != null && f.exists()) {
+            return f.length();
+        }
+        return 0;
     }
 
     public boolean isBookDownloaded(String bookUuid) {
