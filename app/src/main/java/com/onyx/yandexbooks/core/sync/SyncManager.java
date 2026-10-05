@@ -67,7 +67,7 @@ public class SyncManager {
     }
 
     /**
-     * Сравнение прогресса между сервером и читалкой при входе или подключении Wi-Fi.
+     * Сравнение прогресса между сервером и ридером при входе или подключении Wi-Fi.
      * Возвращает true, если конфликт отсутствует и локальная позиция актуальна.
      */
     public void evaluateProgressConflict(ReadingProgress local, ReadingProgress remote, ConflictResolutionCallback callback) {

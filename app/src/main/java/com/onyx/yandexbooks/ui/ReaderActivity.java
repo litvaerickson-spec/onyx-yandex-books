@@ -2415,7 +2415,7 @@ public class ReaderActivity extends Activity {
                 now
         );
 
-        // Мгновенно сохраняем в локальную SQLite базу читалки
+        // Мгновенно сохраняем в локальную SQLite базу ридера
         dbHelper.saveProgress(progress);
 
         // Отправка в облако Яндекса

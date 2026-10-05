@@ -96,6 +96,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
         // Закладки пользователя
         ensureBookmarksTable(db);
+        ensureHiddenBooksTable(db);
     }
 
     private void ensureBookmarksTable(SQLiteDatabase db) {
@@ -108,6 +109,15 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     "title TEXT," +
                     "snippet TEXT," +
                     "timestamp INTEGER" +
+                    ")");
+        } catch (Exception ignored) {}
+    }
+
+    private void ensureHiddenBooksTable(SQLiteDatabase db) {
+        try {
+            db.execSQL("CREATE TABLE IF NOT EXISTS hidden_books (" +
+                    "uuid TEXT PRIMARY KEY," +
+                    "removed_at INTEGER" +
                     ")");
         } catch (Exception ignored) {}
     }
@@ -177,6 +187,15 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     private void saveOrUpdateBookInternal(SQLiteDatabase db, Book book, String overrideShelfType) {
+        ensureHiddenBooksTable(db);
+        if (overrideShelfType == null && isBookHiddenInternal(db, book.getUuid())) {
+            // Книга была явно убрана пользователем с полки на этом устройстве
+            return;
+        }
+        if (overrideShelfType != null) {
+            db.delete("hidden_books", "uuid = ?", new String[]{book.getUuid()});
+        }
+
         double effectivePercent = book.getPercent();
         boolean effectiveDownloaded = book.isDownloaded();
         long effectiveTimestamp = book.getLastReadTimestamp();
@@ -260,7 +279,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     effectiveParagraph = bestLocalPar;
                 }
             } else {
-                // Локальный прогресс читалки сохраняется и не затирается!
+                // Локальный прогресс ридера сохраняется и не затирается!
                 effectivePercent = bestLocalPercent;
                 effectiveChapter = bestLocalCh;
                 effectiveParagraph = bestLocalPar;
@@ -288,20 +307,23 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 } else {
                     targetShelf = "reading";
                 }
-            } else {
-                // Была to_read
+            } else if ("to_read".equals(localShelfType)) {
+                // ВНИМАНИЕ: Пользователь явно перенес книгу в "В планах" (to_read)!
+                // Локальный выбор пользователя ПРЕВЫШЕ ВСЕГО: книга ДОЛЖНА ОСТАВАТЬСЯ в to_read,
+                // даже если у неё есть ненулевой процент прочитанного (effectivePercent > 0)!
                 if ("done".equals(book.getShelfType()) || (effectivePercent >= 99.0 && effectiveChapter > 0)) {
                     targetShelf = "done";
-                } else if ("reading".equals(book.getShelfType()) || effectivePercent > 0.0) {
-                    targetShelf = "reading";
                 } else {
                     targetShelf = "to_read";
                 }
+            } else {
+                targetShelf = localShelfType;
             }
         } else {
+            // Новая книга из облака (еще нет локальной записи в БД):
             if ("done".equals(book.getShelfType()) || (effectivePercent >= 99.0 && effectiveChapter > 0)) {
                 targetShelf = "done";
-            } else if ("reading".equals(book.getShelfType()) || effectivePercent > 0.0) {
+            } else if ("reading".equals(book.getShelfType())) {
                 targetShelf = "reading";
             } else if (book.getShelfType() != null && !"catalog".equals(book.getShelfType()) && !"search".equals(book.getShelfType())) {
                 targetShelf = book.getShelfType();
@@ -419,18 +441,69 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
     public synchronized void updateBookShelf(String uuid, String shelfType) {
         SQLiteDatabase db = getWritableDatabase();
+        ensureHiddenBooksTable(db);
+        db.delete("hidden_books", "uuid = ?", new String[]{uuid});
         ContentValues cv = new ContentValues();
         cv.put("shelf_type", shelfType);
         db.update("books", cv, "uuid = ?", new String[]{uuid});
     }
 
-    public synchronized void removeBook(String uuid) {
+    public synchronized void resetReadingProgress(String uuid) {
         SQLiteDatabase db = getWritableDatabase();
+        ensureHiddenBooksTable(db);
+        db.delete("hidden_books", "uuid = ?", new String[]{uuid});
+        ContentValues cv = new ContentValues();
+        cv.put("percent", 0.0);
+        cv.put("current_chapter", 0);
+        cv.put("current_paragraph", 0);
+        cv.put("last_read_timestamp", 0L);
+        cv.put("shelf_type", "to_read");
+        db.update("books", cv, "uuid = ?", new String[]{uuid});
+        db.delete("progress", "book_uuid = ?", new String[]{uuid});
+        db.delete("bookmarks", "book_uuid = ? AND title LIKE 'Облако%'", new String[]{uuid});
+    }
+
+    public synchronized void hideBook(String uuid) {
+        SQLiteDatabase db = getWritableDatabase();
+        ensureHiddenBooksTable(db);
+        ContentValues cv = new ContentValues();
+        cv.put("uuid", uuid);
+        cv.put("removed_at", System.currentTimeMillis());
+        db.insertWithOnConflict("hidden_books", null, cv, SQLiteDatabase.CONFLICT_REPLACE);
+
         db.delete("books", "uuid = ?", new String[]{uuid});
         db.delete("chapters", "book_uuid = ?", new String[]{uuid});
         db.delete("progress", "book_uuid = ?", new String[]{uuid});
         db.delete("bookmarks", "book_uuid = ?", new String[]{uuid});
         db.delete("sync_queue", "book_uuid = ?", new String[]{uuid});
+    }
+
+    public synchronized void unhideBook(String uuid) {
+        SQLiteDatabase db = getWritableDatabase();
+        ensureHiddenBooksTable(db);
+        db.delete("hidden_books", "uuid = ?", new String[]{uuid});
+    }
+
+    public synchronized boolean isBookHidden(String uuid) {
+        SQLiteDatabase db = getReadableDatabase();
+        ensureHiddenBooksTable(db);
+        return isBookHiddenInternal(db, uuid);
+    }
+
+    private boolean isBookHiddenInternal(SQLiteDatabase db, String uuid) {
+        Cursor c = null;
+        try {
+            c = db.rawQuery("SELECT 1 FROM hidden_books WHERE uuid = ?", new String[]{uuid});
+            return (c != null && c.moveToFirst());
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (c != null) c.close();
+        }
+    }
+
+    public synchronized void removeBook(String uuid) {
+        hideBook(uuid);
     }
 
     public synchronized int getBooksCountByShelf(String shelfType) {

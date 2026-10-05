@@ -32,7 +32,7 @@ import java.util.zip.ZipFile;
 
 /**
  * Менеджер кэширования и загрузки книг в формате EPUB.
- * Скачивает EPUB из Яндекс Книг, парсит главы для Canvas-читалки
+ * Скачивает EPUB из Яндекс Книг, парсит главы для встроенного Canvas-ридера
  * и сохраняет файл в каталог /sdcard/Books/YandexBooks/ для внешней библиотеки Onyx.
  */
 public class CacheManager {

@@ -4,7 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 /**
- * Пользовательские настройки приложения (выбор читалки по умолчанию, режим полей).
+ * Пользовательские настройки приложения (выбор ридера по умолчанию, режим полей).
  */
 public class AppSettings {
 
@@ -26,7 +26,7 @@ public class AppSettings {
     }
 
     /**
-     * Режим читалки по умолчанию: "onyx" (системная Onyx NeoReader/AlReader) или "lite" (встроенная).
+     * Режим ридера по умолчанию: "onyx" (системный Onyx NeoReader/AlReader) или "lite" (встроенный).
      * По умолчанию включена системная Onyx, так как она максимально адаптирована к Darwin.
      */
     public String getReaderMode() {
