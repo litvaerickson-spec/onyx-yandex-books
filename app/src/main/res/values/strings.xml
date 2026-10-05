@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Яндекс Книги Lite</string>
+    <string name="app_name">Яндекс Книги</string>
     <string name="title_auth">Вход в Яндекс</string>
     <string name="title_reader">Чтение</string>
     

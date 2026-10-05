@@ -178,15 +178,20 @@ public class ReaderCanvasView extends View {
             }
 
             if (line.text.isEmpty()) {
-                currentY += lineHeight;
+                currentY += lineHeight * 0.6f; // Компактный отступ между авторскими смысловыми секциями
                 continue;
+            }
+
+            String drawText = line.text;
+            if (drawText.indexOf('\uFFFC') >= 0 || drawText.indexOf('\uFFFD') >= 0) {
+                drawText = drawText.replace("\uFFFC", "").replace("\uFFFD", "");
             }
 
             float lineX = startX + (line.isParagraphStart ? config.getParagraphIndentPx() : 0);
 
             if (config.isJustifyEnabled() && line.wordSpacing > 0 && !line.isLastLineOfParagraph) {
                 // Отрисовка с выравниванием по ширине (Justify)
-                String[] words = line.text.split(" ");
+                String[] words = drawText.split(" ");
                 float wordX = lineX;
                 for (int i = 0; i < words.length; i++) {
                     canvas.drawText(words[i], wordX, currentY, textPaint);
@@ -197,7 +202,7 @@ public class ReaderCanvasView extends View {
                 }
             } else {
                 // Стандартная отрисовка влево с соблюдением правого поля
-                canvas.drawText(line.text, lineX, currentY, textPaint);
+                canvas.drawText(drawText, lineX, currentY, textPaint);
             }
 
             currentY += lineHeight;

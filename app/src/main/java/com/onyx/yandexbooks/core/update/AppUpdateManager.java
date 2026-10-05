@@ -339,7 +339,7 @@ public class AppUpdateManager {
         if (activity == null || activity.isFinishing()) return;
 
         final ProgressDialog progressDialog = new ProgressDialog(activity);
-        progressDialog.setTitle("Яндекс Книги Lite");
+        progressDialog.setTitle("Яндекс Книги");
         progressDialog.setMessage("Скачивание обновления " + release.tagName + "...");
         progressDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
         progressDialog.setMax(100);

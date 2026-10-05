@@ -20,9 +20,9 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 /**
- * Надежный встроенный парсер EPUB архивов для Android.
- * Работает без сторонних библиотек через стандартный java.util.zip.ZipFile.
- * Извлекает оглавление и текст глав для отображения в E-Ink ридере.
+ * Надежный встроенный парсер EPUB архивов для Android (KitKat 4.4+).
+ * Извлекает подлинное оглавление (NCX / NAV), объединяет связанные файлы spine в единые
+ * непрерывные главы без обрывов текста и полностью очищает артефакты [OBJ] и избыточные отступы.
  */
 public class EpubParser {
 
@@ -32,6 +32,16 @@ public class EpubParser {
         public String id;
         public String title;
         public String textContent;
+    }
+
+    public static class TocItem {
+        public String title;
+        public String href; // нормализованный путь к файлу без якоря (#...)
+
+        public TocItem(String title, String href) {
+            this.title = title;
+            this.href = href;
+        }
     }
 
     public static List<ChapterData> parseEpub(File epubFile) {
@@ -52,13 +62,19 @@ public class EpubParser {
                 opfBaseDir = opfPath.substring(0, opfPath.lastIndexOf('/') + 1);
             }
 
-            // 2. Парсинг spine из OPF
+            // 2. Парсинг spine и manifest из OPF
             List<String> chapterHrefs = new ArrayList<>();
+            Map<String, String> manifestHrefMap = new HashMap<>();
+            String ncxPathFromOpf = null;
+            String navPathFromOpf = null;
+
             if (opfPath != null) {
-                chapterHrefs = parseOpfSpine(zip, opfPath, opfBaseDir);
+                chapterHrefs = parseOpfSpine(zip, opfPath, opfBaseDir, manifestHrefMap);
+                ncxPathFromOpf = findNcxPathFromOpf(zip, opfPath, opfBaseDir);
+                navPathFromOpf = findNavPathFromOpf(zip, opfPath, opfBaseDir);
             }
 
-            // 3. Fallback: если spine не удалось прочесть, собираем все xhtml/html файлы
+            // Fallback: если spine не удалось прочесть, собираем все xhtml/html файлы
             if (chapterHrefs.isEmpty()) {
                 Enumeration<? extends ZipEntry> entries = zip.entries();
                 List<String> allHtml = new ArrayList<>();
@@ -75,26 +91,30 @@ public class EpubParser {
                 chapterHrefs.addAll(allHtml);
             }
 
-            // 4. Чтение текста каждой главы
-            int chapterIndex = 1;
-            for (String href : chapterHrefs) {
-                ZipEntry entry = findZipEntry(zip, href);
-                if (entry != null) {
-                    try (InputStream is = zip.getInputStream(entry)) {
-                        String rawHtml = readStreamToString(is);
-                        String cleanText = cleanHtmlText(rawHtml);
-                        if (cleanText != null && cleanText.trim().length() > 20) {
-                            ChapterData ch = new ChapterData();
-                            ch.id = "ch_" + chapterIndex;
-                            ch.title = extractTitle(rawHtml, "Глава " + chapterIndex);
-                            ch.textContent = cleanText;
-                            result.add(ch);
-                            chapterIndex++;
-                        }
-                    } catch (Exception e) {
-                        Log.w(TAG, "Failed to read chapter entry: " + href, e);
-                    }
+            // 3. Извлечение реального оглавления (NCX или EPUB 3 NAV)
+            List<TocItem> tocItems = new ArrayList<>();
+            if (ncxPathFromOpf != null) {
+                tocItems = parseNcx(zip, ncxPathFromOpf);
+            }
+            if (tocItems.isEmpty() && navPathFromOpf != null) {
+                tocItems = parseNav(zip, navPathFromOpf);
+            }
+            if (tocItems.isEmpty()) {
+                // Поиск любого .ncx файла в архиве
+                String anyNcx = findAnyEntryByExtension(zip, ".ncx");
+                if (anyNcx != null) {
+                    tocItems = parseNcx(zip, anyNcx);
                 }
+            }
+
+            // 4. Группировка файлов spine по оглавлению TOC
+            if (!tocItems.isEmpty() && !chapterHrefs.isEmpty()) {
+                result = assembleChaptersFromToc(zip, chapterHrefs, tocItems);
+            }
+
+            // 5. Fallback: если по оглавлению собрать не удалось, читаем файлы по порядку
+            if (result.isEmpty() && !chapterHrefs.isEmpty()) {
+                result = assembleChaptersFallback(zip, chapterHrefs);
             }
 
         } catch (Throwable e) {
@@ -108,6 +128,163 @@ public class EpubParser {
         }
 
         return result;
+    }
+
+    /**
+     * Сборка глав на основе подлинного оглавления (TOC):
+     * все промежуточные части и фрагменты между главами объединяются в единый непрерывный текст.
+     */
+    private static List<ChapterData> assembleChaptersFromToc(ZipFile zip, List<String> spineHrefs, List<TocItem> tocItems) {
+        List<ChapterData> chapters = new ArrayList<>();
+
+        // Сопоставление каждого элемента TOC с индексом в spine
+        class MatchedToc {
+            int spineIndex;
+            TocItem item;
+            MatchedToc(int spineIndex, TocItem item) {
+                this.spineIndex = spineIndex;
+                this.item = item;
+            }
+        }
+
+        List<MatchedToc> matched = new ArrayList<>();
+        int lastFoundIndex = -1;
+
+        for (TocItem ti : tocItems) {
+            int idx = findSpineIndex(spineHrefs, ti.href);
+            if (idx >= 0) {
+                // Пропускаем дубликаты на один и тот же файл, если название совпадает
+                if (idx != lastFoundIndex) {
+                    matched.add(new MatchedToc(idx, ti));
+                    lastFoundIndex = idx;
+                }
+            }
+        }
+
+        if (matched.isEmpty()) {
+            return chapters;
+        }
+
+        // 1. Фронт-материалы до первой главы TOC (титульный лист, выходные данные)
+        int firstSpineIdx = matched.get(0).spineIndex;
+        if (firstSpineIdx > 0) {
+            StringBuilder frontSb = new StringBuilder();
+            for (int i = 0; i < firstSpineIdx; i++) {
+                String text = readEntryText(zip, spineHrefs.get(i));
+                if (text != null && !text.trim().isEmpty()) {
+                    if (frontSb.length() > 0) frontSb.append("\n\n");
+                    frontSb.append(text.trim());
+                }
+            }
+            if (frontSb.length() > 30) {
+                ChapterData cd = new ChapterData();
+                cd.id = "ch_0";
+                cd.title = "Начало книги";
+                cd.textContent = frontSb.toString();
+                chapters.add(cd);
+            }
+        }
+
+        // 2. Объединение файлов spine по главам TOC
+        for (int m = 0; m < matched.size(); m++) {
+            MatchedToc cur = matched.get(m);
+            int startIdx = cur.spineIndex;
+            int endIdx = (m + 1 < matched.size()) ? matched.get(m + 1).spineIndex : spineHrefs.size();
+            if (endIdx < startIdx) {
+                endIdx = startIdx + 1;
+            }
+
+            StringBuilder chSb = new StringBuilder();
+            for (int s = startIdx; s < endIdx; s++) {
+                if (s >= 0 && s < spineHrefs.size()) {
+                    String partText = readEntryText(zip, spineHrefs.get(s));
+                    if (partText != null && !partText.trim().isEmpty()) {
+                        if (chSb.length() > 0) {
+                            chSb.append("\n\n");
+                        }
+                        chSb.append(partText.trim());
+                    }
+                }
+            }
+
+            String fullText = chSb.toString().trim();
+            if (fullText.length() > 10) {
+                ChapterData cd = new ChapterData();
+                cd.id = "ch_" + (chapters.size() + 1);
+                String title = cur.item.title;
+                if (title == null || title.trim().isEmpty()) {
+                    title = "Глава " + (chapters.size() + 1);
+                }
+                cd.title = title.trim();
+                cd.textContent = fullText;
+                chapters.add(cd);
+            }
+        }
+
+        return chapters;
+    }
+
+    private static List<ChapterData> assembleChaptersFallback(ZipFile zip, List<String> chapterHrefs) {
+        List<ChapterData> result = new ArrayList<>();
+        int chapterIndex = 1;
+        for (String href : chapterHrefs) {
+            String cleanText = readEntryText(zip, href);
+            if (cleanText != null && cleanText.trim().length() > 20) {
+                ZipEntry entry = findZipEntry(zip, href);
+                String rawHtml = "";
+                if (entry != null) {
+                    try (InputStream is = zip.getInputStream(entry)) {
+                        rawHtml = readStreamToString(is);
+                    } catch (Exception ignored) {}
+                }
+                ChapterData ch = new ChapterData();
+                ch.id = "ch_" + chapterIndex;
+                ch.title = extractTitle(rawHtml, "Глава " + chapterIndex);
+                ch.textContent = cleanText;
+                result.add(ch);
+                chapterIndex++;
+            }
+        }
+        return result;
+    }
+
+    private static String readEntryText(ZipFile zip, String href) {
+        ZipEntry entry = findZipEntry(zip, href);
+        if (entry == null) return null;
+        try (InputStream is = zip.getInputStream(entry)) {
+            String rawHtml = readStreamToString(is);
+            return cleanHtmlText(rawHtml);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static int findSpineIndex(List<String> spineHrefs, String targetHref) {
+        if (targetHref == null || targetHref.isEmpty()) return -1;
+        String cleanTarget = targetHref.trim();
+        if (cleanTarget.contains("#")) {
+            cleanTarget = cleanTarget.substring(0, cleanTarget.indexOf('#'));
+        }
+
+        // 1. Точное совпадение
+        for (int i = 0; i < spineHrefs.size(); i++) {
+            String s = spineHrefs.get(i);
+            if (s.equalsIgnoreCase(cleanTarget) || s.endsWith("/" + cleanTarget) || cleanTarget.endsWith("/" + s)) {
+                return i;
+            }
+        }
+
+        // 2. Сопоставление только по имени файла
+        String targetFilename = cleanTarget.contains("/") ? cleanTarget.substring(cleanTarget.lastIndexOf('/') + 1) : cleanTarget;
+        for (int i = 0; i < spineHrefs.size(); i++) {
+            String s = spineHrefs.get(i);
+            String sFilename = s.contains("/") ? s.substring(s.lastIndexOf('/') + 1) : s;
+            if (sFilename.equalsIgnoreCase(targetFilename)) {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     private static String findOpfPath(ZipFile zip) {
@@ -126,18 +303,10 @@ public class EpubParser {
             } catch (Exception ignored) {}
         }
 
-        // Поиск любого .opf файла в архиве
-        Enumeration<? extends ZipEntry> entries = zip.entries();
-        while (entries.hasMoreElements()) {
-            ZipEntry e = entries.nextElement();
-            if (e.getName().toLowerCase().endsWith(".opf")) {
-                return e.getName();
-            }
-        }
-        return null;
+        return findAnyEntryByExtension(zip, ".opf");
     }
 
-    private static List<String> parseOpfSpine(ZipFile zip, String opfPath, String baseDir) {
+    private static List<String> parseOpfSpine(ZipFile zip, String opfPath, String baseDir, Map<String, String> outManifestMap) {
         List<String> result = new ArrayList<>();
         ZipEntry opfEntry = zip.getEntry(opfPath);
         if (opfEntry == null) return result;
@@ -146,17 +315,15 @@ public class EpubParser {
             String opfXml = readStreamToString(is);
 
             // Сопоставление id -> href из <manifest>
-            Map<String, String> manifestMap = new HashMap<>();
             Pattern itemPattern = Pattern.compile("<item\\s+[^>]*?id\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
             Matcher m = itemPattern.matcher(opfXml);
             while (m.find()) {
-                manifestMap.put(m.group(1), m.group(2));
+                outManifestMap.put(m.group(1), m.group(2));
             }
-            // Также проверяем обратный порядок атрибутов (href перед id)
             Pattern itemPatternRev = Pattern.compile("<item\\s+[^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?id\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
             Matcher mRev = itemPatternRev.matcher(opfXml);
             while (mRev.find()) {
-                manifestMap.put(mRev.group(2), mRev.group(1));
+                outManifestMap.put(mRev.group(2), mRev.group(1));
             }
 
             // Порядок чтения из <spine>
@@ -164,7 +331,7 @@ public class EpubParser {
             Matcher mSpine = itemrefPattern.matcher(opfXml);
             while (mSpine.find()) {
                 String idref = mSpine.group(1);
-                String href = manifestMap.get(idref);
+                String href = outManifestMap.get(idref);
                 if (href != null) {
                     if (href.contains("#")) {
                         href = href.substring(0, href.indexOf('#'));
@@ -181,16 +348,131 @@ public class EpubParser {
         return result;
     }
 
+    private static String findNcxPathFromOpf(ZipFile zip, String opfPath, String baseDir) {
+        ZipEntry opfEntry = zip.getEntry(opfPath);
+        if (opfEntry == null) return null;
+        try (InputStream is = zip.getInputStream(opfEntry)) {
+            String opfXml = readStreamToString(is);
+            Pattern p = Pattern.compile("<item\\s+[^>]*?href\\s*=\\s*[\"']([^\"']+\\.ncx)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
+            Matcher m = p.matcher(opfXml);
+            if (m.find()) {
+                String href = m.group(1);
+                return baseDir.isEmpty() ? href : (baseDir + href);
+            }
+            Pattern p2 = Pattern.compile("<item\\s+[^>]*?media-type\\s*=\\s*[\"']application/x-dtbncx\\+xml[\"'][^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
+            Matcher m2 = p2.matcher(opfXml);
+            if (m2.find()) {
+                String href = m2.group(1);
+                return baseDir.isEmpty() ? href : (baseDir + href);
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private static String findNavPathFromOpf(ZipFile zip, String opfPath, String baseDir) {
+        ZipEntry opfEntry = zip.getEntry(opfPath);
+        if (opfEntry == null) return null;
+        try (InputStream is = zip.getInputStream(opfEntry)) {
+            String opfXml = readStreamToString(is);
+            Pattern p = Pattern.compile("<item\\s+[^>]*?properties\\s*=\\s*[\"'][^\"']*?\\bnav\\b[^\"']*?[\"'][^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
+            Matcher m = p.matcher(opfXml);
+            if (m.find()) {
+                String href = m.group(1);
+                return baseDir.isEmpty() ? href : (baseDir + href);
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private static List<TocItem> parseNcx(ZipFile zip, String ncxPath) {
+        List<TocItem> result = new ArrayList<>();
+        ZipEntry entry = findZipEntry(zip, ncxPath);
+        if (entry == null) return result;
+
+        String ncxBaseDir = "";
+        if (ncxPath.contains("/")) {
+            ncxBaseDir = ncxPath.substring(0, ncxPath.lastIndexOf('/') + 1);
+        }
+
+        try (InputStream is = zip.getInputStream(entry)) {
+            String xml = readStreamToString(is);
+            Pattern pattern = Pattern.compile("<navLabel>\\s*<text>(.*?)</text>\\s*</navLabel>\\s*<content\\s+[^>]*?src=[\"']([^\"']+)[\"']", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
+            Matcher matcher = pattern.matcher(xml);
+
+            while (matcher.find()) {
+                String rawTitle = matcher.group(1);
+                String cleanTitle = cleanHtmlText(rawTitle).replaceAll("\\s+", " ").trim();
+                String src = matcher.group(2).trim();
+                if (src.contains("#")) {
+                    src = src.substring(0, src.indexOf('#'));
+                }
+                String fullSrc = ncxBaseDir.isEmpty() ? src : (ncxBaseDir + src);
+                if (!cleanTitle.isEmpty() && !src.isEmpty()) {
+                    result.add(new TocItem(cleanTitle, fullSrc));
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to parse NCX TOC", e);
+        }
+        return result;
+    }
+
+    private static List<TocItem> parseNav(ZipFile zip, String navPath) {
+        List<TocItem> result = new ArrayList<>();
+        ZipEntry entry = findZipEntry(zip, navPath);
+        if (entry == null) return result;
+
+        String navBaseDir = "";
+        if (navPath.contains("/")) {
+            navBaseDir = navPath.substring(0, navPath.lastIndexOf('/') + 1);
+        }
+
+        try (InputStream is = zip.getInputStream(entry)) {
+            String html = readStreamToString(is);
+            Pattern pattern = Pattern.compile("<a\\s+[^>]*?href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
+            Matcher matcher = pattern.matcher(html);
+
+            while (matcher.find()) {
+                String src = matcher.group(1).trim();
+                String rawTitle = matcher.group(2);
+                String cleanTitle = cleanHtmlText(rawTitle).replaceAll("\\s+", " ").trim();
+                if (src.contains("#")) {
+                    src = src.substring(0, src.indexOf('#'));
+                }
+                String fullSrc = navBaseDir.isEmpty() ? src : (navBaseDir + src);
+                if (!cleanTitle.isEmpty() && !src.isEmpty()) {
+                    result.add(new TocItem(cleanTitle, fullSrc));
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to parse NAV TOC", e);
+        }
+        return result;
+    }
+
+    private static String findAnyEntryByExtension(ZipFile zip, String ext) {
+        String lowerExt = ext.toLowerCase();
+        Enumeration<? extends ZipEntry> entries = zip.entries();
+        while (entries.hasMoreElements()) {
+            ZipEntry e = entries.nextElement();
+            if (e.getName().toLowerCase().endsWith(lowerExt)) {
+                return e.getName();
+            }
+        }
+        return null;
+    }
+
     private static ZipEntry findZipEntry(ZipFile zip, String name) {
+        if (name == null) return null;
         ZipEntry entry = zip.getEntry(name);
         if (entry != null) return entry;
 
-        // Поиск без учета регистра или со слэшами
         String lower = name.toLowerCase();
         Enumeration<? extends ZipEntry> entries = zip.entries();
         while (entries.hasMoreElements()) {
             ZipEntry e = entries.nextElement();
-            if (e.getName().equalsIgnoreCase(name) || e.getName().toLowerCase().endsWith(lower)) {
+            String eName = e.getName();
+            if (eName.equalsIgnoreCase(name) || eName.toLowerCase().endsWith(lower)) {
                 return e;
             }
         }
@@ -200,172 +482,141 @@ public class EpubParser {
     private static String extractTitle(String html, String defaultTitle) {
         if (html == null || html.isEmpty()) return defaultTitle;
         try {
-            int h1Start = html.indexOf("<h1");
-            if (h1Start == -1) h1Start = html.indexOf("<H1");
-            if (h1Start != -1) {
-                int closeTag = html.indexOf('>', h1Start);
-                int endH1 = html.indexOf("</h1", closeTag);
-                if (endH1 == -1) endH1 = html.indexOf("</H1", closeTag);
-                if (closeTag != -1 && endH1 != -1 && endH1 > closeTag) {
-                    String raw = html.substring(closeTag + 1, endH1);
-                    String clean = cleanHtmlText(raw);
-                    if (!clean.isEmpty() && clean.length() < 100) return clean;
-                }
+            // 1. Поиск <h1>
+            Pattern p1 = Pattern.compile("<h1[^>]*>(.*?)</h1>", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
+            Matcher m1 = p1.matcher(html);
+            if (m1.find()) {
+                String clean = cleanHtmlText(m1.group(1)).replaceAll("\\s+", " ").trim();
+                if (!clean.isEmpty() && clean.length() < 120) return clean;
             }
 
-            int titleStart = html.indexOf("<title");
-            if (titleStart == -1) titleStart = html.indexOf("<TITLE");
-            if (titleStart != -1) {
-                int closeTag = html.indexOf('>', titleStart);
-                int endTitle = html.indexOf("</title", closeTag);
-                if (endTitle == -1) endTitle = html.indexOf("</TITLE", closeTag);
-                if (closeTag != -1 && endTitle != -1 && endTitle > closeTag) {
-                    String raw = html.substring(closeTag + 1, endTitle);
-                    String clean = cleanHtmlText(raw);
-                    if (!clean.isEmpty() && clean.length() < 100) return clean;
-                }
+            // 2. Поиск <h2>
+            Pattern p2 = Pattern.compile("<h2[^>]*>(.*?)</h2>", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
+            Matcher m2 = p2.matcher(html);
+            if (m2.find()) {
+                String clean = cleanHtmlText(m2.group(1)).replaceAll("\\s+", " ").trim();
+                if (!clean.isEmpty() && clean.length() < 120) return clean;
+            }
+
+            // 3. Поиск <title>
+            Pattern pt = Pattern.compile("<title[^>]*>(.*?)</title>", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
+            Matcher mt = pt.matcher(html);
+            if (mt.find()) {
+                String clean = cleanHtmlText(mt.group(1)).replaceAll("\\s+", " ").trim();
+                if (!clean.isEmpty() && clean.length() < 120) return clean;
             }
         } catch (Throwable ignored) {}
         return defaultTitle;
     }
 
     /**
-     * Сверхбыстрый потоковый очиститель HTML для E-Ink ридеров.
-     * Не использует медленный Html.fromHtml (TagSoup) и тяжелые регулярные выражения,
-     * исключая зависания и OutOfMemoryError на процессорах Onyx Boox.
+     * Высокопроизводительный очиститель HTML для E-Ink ридеров:
+     * - Исключает появление символов [OBJ] (\uFFFC) и битых глифов (\uFFFD, \uFEFF)
+     * - Формирует нормальное книжное расстояние между абзацами (следующая строка с красной строкой)
+     * - Сохраняет пропуск одной строки только для явных смысловых разделителей автора (<hr/>, звездочки)
      */
     public static String cleanHtmlText(String html) {
         if (html == null || html.isEmpty()) return "";
         try {
-            int len = html.length();
-            StringBuilder sb = new StringBuilder(len);
-            boolean inTag = false;
+            // 1. Удаление <head>, <style>, <script>
+            String text = html.replaceAll("(?is)<(script|style|head).*?>.*?</\\1>", "");
 
-            int i = 0;
-            while (i < len) {
-                char c = html.charAt(i);
+            // 2. Маркировка явных смысловых разделителей секций
+            text = text.replaceAll("(?i)<hr\\s*/?>", "\n___SECTION_BREAK___\n");
+            text = text.replaceAll("(?i)<p[^>]*>(\\s*|&nbsp;|<br\\s*/?>|\\*\\s*\\*\\s*\\*)</p>", "\n___SECTION_BREAK___\n");
 
-                if (!inTag && c == '<') {
-                    // Пропускаем теги <head>...</head>, <style>...</style>, <script>...</script> целиком
-                    if (i + 5 < len) {
-                        String prefix = html.substring(i, Math.min(len, i + 8)).toLowerCase();
-                        if (prefix.startsWith("<head") || prefix.startsWith("<style") || prefix.startsWith("<script")) {
-                            String endTag = prefix.startsWith("<head") ? "</head>" :
-                                            (prefix.startsWith("<style") ? "</style>" : "</script>");
-                            int endIdx = html.toLowerCase().indexOf(endTag, i);
-                            if (endIdx != -1) {
-                                i = endIdx + endTag.length();
-                                continue;
-                            }
-                        }
-                    }
+            // 3. Замена тегов переноса строк и закрытия структурных блоков на единичный \n
+            text = text.replaceAll("(?i)<br\\s*/?>", "\n");
+            text = text.replaceAll("(?i)</?(p|div|h[1-6]|li|blockquote|tr)[^>]*>", "\n");
 
-                    inTag = true;
-                    // Вставляем перенос строки для структурных блоков
-                    String tagPrefix = html.substring(i, Math.min(len, i + 6)).toLowerCase();
-                    if (tagPrefix.startsWith("<p") || tagPrefix.startsWith("</p")
-                            || tagPrefix.startsWith("<br")
-                            || tagPrefix.startsWith("<div") || tagPrefix.startsWith("</div")
-                            || tagPrefix.startsWith("<h") || tagPrefix.startsWith("</h")
-                            || tagPrefix.startsWith("<tr") || tagPrefix.startsWith("<li")) {
-                        if (sb.length() > 0 && sb.charAt(sb.length() - 1) != '\n') {
-                            sb.append('\n');
-                        }
-                    }
-                    i++;
-                    continue;
-                }
+            // 4. Удаление всех остальных тегов (включая <img>, <span>, <i>, <b> и др.)
+            text = text.replaceAll("<[^>]+>", "");
 
-                if (inTag) {
-                    if (c == '>') {
-                        inTag = false;
-                    }
-                    i++;
-                    continue;
-                }
+            // 5. Тотальное удаление некорректных символов [OBJ], BOM, мягких переносов и непечатных кодов
+            text = text.replace("\uFFFC", ""); // Object Replacement Character ([OBJ])
+            text = text.replace("\uFFFD", ""); // Unicode Replacement Character
+            text = text.replace("\uFEFF", ""); // Byte Order Mark
+            text = text.replace("\u200B", ""); // Zero-width space
+            text = text.replace("\u200C", ""); // Zero-width non-joiner
+            text = text.replace("\u200D", ""); // Zero-width joiner
+            text = text.replace("\u00AD", ""); // Soft hyphen
 
-                // Декодирование типографических сущностей HTML
-                if (c == '&') {
-                    int semi = html.indexOf(';', i);
-                    if (semi != -1 && (semi - i) <= 10) {
-                        String entity = html.substring(i + 1, semi);
-                        char decoded = decodeEntity(entity);
-                        if (decoded != 0) {
-                            sb.append(decoded);
-                            i = semi + 1;
-                            continue;
-                        } else if (entity.equalsIgnoreCase("laquo")) {
-                            sb.append('«');
-                            i = semi + 1;
-                            continue;
-                        } else if (entity.equalsIgnoreCase("raquo")) {
-                            sb.append('»');
-                            i = semi + 1;
-                            continue;
-                        } else if (entity.equalsIgnoreCase("mdash")) {
-                            sb.append('—');
-                            i = semi + 1;
-                            continue;
-                        } else if (entity.equalsIgnoreCase("ndash")) {
-                            sb.append('–');
-                            i = semi + 1;
-                            continue;
-                        } else if (entity.equalsIgnoreCase("hellip")) {
-                            sb.append('…');
-                            i = semi + 1;
-                            continue;
-                        }
-                    }
-                }
+            // 6. Декодирование типографических сущностей HTML
+            text = text.replace("&nbsp;", " ");
+            text = text.replace("&laquo;", "«");
+            text = text.replace("&raquo;", "»");
+            text = text.replace("&mdash;", "—");
+            text = text.replace("&ndash;", "–");
+            text = text.replace("&hellip;", "…");
+            text = text.replace("&amp;", "&");
+            text = text.replace("&lt;", "<");
+            text = text.replace("&gt;", ">");
+            text = text.replace("&quot;", "\"");
+            text = text.replace("&apos;", "'");
 
-                if (c == '\r') {
-                    i++;
-                    continue;
-                }
-
-                sb.append(c);
-                i++;
+            // Числовые сущности &#...;
+            if (text.contains("&#")) {
+                text = decodeNumericEntities(text);
             }
 
-            // Нормализация множественных пустых строк (не более 2 подряд)
-            String raw = sb.toString();
-            StringBuilder out = new StringBuilder(raw.length());
-            int newlineCount = 0;
-            for (int k = 0; k < raw.length(); k++) {
-                char ch = raw.charAt(k);
-                if (ch == '\n') {
-                    newlineCount++;
-                    if (newlineCount <= 2) {
-                        out.append('\n');
-                    }
-                } else {
-                    newlineCount = 0;
-                    out.append(ch);
+            // 7. Построчная сборка текста: нормальные абзацы идут друг за другом,
+            // пустая строка допускается максимум одна и только для авторских разделителей
+            String[] lines = text.split("\n");
+            StringBuilder result = new StringBuilder(text.length());
+            boolean allowEmptyLine = false;
+
+            for (String line : lines) {
+                String trimmed = line.trim();
+                if (trimmed.isEmpty()) {
+                    continue;
                 }
+
+                if ("___SECTION_BREAK___".equals(trimmed)) {
+                    if (result.length() > 0 && allowEmptyLine) {
+                        result.append("\n");
+                        allowEmptyLine = false;
+                    }
+                    continue;
+                }
+
+                if (result.length() > 0) {
+                    result.append("\n");
+                }
+                result.append(trimmed);
+                allowEmptyLine = true;
             }
-            return out.toString().trim();
+
+            return result.toString().trim();
         } catch (Throwable t) {
             return html.replaceAll("<[^>]+>", " ").replaceAll("\\s+", " ").trim();
         }
     }
 
-    private static char decodeEntity(String entity) {
-        if (entity.equalsIgnoreCase("nbsp")) return ' ';
-        if (entity.equalsIgnoreCase("quot")) return '"';
-        if (entity.equalsIgnoreCase("apos")) return '\'';
-        if (entity.equalsIgnoreCase("amp")) return '&';
-        if (entity.equalsIgnoreCase("lt")) return '<';
-        if (entity.equalsIgnoreCase("gt")) return '>';
-        if (entity.startsWith("#x") || entity.startsWith("#X")) {
+    private static String decodeNumericEntities(String str) {
+        Pattern pattern = Pattern.compile("&#(x[0-9a-fA-F]+|[0-9]+);");
+        Matcher matcher = pattern.matcher(str);
+        StringBuffer sb = new StringBuffer();
+        while (matcher.find()) {
+            String val = matcher.group(1);
             try {
-                return (char) Integer.parseInt(entity.substring(2), 16);
-            } catch (Exception ignored) {}
-        } else if (entity.startsWith("#")) {
-            try {
-                return (char) Integer.parseInt(entity.substring(1));
-            } catch (Exception ignored) {}
+                int code;
+                if (val.startsWith("x") || val.startsWith("X")) {
+                    code = Integer.parseInt(val.substring(1), 16);
+                } else {
+                    code = Integer.parseInt(val);
+                }
+                // Исключаем вставку [OBJ] и спецсимволов замены
+                if (code == 0xFFFC || code == 0xFFFD || code == 0xFEFF || code < 32 && code != 10 && code != 9) {
+                    matcher.appendReplacement(sb, "");
+                } else {
+                    matcher.appendReplacement(sb, Matcher.quoteReplacement(new String(Character.toChars(code))));
+                }
+            } catch (Exception ignored) {
+                matcher.appendReplacement(sb, "");
+            }
         }
-        return 0;
+        matcher.appendTail(sb);
+        return sb.toString();
     }
 
     private static String readStreamToString(InputStream is) throws Exception {

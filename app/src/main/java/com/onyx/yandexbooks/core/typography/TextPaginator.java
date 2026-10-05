@@ -56,6 +56,8 @@ public class TextPaginator {
             return pages;
         }
 
+        fullText = fullText.replace("\uFFFC", "").replace("\uFFFD", "").replace("\uFEFF", "");
+
         float availableWidth = screenWidth - config.getPaddingLeftPx() - config.getPaddingRightPx();
         float availableHeight = screenHeight - config.getPaddingTopPx() - config.getHeaderReservedHeightPx() - config.getPaddingBottomPx() - config.getFooterReservedHeightPx();
 
@@ -69,6 +71,7 @@ public class TextPaginator {
         int globalCharOffset = 0;
         int pageStartCharOffset = 0;
         float spaceWidth = paint.measureText(" ");
+        boolean lastWasEmptyLine = false;
 
         TeXHyphenator.TextWidthMeasurer measurer = new TeXHyphenator.TextWidthMeasurer() {
             @Override
@@ -80,16 +83,25 @@ public class TextPaginator {
         for (String paragraph : paragraphs) {
             String trimmed = paragraph.trim();
             if (trimmed.isEmpty()) {
-                // Пустая строка между абзацами
+                // Пустая строка (разделитель секций автора)
+                if (currentLines.isEmpty() || lastWasEmptyLine) {
+                    globalCharOffset += 1;
+                    continue; // Не добавляем пустую строку в начале страницы или две подряд
+                }
                 if (currentLines.size() + 1 > maxLinesPerPage) {
                     pages.add(new Page(pageIndex++, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
                     currentLines.clear();
                     pageStartCharOffset = globalCharOffset;
+                    globalCharOffset += 1;
+                    lastWasEmptyLine = false;
+                    continue;
                 }
                 currentLines.add(new Line("", true, true, 0));
                 globalCharOffset += 1;
+                lastWasEmptyLine = true;
                 continue;
             }
+            lastWasEmptyLine = false;
 
             String[] words = trimmed.split("\\s+");
             StringBuilder currentLineText = new StringBuilder();

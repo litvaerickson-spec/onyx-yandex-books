@@ -199,12 +199,66 @@ public class CacheManager {
      * Обеспечивает готовность книги к чтению (берет из локального кэша или скачивает).
      */
     public void ensureBookReady(final String bookUuid, final String bookTitle, final BookReadyCallback callback) {
-        if (isBookDownloaded(bookUuid)) {
-            List<Chapter> chapters = dbHelper.getChapters(bookUuid);
-            if (chapters != null && !chapters.isEmpty()) {
-                callback.onReady(chapters);
-                return;
-            }
+        final File epub = getEpubFile(bookUuid);
+        List<Chapter> chapters = dbHelper.getChapters(bookUuid);
+
+        // Если EPUB файл уже на устройстве, но список глав пуст (миграция v5 оглавления TOC):
+        if (epub.exists() && epub.length() > 0 && (chapters == null || chapters.isEmpty())) {
+            new AsyncTask<Void, Void, List<Chapter>>() {
+                @Override
+                protected List<Chapter> doInBackground(Void... voids) {
+                    try {
+                        List<EpubParser.ChapterData> parsed = EpubParser.parseEpub(epub);
+                        if (parsed.isEmpty()) return null;
+                        List<Chapter> newChapters = new ArrayList<>();
+                        for (int i = 0; i < parsed.size(); i++) {
+                            EpubParser.ChapterData cd = parsed.get(i);
+                            String chId = String.valueOf(i);
+                            saveChapter(bookUuid, chId, cd.textContent);
+                            Chapter ch = new Chapter();
+                            ch.setId(chId);
+                            ch.setBookUuid(bookUuid);
+                            ch.setChapterIndex(i);
+                            ch.setTitle(cd.title);
+                            newChapters.add(ch);
+                        }
+                        dbHelper.saveChapters(bookUuid, newChapters);
+                        dbHelper.updateBookDownloaded(bookUuid, true);
+                        return newChapters;
+                    } catch (Throwable e) {
+                        return null;
+                    }
+                }
+
+                @Override
+                protected void onPostExecute(List<Chapter> res) {
+                    if (res != null && !res.isEmpty()) {
+                        callback.onReady(res);
+                    } else {
+                        // Если локальный перепарсинг не удался, скачиваем заново
+                        downloadBookAsync(bookUuid, bookTitle, new DownloadProgressCallback() {
+                            @Override
+                            public void onProgress(int downloadedCount, int totalCount) {}
+                            @Override
+                            public void onComplete() {
+                                List<Chapter> chs = dbHelper.getChapters(bookUuid);
+                                if (chs != null && !chs.isEmpty()) callback.onReady(chs);
+                                else callback.onError("Книга загружена, но главы не найдены");
+                            }
+                            @Override
+                            public void onError(String message) {
+                                callback.onError(message);
+                            }
+                        });
+                    }
+                }
+            }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+            return;
+        }
+
+        if (isBookDownloaded(bookUuid) && chapters != null && !chapters.isEmpty()) {
+            callback.onReady(chapters);
+            return;
         }
 
         // Скачиваем книгу
@@ -214,9 +268,9 @@ public class CacheManager {
 
             @Override
             public void onComplete() {
-                List<Chapter> chapters = dbHelper.getChapters(bookUuid);
-                if (chapters != null && !chapters.isEmpty()) {
-                    callback.onReady(chapters);
+                List<Chapter> chs = dbHelper.getChapters(bookUuid);
+                if (chs != null && !chs.isEmpty()) {
+                    callback.onReady(chs);
                 } else {
                     callback.onError("Книга загружена, но главы не найдены");
                 }

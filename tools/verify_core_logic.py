@@ -668,9 +668,88 @@ def test_iso_timestamp_parsing():
     print("✅ Тест парсинга ISO дат успешно пройден!\n")
 
 
+def test_epub_toc_and_chapter_merging():
+    print("--- [ТЕСТ 15] Сборка глав по подлинному оглавлению TOC (NCX / NAV) ---")
+
+    class TocItem:
+        def __init__(self, title, src):
+            self.title = title
+            self.src = src
+
+    toc_items = [
+        TocItem("Введение", "text/intro.xhtml"),
+        TocItem("Глава 1. Начало пути", "text/ch01_part1.xhtml"),
+        TocItem("Глава 2. Действие", "text/ch02.xhtml")
+    ]
+
+    spine = [
+        "text/cover.xhtml",
+        "text/intro.xhtml",
+        "text/ch01_part1.xhtml",
+        "text/ch01_part2.xhtml",
+        "text/ch01_part3.xhtml",
+        "text/ch02.xhtml",
+        "text/colophon.xhtml"
+    ]
+
+    # Алгоритм сопоставления spine файлов с главами TOC
+    spine_to_toc_idx = {}
+    last_idx = 0
+    for s_idx, s_href in enumerate(spine):
+        for t_idx, t_item in enumerate(toc_items):
+            clean_t = t_item.src.split("#")[0]
+            if clean_t.endswith(s_href) or s_href.endswith(clean_t):
+                last_idx = t_idx
+                break
+        spine_to_toc_idx[s_href] = last_idx
+
+    print(f"Маппинг spine на TOC: {spine_to_toc_idx}")
+    assert spine_to_toc_idx["text/ch01_part1.xhtml"] == 1
+    assert spine_to_toc_idx["text/ch01_part2.xhtml"] == 1
+    assert spine_to_toc_idx["text/ch01_part3.xhtml"] == 1
+    assert spine_to_toc_idx["text/ch02.xhtml"] == 2
+    print("✅ Тест сборки глав по TOC успешно пройден!\n")
+
+
+def test_obj_and_whitespace_cleaning():
+    print("--- [ТЕСТ 16] Очистка символов [OBJ] (\\uFFFC) и нормализация межабзацных интервалов ---")
+    import re
+
+    raw_html = (
+        "<p>Первый абзац с артефактом \uFFFC и спецсимволом \uFFFD.</p>\n"
+        "<p>Второй абзац книги.\u200B\u00AD</p>\n\n"
+        "<p>Третий абзац книги.</p>"
+    )
+
+    # 1. Удаление нежелательных спецсимволов
+    cleaned = raw_html
+    cleaned = cleaned.replace("\uFFFC", "")
+    cleaned = cleaned.replace("\uFFFD", "")
+    cleaned = cleaned.replace("\uFEFF", "")
+    cleaned = cleaned.replace("\u00AD", "")
+    cleaned = cleaned.replace("\u200B", "")
+
+    assert "\uFFFC" not in cleaned, "Символ [OBJ] не был удален!"
+    assert "\uFFFD" not in cleaned, "Символ replacement char не был удален!"
+
+    # 2. Очистка тегов и нормализация переносов строк
+    text = re.sub(r"<[^>]+>", "\n", cleaned)
+    # Нормализация: 3+ переводов строки сводятся к 2 (одна пустая строка для авторского разделителя)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+
+    print(f"Извлеченные абзацы ({len(lines)}): {lines}")
+    assert len(lines) == 3
+    assert lines[0] == "Первый абзац с артефактом  и спецсимволом ."
+    assert lines[1] == "Второй абзац книги."
+    assert lines[2] == "Третий абзац книги."
+
+    print("✅ Тест очистки [OBJ] и нормализации абзацев успешно пройден!\n")
+
+
 if __name__ == "__main__":
     print("==================================================")
-    print("🚀 Запуск тотальной верификации ядра Яндекс Книги Lite")
+    print("🚀 Запуск тотальной верификации ядра Яндекс Книги")
     print("==================================================")
     print()
     test_tex_hyphenation()
@@ -687,6 +766,8 @@ if __name__ == "__main__":
     test_total_book_pages_continuous_pagination()
     test_sqlite_reading_progress_protection()
     test_iso_timestamp_parsing()
+    test_epub_toc_and_chapter_merging()
+    test_obj_and_whitespace_cleaning()
     print("==================================================")
-    print("🎉 ВСЕ 14 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 16 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

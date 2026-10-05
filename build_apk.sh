@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
-VERSION="${1:-1.3.7}"
+VERSION="${1:-1.3.8}"
 TARGET_APK="yandex-books-lite-v${VERSION}.apk"
 
-echo "=== Сборка Яндекс Книги Lite APK (Версия: $VERSION) ==="
+echo "=== Сборка Яндекс Книги APK (Версия: $VERSION) ==="
 
 export JAVA_HOME="/opt/homebrew/opt/openjdk@17"
 export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"

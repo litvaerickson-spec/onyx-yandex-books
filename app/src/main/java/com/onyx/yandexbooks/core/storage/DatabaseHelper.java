@@ -19,7 +19,7 @@ import java.util.List;
 public class DatabaseHelper extends SQLiteOpenHelper {
 
     private static final String DATABASE_NAME = "yandex_books_lite.db";
-    private static final int DATABASE_VERSION = 4;
+    private static final int DATABASE_VERSION = 5;
 
     private static DatabaseHelper instance;
 
@@ -123,6 +123,16 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             db.execSQL("UPDATE progress SET percent = 0.0, chapter_index = 0, paragraph_index = 0, page_index = 0 " +
                     "WHERE percent >= 99.0 AND chapter_index = 0");
         } catch (Exception ignored) {}
+
+        if (oldVersion < 5) {
+            try {
+                // Очищаем старые фрагментированные главы для автоматического перепарсинга по подлинному оглавлению TOC
+                db.execSQL("DELETE FROM chapters");
+                // Сбрасываем старые индексы фрагментов, сохраняя процент прочитанного для корректного пересчета
+                db.execSQL("UPDATE progress SET chapter_index = -1, page_index = 0");
+                db.execSQL("UPDATE books SET current_chapter = -1");
+            } catch (Exception ignored) {}
+        }
     }
 
     public synchronized void saveBooks(List<Book> books, String shelfType) {
