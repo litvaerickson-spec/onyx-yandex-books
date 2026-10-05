@@ -156,7 +156,7 @@ public class CacheManager {
                             exportToPublicBooksDir(downloadedFile, bookTitle);
 
                             return chapters;
-                        } catch (Exception e) {
+                        } catch (Throwable e) {
                             Log.e(TAG, "Error parsing downloaded EPUB", e);
                             return null;
                         }
@@ -175,7 +175,7 @@ public class CacheManager {
                             }
                         }
                     }
-                }.execute();
+                }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
             }
 
             @Override

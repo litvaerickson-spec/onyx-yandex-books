@@ -32,21 +32,23 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Название книги"
-            android:textSize="14sp"
+            android:textSize="13sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
-            android:lineSpacingMultiplier="1.1" />
+            android:includeFontPadding="false"
+            android:lineSpacingMultiplier="0.9" />
 
         <TextView
             android:id="@+id/book_author"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Автор"
-            android:textSize="12sp"
+            android:textSize="11sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
-            android:layout_marginTop="2dp"
-            android:lineSpacingMultiplier="1.1" />
+            android:layout_marginTop="1dp"
+            android:includeFontPadding="false"
+            android:lineSpacingMultiplier="0.95" />
 
         <!-- Описание доступно в модальном окне «О книге» -->
         <TextView

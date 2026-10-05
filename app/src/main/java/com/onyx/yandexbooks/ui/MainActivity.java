@@ -10,6 +10,8 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.TextUtils;
 import android.util.DisplayMetrics;
 import android.view.Gravity;
@@ -361,9 +363,31 @@ public class MainActivity extends Activity {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle(title);
         builder.setMessage(message);
-        builder.setCancelable(false);
-        AlertDialog dialog = builder.create();
+        builder.setCancelable(true);
+        builder.setNegativeButton("Отмена", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                dialog.dismiss();
+                EpdController.requestFullRefresh(MainActivity.this, null);
+            }
+        });
+        final AlertDialog dialog = builder.create();
         dialog.show();
+
+        // 25-секундный предохранитель для защиты от зависаний
+        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (dialog != null && dialog.isShowing()) {
+                    try {
+                        dialog.dismiss();
+                    } catch (Exception ignored) {}
+                    Toast.makeText(MainActivity.this, "Превышено время ожидания загрузки книги. Попробуйте еще раз или режим Onyx.", Toast.LENGTH_LONG).show();
+                    EpdController.requestFullRefresh(MainActivity.this, null);
+                }
+            }
+        }, 25000);
+
         return dialog;
     }
 

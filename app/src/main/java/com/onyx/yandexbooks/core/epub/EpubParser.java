@@ -97,7 +97,7 @@ public class EpubParser {
                 }
             }
 
-        } catch (Exception e) {
+        } catch (Throwable e) {
             Log.e(TAG, "Error parsing EPUB: " + epubFile.getAbsolutePath(), e);
         } finally {
             if (zip != null) {
@@ -198,51 +198,174 @@ public class EpubParser {
     }
 
     private static String extractTitle(String html, String defaultTitle) {
+        if (html == null || html.isEmpty()) return defaultTitle;
         try {
-            Pattern titlePattern = Pattern.compile("<title\\b[^>]*>(.*?)</title>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
-            Matcher m = titlePattern.matcher(html);
-            if (m.find()) {
-                String t = cleanHtmlEntities(m.group(1)).trim();
-                if (!t.isEmpty() && t.length() < 100) return t;
+            int h1Start = html.indexOf("<h1");
+            if (h1Start == -1) h1Start = html.indexOf("<H1");
+            if (h1Start != -1) {
+                int closeTag = html.indexOf('>', h1Start);
+                int endH1 = html.indexOf("</h1", closeTag);
+                if (endH1 == -1) endH1 = html.indexOf("</H1", closeTag);
+                if (closeTag != -1 && endH1 != -1 && endH1 > closeTag) {
+                    String raw = html.substring(closeTag + 1, endH1);
+                    String clean = cleanHtmlText(raw);
+                    if (!clean.isEmpty() && clean.length() < 100) return clean;
+                }
             }
 
-            Pattern h1Pattern = Pattern.compile("<h[1-2]\\b[^>]*>(.*?)</h[1-2]>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
-            Matcher mH1 = h1Pattern.matcher(html);
-            if (mH1.find()) {
-                String t = cleanHtmlEntities(mH1.group(1)).trim();
-                if (!t.isEmpty() && t.length() < 100) return t;
+            int titleStart = html.indexOf("<title");
+            if (titleStart == -1) titleStart = html.indexOf("<TITLE");
+            if (titleStart != -1) {
+                int closeTag = html.indexOf('>', titleStart);
+                int endTitle = html.indexOf("</title", closeTag);
+                if (endTitle == -1) endTitle = html.indexOf("</TITLE", closeTag);
+                if (closeTag != -1 && endTitle != -1 && endTitle > closeTag) {
+                    String raw = html.substring(closeTag + 1, endTitle);
+                    String clean = cleanHtmlText(raw);
+                    if (!clean.isEmpty() && clean.length() < 100) return clean;
+                }
             }
-        } catch (Exception ignored) {}
+        } catch (Throwable ignored) {}
         return defaultTitle;
     }
 
-    private static String cleanHtmlText(String html) {
-        if (html == null) return "";
+    /**
+     * Сверхбыстрый потоковый очиститель HTML для E-Ink ридеров.
+     * Не использует медленный Html.fromHtml (TagSoup) и тяжелые регулярные выражения,
+     * исключая зависания и OutOfMemoryError на процессорах Onyx Boox.
+     */
+    public static String cleanHtmlText(String html) {
+        if (html == null || html.isEmpty()) return "";
         try {
-            // Удаляем теги <script>, <style>, <head> целиком
-            String stripped = html.replaceAll("(?i)<head[\\s\\S]*?</head>", "")
-                                  .replaceAll("(?i)<script[\\s\\S]*?</script>", "")
-                                  .replaceAll("(?i)<style[\\s\\S]*?</style>", "");
+            int len = html.length();
+            StringBuilder sb = new StringBuilder(len);
+            boolean inTag = false;
 
-            // Преобразуем HTML сущности и разметку
-            CharSequence parsed = Html.fromHtml(stripped);
-            String text = parsed.toString();
+            int i = 0;
+            while (i < len) {
+                char c = html.charAt(i);
 
-            // Нормализуем переносы строк (не более двух подряд)
-            text = text.replaceAll("\r\n", "\n")
-                       .replaceAll("\r", "\n")
-                       .replaceAll("\n{3,}", "\n\n")
-                       .trim();
-            return text;
-        } catch (Exception e) {
-            // Простейший fallback при сбое парсера
+                if (!inTag && c == '<') {
+                    // Пропускаем теги <head>...</head>, <style>...</style>, <script>...</script> целиком
+                    if (i + 5 < len) {
+                        String prefix = html.substring(i, Math.min(len, i + 8)).toLowerCase();
+                        if (prefix.startsWith("<head") || prefix.startsWith("<style") || prefix.startsWith("<script")) {
+                            String endTag = prefix.startsWith("<head") ? "</head>" :
+                                            (prefix.startsWith("<style") ? "</style>" : "</script>");
+                            int endIdx = html.toLowerCase().indexOf(endTag, i);
+                            if (endIdx != -1) {
+                                i = endIdx + endTag.length();
+                                continue;
+                            }
+                        }
+                    }
+
+                    inTag = true;
+                    // Вставляем перенос строки для структурных блоков
+                    String tagPrefix = html.substring(i, Math.min(len, i + 6)).toLowerCase();
+                    if (tagPrefix.startsWith("<p") || tagPrefix.startsWith("</p")
+                            || tagPrefix.startsWith("<br")
+                            || tagPrefix.startsWith("<div") || tagPrefix.startsWith("</div")
+                            || tagPrefix.startsWith("<h") || tagPrefix.startsWith("</h")
+                            || tagPrefix.startsWith("<tr") || tagPrefix.startsWith("<li")) {
+                        if (sb.length() > 0 && sb.charAt(sb.length() - 1) != '\n') {
+                            sb.append('\n');
+                        }
+                    }
+                    i++;
+                    continue;
+                }
+
+                if (inTag) {
+                    if (c == '>') {
+                        inTag = false;
+                    }
+                    i++;
+                    continue;
+                }
+
+                // Декодирование типографических сущностей HTML
+                if (c == '&') {
+                    int semi = html.indexOf(';', i);
+                    if (semi != -1 && (semi - i) <= 10) {
+                        String entity = html.substring(i + 1, semi);
+                        char decoded = decodeEntity(entity);
+                        if (decoded != 0) {
+                            sb.append(decoded);
+                            i = semi + 1;
+                            continue;
+                        } else if (entity.equalsIgnoreCase("laquo")) {
+                            sb.append('«');
+                            i = semi + 1;
+                            continue;
+                        } else if (entity.equalsIgnoreCase("raquo")) {
+                            sb.append('»');
+                            i = semi + 1;
+                            continue;
+                        } else if (entity.equalsIgnoreCase("mdash")) {
+                            sb.append('—');
+                            i = semi + 1;
+                            continue;
+                        } else if (entity.equalsIgnoreCase("ndash")) {
+                            sb.append('–');
+                            i = semi + 1;
+                            continue;
+                        } else if (entity.equalsIgnoreCase("hellip")) {
+                            sb.append('…');
+                            i = semi + 1;
+                            continue;
+                        }
+                    }
+                }
+
+                if (c == '\r') {
+                    i++;
+                    continue;
+                }
+
+                sb.append(c);
+                i++;
+            }
+
+            // Нормализация множественных пустых строк (не более 2 подряд)
+            String raw = sb.toString();
+            StringBuilder out = new StringBuilder(raw.length());
+            int newlineCount = 0;
+            for (int k = 0; k < raw.length(); k++) {
+                char ch = raw.charAt(k);
+                if (ch == '\n') {
+                    newlineCount++;
+                    if (newlineCount <= 2) {
+                        out.append('\n');
+                    }
+                } else {
+                    newlineCount = 0;
+                    out.append(ch);
+                }
+            }
+            return out.toString().trim();
+        } catch (Throwable t) {
             return html.replaceAll("<[^>]+>", " ").replaceAll("\\s+", " ").trim();
         }
     }
 
-    private static String cleanHtmlEntities(String text) {
-        if (text == null) return "";
-        return Html.fromHtml(text).toString().replaceAll("\\s+", " ").trim();
+    private static char decodeEntity(String entity) {
+        if (entity.equalsIgnoreCase("nbsp")) return ' ';
+        if (entity.equalsIgnoreCase("quot")) return '"';
+        if (entity.equalsIgnoreCase("apos")) return '\'';
+        if (entity.equalsIgnoreCase("amp")) return '&';
+        if (entity.equalsIgnoreCase("lt")) return '<';
+        if (entity.equalsIgnoreCase("gt")) return '>';
+        if (entity.startsWith("#x") || entity.startsWith("#X")) {
+            try {
+                return (char) Integer.parseInt(entity.substring(2), 16);
+            } catch (Exception ignored) {}
+        } else if (entity.startsWith("#")) {
+            try {
+                return (char) Integer.parseInt(entity.substring(1));
+            } catch (Exception ignored) {}
+        }
+        return 0;
     }
 
     private static String readStreamToString(InputStream is) throws Exception {
