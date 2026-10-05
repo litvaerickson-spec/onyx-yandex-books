@@ -1411,18 +1411,20 @@ public class ReaderActivity extends Activity {
             long targetGlobalOffset = (long) ((percent / 100.0) * totalBookLength);
             long acc = 0;
             int matchedCh = 0;
-            int matchedOffset = 0;
+            long matchedOffset = 0;
             for (int i = 0; i < chapters.size(); i++) {
                 long chLen = chapterLengths[i];
                 if (targetGlobalOffset <= acc + chLen || i == chapters.size() - 1) {
                     matchedCh = i;
-                    matchedOffset = (int) Math.max(0, targetGlobalOffset - acc);
+                    matchedOffset = Math.max(0, targetGlobalOffset - acc);
                     break;
                 }
                 acc += chLen;
             }
+            long curChLen = chapterLengths[matchedCh];
+            double chapterFraction = (curChLen > 0) ? ((double) matchedOffset / (double) curChLen) : 0.0;
             currentChapterIndex = matchedCh;
-            loadChapterWithOffset(currentChapterIndex, matchedOffset);
+            loadChapterWithFraction(currentChapterIndex, chapterFraction);
         } else {
             if (targetChapter > 0 && chapters != null && targetChapter < chapters.size()) {
                 currentChapterIndex = targetChapter;
@@ -1452,20 +1454,22 @@ public class ReaderActivity extends Activity {
                 long targetGlobalOffset = (long) ((cloudPercent / 100.0) * totalBookLength);
                 long acc = 0;
                 int matchedCh = 0;
-                int matchedOffset = 0;
+                long matchedOffset = 0;
                 for (int i = 0; i < chapters.size(); i++) {
                     long chLen = chapterLengths[i];
                     if (targetGlobalOffset <= acc + chLen || i == chapters.size() - 1) {
                         matchedCh = i;
-                        matchedOffset = (int) Math.max(0, targetGlobalOffset - acc);
+                        matchedOffset = Math.max(0, targetGlobalOffset - acc);
                         break;
                     }
                     acc += chLen;
                 }
+                long curChLen = chapterLengths[matchedCh];
+                double chapterFraction = (curChLen > 0) ? ((double) matchedOffset / (double) curChLen) : 0.0;
 
                 if (matchedCh != currentChapterIndex || Math.abs(cloudPercent - curPercent) > 1.0) {
                     currentChapterIndex = matchedCh;
-                    loadChapterWithOffset(currentChapterIndex, matchedOffset);
+                    loadChapterWithFraction(currentChapterIndex, chapterFraction);
                     Toast.makeText(ReaderActivity.this, String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)", cloudPercent, currentChapterIndex + 1), Toast.LENGTH_SHORT).show();
                 }
             }
@@ -1477,33 +1481,33 @@ public class ReaderActivity extends Activity {
     }
 
     private void loadChapter(final int index, final int targetPage) {
-        loadChapterInternal(index, -1, targetPage);
+        loadChapterInternal(index, -1.0, targetPage);
     }
 
-    private void loadChapterWithOffset(final int index, final int anchorOffset) {
-        loadChapterInternal(index, anchorOffset, 0);
+    private void loadChapterWithFraction(final int index, final double anchorFraction) {
+        loadChapterInternal(index, anchorFraction, 0);
     }
 
-    private void loadChapterInternal(final int index, final int anchorOffset, final int targetPage) {
+    private void loadChapterInternal(final int index, final double anchorFraction, final int targetPage) {
         if (chapters == null || chapters.isEmpty()) return;
         if (index < 0 || index >= chapters.size()) return;
         currentChapterIndex = index;
-        currentPageIndex = Math.max(0, targetPage);
+        currentPageIndex = (targetPage == -999) ? 0 : Math.max(0, targetPage);
         final Chapter ch = chapters.get(index);
 
         String text = cacheManager.loadChapter(bookUuid, ch.getId());
         if (text != null && !text.isEmpty()) {
-            displayChapterText(text, ch.getTitle(), anchorOffset);
+            displayChapterText(text, ch.getTitle(), anchorFraction, targetPage);
         } else {
             Toast.makeText(ReaderActivity.this, "Текст главы не найден", Toast.LENGTH_SHORT).show();
         }
     }
 
     private void displayChapterText(String rawText, String title) {
-        displayChapterText(rawText, title, -1);
+        displayChapterText(rawText, title, -1.0, 0);
     }
 
-    private void displayChapterText(final String rawText, final String title, final int anchorCharOffset) {
+    private void displayChapterText(final String rawText, final String title, final double anchorFraction, final int targetPage) {
         // Синхронизируем конфигурацию с холстом
         readerCanvas.setTypographyConfig(typographyConfig);
 
@@ -1559,18 +1563,34 @@ public class ReaderActivity extends Activity {
                         }
                         currentPages = pages;
 
-                        if (anchorCharOffset >= 0 && !currentPages.isEmpty()) {
-                            int targetPage = 0;
-                            for (int i = 0; i < currentPages.size(); i++) {
-                                TextPaginator.Page p = currentPages.get(i);
-                                if (anchorCharOffset >= p.startCharOffset && anchorCharOffset <= p.endCharOffset) {
-                                    targetPage = i;
-                                    break;
+                        if (currentPages != null && !currentPages.isEmpty()) {
+                            if (targetPage == -999) {
+                                currentPageIndex = currentPages.size() - 1;
+                            } else if (anchorFraction >= 0.0) {
+                                int targetCharOffset = (int) Math.round(anchorFraction * rawText.length());
+                                int resolvedP = 0;
+                                boolean found = false;
+                                for (int i = 0; i < currentPages.size(); i++) {
+                                    TextPaginator.Page p = currentPages.get(i);
+                                    if (targetCharOffset >= p.startCharOffset && targetCharOffset <= p.endCharOffset) {
+                                        resolvedP = i;
+                                        found = true;
+                                        break;
+                                    }
                                 }
+                                if (!found) {
+                                    if (targetCharOffset >= currentPages.get(currentPages.size() - 1).endCharOffset) {
+                                        resolvedP = currentPages.size() - 1;
+                                    } else {
+                                        resolvedP = 0;
+                                    }
+                                }
+                                currentPageIndex = resolvedP;
+                            } else if (targetPage >= 0 && targetPage < currentPages.size()) {
+                                currentPageIndex = targetPage;
+                            } else if (currentPageIndex >= currentPages.size()) {
+                                currentPageIndex = Math.max(0, currentPages.size() - 1);
                             }
-                            currentPageIndex = targetPage;
-                        } else if (currentPageIndex >= currentPages.size()) {
-                            currentPageIndex = Math.max(0, currentPages.size() - 1);
                         }
 
                         renderCurrentPage();
@@ -1584,14 +1604,14 @@ public class ReaderActivity extends Activity {
 
     private void repaginateCurrentChapter() {
         if (chapters != null && currentChapterIndex < chapters.size()) {
-            int anchorOffset = -1;
-            if (currentPages != null && currentPageIndex < currentPages.size()) {
-                anchorOffset = currentPages.get(currentPageIndex).startCharOffset;
+            double fraction = -1.0;
+            if (currentPages != null && !currentPages.isEmpty() && currentPageIndex < currentPages.size()) {
+                fraction = (double) currentPageIndex / (double) Math.max(1, currentPages.size());
             }
             String id = chapters.get(currentChapterIndex).getId();
             String text = cacheManager.loadChapter(bookUuid, id);
             if (text != null) {
-                displayChapterText(text, chapters.get(currentChapterIndex).getTitle(), anchorOffset);
+                displayChapterText(text, chapters.get(currentChapterIndex).getTitle(), fraction, currentPageIndex);
             }
         }
     }
@@ -1611,17 +1631,10 @@ public class ReaderActivity extends Activity {
         long curChapterLen = chapterLengths[currentChapterIndex];
         double inChapterFraction = 0.0;
         if (currentPages != null && !currentPages.isEmpty()) {
-            if (currentPageIndex < currentPages.size()) {
-                TextPaginator.Page page = currentPages.get(currentPageIndex);
-                if (curChapterLen > 0) {
-                    inChapterFraction = (double) page.startCharOffset / (double) curChapterLen;
-                } else {
-                    inChapterFraction = (double) currentPageIndex / (double) currentPages.size();
-                }
-            }
+            inChapterFraction = (double) (currentPageIndex + 1) / (double) currentPages.size();
         }
-        double globalOffset = precedingLength + (inChapterFraction * curChapterLen);
-        double percent = (globalOffset / (double) totalBookLength) * 100.0;
+        double globalBytes = precedingLength + (inChapterFraction * curChapterLen);
+        double percent = (globalBytes / (double) totalBookLength) * 100.0;
         return Math.min(100.0, Math.max(0.0, percent));
     }
 
@@ -1670,7 +1683,7 @@ public class ReaderActivity extends Activity {
             updateMenuControls();
         } else if (currentChapterIndex > 0) {
             currentChapterIndex--;
-            loadChapter(currentChapterIndex);
+            loadChapter(currentChapterIndex, -999);
         }
     }
 

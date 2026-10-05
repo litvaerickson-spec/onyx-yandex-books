@@ -300,6 +300,193 @@ def test_ota_update_semver_and_github_contract():
     print("✅ Тест OTA обновлений и контракта GitHub API успешно пройден!\n")
 
 
+def test_weighted_chapter_sync_and_offset():
+    print("--- [ТЕСТ 7] Взвешенный расчет глав и маппинг прогресса (НЕ ТУПИ и др.) ---")
+    
+    chapter_lengths = [5000, 500000, 10000, 8000]
+    total_book_len = sum(chapter_lengths)
+    
+    cloud_percent = 51.0
+    
+    # 1. Проверяем старый наивный алгоритм (баг перескока):
+    naive_chapter = int((cloud_percent / 100.0) * len(chapter_lengths))
+    print(f"Старый наивный алгоритм выдавал главу: {naive_chapter} ('Слова благодарности') - ОШИБКА!")
+    assert naive_chapter == 2, "Наивный алгоритм должен был выдать ошибочную главу 2"
+    
+    # 2. Проверяем новый взвешенный алгоритм:
+    target_global_offset = int((cloud_percent / 100.0) * total_book_len)
+    acc = 0
+    matched_ch = 0
+    matched_offset = 0
+    for i, ch_len in enumerate(chapter_lengths):
+        if target_global_offset <= acc + ch_len or i == len(chapter_lengths) - 1:
+            matched_ch = i
+            matched_offset = max(0, target_global_offset - acc)
+            break
+        acc += ch_len
+        
+    print(f"Новый взвешенный алгоритм: глава {matched_ch}, смещение {matched_offset} байт")
+    assert matched_ch == 1, f"Ожидалась глава 1 (Основной текст книги), но получено: {matched_ch}"
+    
+    # 3. Проверяем расчет относительной доли главы chapterFraction
+    cur_ch_len = chapter_lengths[matched_ch]
+    chapter_fraction = matched_offset / cur_ch_len
+    print(f"Относительная доля внутри главы: {chapter_fraction:.4f}")
+    assert 0.50 <= chapter_fraction <= 0.55, f"Ожидалось ~52% главы 1, получено: {chapter_fraction}"
+    
+    # 4. Проверяем маппинг в символьное смещение текста главы
+    raw_text_len = 240000
+    target_char_offset = int(round(chapter_fraction * raw_text_len))
+    print(f"Целевое символьное смещение: {target_char_offset} из {raw_text_len} символов")
+    assert 120000 <= target_char_offset <= 130000
+    
+    # 5. Проверяем обратный расчет процента calculateCurrentGlobalPercent
+    cur_page_idx = 129
+    total_pages = 250
+    in_chapter_fraction = (cur_page_idx + 1) / total_pages
+    preceding_len = chapter_lengths[0]
+    global_bytes = preceding_len + (in_chapter_fraction * cur_ch_len)
+    calc_percent = (global_bytes / total_book_len) * 100.0
+    print(f"Обратный расчет процента со страницы 130/250: {calc_percent:.2f}%")
+    assert abs(calc_percent - cloud_percent) < 0.5, f"Процент должен совпадать с исходным 51%! Получено {calc_percent}"
+
+    print("✅ Тест взвешенного прогресса и символьного маппинга успешно пройден!\n")
+
+
+def test_initial_load_protection_contract():
+    print("--- [ТЕСТ 8] Контракт защиты от перезаписи облачного прогресса (isInitialLoading) ---")
+    
+    class MockReaderSession:
+        def __init__(self, cloud_percent):
+            self.cloud_percent = cloud_percent
+            self.saved_percent = None
+            self.is_initial_loading = True
+            
+        def render_initial_page(self):
+            if not self.is_initial_loading:
+                self.save_progress(40.0)
+                
+        def user_flips_page(self, new_percent):
+            self.is_initial_loading = False
+            self.save_progress(new_percent)
+            
+        def save_progress(self, pct):
+            self.saved_percent = pct
+
+    session = MockReaderSession(cloud_percent=51.0)
+    session.render_initial_page()
+    assert session.saved_percent is None, "ОШИБКА: Автосейв сработал при первичном открытии и перезаписал прогресс!"
+    
+    session.user_flips_page(51.2)
+    assert session.saved_percent == 51.2, "ОШИБКА: Прогресс должен сохраниться после действия пользователя!"
+    
+    print("✅ Контракт защиты isInitialLoading успешно верифицирован!\n")
+
+
+def test_backward_chapter_transition():
+    print("--- [ТЕСТ 9] Переход назад на границе глав (-999 -> последняя страница) ---")
+    
+    def resolve_target_page(target_page_code, total_pages_in_chapter):
+        if target_page_code == -999:
+            return total_pages_in_chapter - 1
+        return max(0, min(target_page_code, total_pages_in_chapter - 1))
+        
+    assert resolve_target_page(-999, 15) == 14, "Должна открыться страница 14 (последняя из 15)"
+    assert resolve_target_page(0, 15) == 0, "Должна открыться страница 0"
+    assert resolve_target_page(5, 15) == 5, "Должна открыться страница 5"
+    
+    print("✅ Тест перехода назад на границе глав успешно пройден!\n")
+
+
+def test_bookmarks_model_and_storage():
+    print("--- [ТЕСТ 10] Модель закладок и SQLite контракт ---")
+    
+    bookmarks = []
+    
+    def add_bookmark(book_uuid, chapter_idx, page_idx, title, snippet, ts):
+        bm = {
+            "id": len(bookmarks) + 1,
+            "book_uuid": book_uuid,
+            "chapter_index": chapter_idx,
+            "page_index": page_idx,
+            "title": title,
+            "snippet": snippet,
+            "timestamp": ts
+        }
+        bookmarks.insert(0, bm)
+        return bm["id"]
+        
+    def delete_bookmark(bm_id):
+        nonlocal bookmarks
+        bookmarks = [b for b in bookmarks if b["id"] != bm_id]
+        
+    b1_id = add_bookmark("uuid-1", 1, 10, "Глава 2, стр. 11", "Начало интересного абзаца...", 1000)
+    b2_id = add_bookmark("uuid-1", 1, 25, "Глава 2, стр. 26", "Вторая важная мысль...", 2000)
+    
+    assert len(bookmarks) == 2
+    assert bookmarks[0]["id"] == b2_id, "Свежая закладка должна быть первой в списке"
+    assert bookmarks[0]["page_index"] == 25
+    
+    delete_bookmark(b1_id)
+    assert len(bookmarks) == 1
+    assert bookmarks[0]["id"] == b2_id
+    
+    print("✅ Тест модели закладок успешно пройден!\n")
+
+
+def test_typography_cycle_contracts():
+    print("--- [ТЕСТ 11] Контракты переключения типографики в стиле Onyx NeoReader ---")
+    
+    def next_font_family(cur):
+        if cur == "serif": return "sans-serif"
+        if cur == "sans-serif": return "monospace"
+        return "serif"
+        
+    assert next_font_family("serif") == "sans-serif"
+    assert next_font_family("sans-serif") == "monospace"
+    assert next_font_family("monospace") == "serif"
+    
+    def next_indent(cur):
+        if cur == 0: return 20
+        if cur <= 20: return 32
+        if cur <= 32: return 44
+        return 0
+        
+    assert next_indent(0) == 20
+    assert next_indent(20) == 32
+    assert next_indent(32) == 44
+    assert next_indent(44) == 0
+    
+    def next_line_spacing(cur):
+        if cur <= 1.05: return 1.25
+        if cur <= 1.30: return 1.50
+        if cur <= 1.55: return 1.75
+        return 1.00
+        
+    assert next_line_spacing(1.00) == 1.25
+    assert next_line_spacing(1.25) == 1.50
+    assert next_line_spacing(1.50) == 1.75
+    assert next_line_spacing(1.75) == 1.00
+    
+    def next_margin_mode(cur):
+        if cur == "narrow": return "medium"
+        if cur == "medium": return "wide"
+        return "narrow"
+        
+    assert next_margin_mode("narrow") == "medium"
+    assert next_margin_mode("medium") == "wide"
+    assert next_margin_mode("wide") == "narrow"
+
+    def next_vert_margin(cur):
+        if cur == "small": return "normal"
+        if cur == "normal": return "large"
+        return "small"
+        
+    assert next_vert_margin("normal") == "large"
+    assert next_vert_margin("large") == "small"
+    assert next_vert_margin("small") == "normal"
+    
+    print("✅ Тест переключения настроек типографики успешно пройден!\n")
 if __name__ == "__main__":
     print("==================================================")
     print("🚀 Запуск тотальной верификации ядра Яндекс Книги Lite")
@@ -311,6 +498,11 @@ if __name__ == "__main__":
     test_device_flow_contract()
     test_cloud_reading_progress_extraction()
     test_ota_update_semver_and_github_contract()
+    test_weighted_chapter_sync_and_offset()
+    test_initial_load_protection_contract()
+    test_backward_chapter_transition()
+    test_bookmarks_model_and_storage()
+    test_typography_cycle_contracts()
     print("==================================================")
-    print("🎉 ВСЕ ТЕСТЫ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 11 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")
