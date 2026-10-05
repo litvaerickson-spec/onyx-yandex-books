@@ -760,17 +760,20 @@ public class ReaderActivity extends Activity {
         if (btnSubtabView != null) {
             boolean active = "view".equals(subtab);
             btnSubtabView.setBackgroundResource(active ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
-            btnSubtabView.setTextColor(active ? Color.WHITE : Color.BLACK);
+            btnSubtabView.setTextColor(Color.BLACK);
+            btnSubtabView.setTypeface(null, active ? Typeface.BOLD : Typeface.NORMAL);
         }
         if (btnSubtabFormat != null) {
             boolean active = "format".equals(subtab);
             btnSubtabFormat.setBackgroundResource(active ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
-            btnSubtabFormat.setTextColor(active ? Color.WHITE : Color.BLACK);
+            btnSubtabFormat.setTextColor(Color.BLACK);
+            btnSubtabFormat.setTypeface(null, active ? Typeface.BOLD : Typeface.NORMAL);
         }
         if (btnSubtabSpacing != null) {
             boolean active = "spacing".equals(subtab);
             btnSubtabSpacing.setBackgroundResource(active ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
-            btnSubtabSpacing.setTextColor(active ? Color.WHITE : Color.BLACK);
+            btnSubtabSpacing.setTextColor(Color.BLACK);
+            btnSubtabSpacing.setTypeface(null, active ? Typeface.BOLD : Typeface.NORMAL);
         }
     }
 
@@ -1039,7 +1042,7 @@ public class ReaderActivity extends Activity {
         btnTabChapters.setTextSize(12);
         btnTabChapters.setTypeface(null, Typeface.BOLD);
         btnTabChapters.setBackgroundResource(R.drawable.btn_eink_primary);
-        btnTabChapters.setTextColor(Color.WHITE);
+        btnTabChapters.setTextColor(Color.BLACK);
         LinearLayout.LayoutParams tabLp1 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
         tabLp1.setMargins(0, 0, (int) (4 * density), 0);
         btnTabChapters.setLayoutParams(tabLp1);
@@ -1378,7 +1381,7 @@ public class ReaderActivity extends Activity {
             @Override
             public void onClick(View v) {
                 btnTabChapters.setBackgroundResource(R.drawable.btn_eink_primary);
-                btnTabChapters.setTextColor(Color.WHITE);
+                btnTabChapters.setTextColor(Color.BLACK);
                 btnTabBookmarks.setBackgroundResource(R.drawable.btn_eink);
                 btnTabBookmarks.setTextColor(Color.BLACK);
                 listChaptersView.setVisibility(View.VISIBLE);
@@ -1390,7 +1393,7 @@ public class ReaderActivity extends Activity {
             @Override
             public void onClick(View v) {
                 btnTabBookmarks.setBackgroundResource(R.drawable.btn_eink_primary);
-                btnTabBookmarks.setTextColor(Color.WHITE);
+                btnTabBookmarks.setTextColor(Color.BLACK);
                 btnTabChapters.setBackgroundResource(R.drawable.btn_eink);
                 btnTabChapters.setTextColor(Color.BLACK);
                 listChaptersView.setVisibility(View.GONE);
@@ -1482,7 +1485,7 @@ public class ReaderActivity extends Activity {
         btnSyncNow.setText("Синхронизировать сейчас");
         btnSyncNow.setTextSize(12);
         btnSyncNow.setTypeface(null, Typeface.BOLD);
-        btnSyncNow.setTextColor(Color.WHITE);
+        btnSyncNow.setTextColor(Color.BLACK);
         btnSyncNow.setBackgroundResource(R.drawable.btn_eink_primary);
         btnSyncNow.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (38 * density)));
         btnSyncNow.setOnClickListener(new View.OnClickListener() {
@@ -1819,7 +1822,8 @@ public class ReaderActivity extends Activity {
                     currentPageIndex = Math.max(0, cloudProgress.getPageIndex());
                     loadChapter(currentChapterIndex, currentPageIndex);
                     dbHelper.saveProgress(cloudProgress);
-                    Toast.makeText(ReaderActivity.this, String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)", cloudPercent, currentChapterIndex + 1), Toast.LENGTH_SHORT).show();
+                    dbHelper.ensureCloudSyncBookmark(bookUuid, currentChapterIndex, currentPageIndex, (float) cloudPercent);
+                    Toast.makeText(ReaderActivity.this, String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d) [Закладка создана]", cloudPercent, currentChapterIndex + 1), Toast.LENGTH_SHORT).show();
                 }
             } else if (cloudPercent > 0 && cloudPercent < 99.0 && totalBookLength > 0) {
                 // Если номер главы не указан (или 0 при высоком проценте) – маппинг по общей длине
@@ -1846,7 +1850,8 @@ public class ReaderActivity extends Activity {
                     currentChapterIndex = matchedCh;
                     loadChapterWithFraction(currentChapterIndex, chapterFraction);
                     dbHelper.saveProgress(cloudProgress);
-                    Toast.makeText(ReaderActivity.this, String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)", cloudPercent, currentChapterIndex + 1), Toast.LENGTH_SHORT).show();
+                    dbHelper.ensureCloudSyncBookmark(bookUuid, currentChapterIndex, currentPageIndex, (float) cloudPercent);
+                    Toast.makeText(ReaderActivity.this, String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d) [Закладка создана]", cloudPercent, currentChapterIndex + 1), Toast.LENGTH_SHORT).show();
                 }
             }
         }

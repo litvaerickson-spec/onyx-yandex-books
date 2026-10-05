@@ -114,7 +114,7 @@
             android:text="@string/btn_read"
             android:textSize="12sp"
             android:textStyle="bold"
-            android:textColor="@color/eink_white"
+            android:textColor="@color/eink_black"
             android:background="@drawable/btn_eink_primary"
             android:includeFontPadding="false"
             android:paddingTop="2dp"

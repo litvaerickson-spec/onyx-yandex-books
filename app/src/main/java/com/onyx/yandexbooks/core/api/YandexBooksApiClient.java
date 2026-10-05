@@ -1224,18 +1224,27 @@ public class YandexBooksApiClient {
      * Перемещение книги на заданную полку («reading», «to_read», «finished»).
      */
     public void updateBookShelfState(final String bookUuid, final String shelfState, final ApiCallback<Boolean> callback) {
+        final String apiState;
+        if ("done".equalsIgnoreCase(shelfState) || "finished".equalsIgnoreCase(shelfState) || "read".equalsIgnoreCase(shelfState) || "completed".equalsIgnoreCase(shelfState)) {
+            apiState = "finished";
+        } else if ("reading".equalsIgnoreCase(shelfState)) {
+            apiState = "reading";
+        } else {
+            apiState = "to_read";
+        }
+
         String endpoint = BASE_URL + "/profile/library_cards/" + bookUuid;
         try {
             JSONObject bodyJson = new JSONObject();
             bodyJson.put("book_uuid", bookUuid);
-            bodyJson.put("state", shelfState);
+            bodyJson.put("state", apiState);
             RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString());
             Request request = createAuthRequestBuilder(endpoint).patch(body).build();
 
             httpClient.newCall(request).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
-                    updateBookShelfFallbackPost(bookUuid, shelfState, callback);
+                    updateBookShelfFallbackPut(bookUuid, apiState, callback);
                 }
 
                 @Override
@@ -1243,21 +1252,50 @@ public class YandexBooksApiClient {
                     if (response.isSuccessful()) {
                         postSuccess(callback, true);
                     } else {
-                        updateBookShelfFallbackPost(bookUuid, shelfState, callback);
+                        updateBookShelfFallbackPut(bookUuid, apiState, callback);
                     }
                 }
             });
         } catch (Exception e) {
-            updateBookShelfFallbackPost(bookUuid, shelfState, callback);
+            updateBookShelfFallbackPut(bookUuid, apiState, callback);
         }
     }
 
-    private void updateBookShelfFallbackPost(final String bookUuid, final String shelfState, final ApiCallback<Boolean> callback) {
+    private void updateBookShelfFallbackPut(final String bookUuid, final String apiState, final ApiCallback<Boolean> callback) {
+        String endpoint = BASE_URL + "/profile/library_cards/" + bookUuid;
+        try {
+            JSONObject bodyJson = new JSONObject();
+            bodyJson.put("book_uuid", bookUuid);
+            bodyJson.put("state", apiState);
+            RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString());
+            Request request = createAuthRequestBuilder(endpoint).put(body).build();
+
+            httpClient.newCall(request).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    updateBookShelfFallbackPost(bookUuid, apiState, callback);
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) {
+                    if (response.isSuccessful()) {
+                        postSuccess(callback, true);
+                    } else {
+                        updateBookShelfFallbackPost(bookUuid, apiState, callback);
+                    }
+                }
+            });
+        } catch (Exception e) {
+            updateBookShelfFallbackPost(bookUuid, apiState, callback);
+        }
+    }
+
+    private void updateBookShelfFallbackPost(final String bookUuid, final String apiState, final ApiCallback<Boolean> callback) {
         String endpoint = BASE_URL + "/profile/library_cards";
         try {
             JSONObject bodyJson = new JSONObject();
             bodyJson.put("book_uuid", bookUuid);
-            bodyJson.put("state", shelfState);
+            bodyJson.put("state", apiState);
             RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString());
             Request request = createAuthRequestBuilder(endpoint).post(body).build();
 

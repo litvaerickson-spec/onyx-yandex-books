@@ -188,10 +188,11 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         int bestLocalCh = 0;
         int bestLocalPar = 0;
         boolean hasLocalRecord = false;
+        String localShelfType = null;
 
         try {
             // 1. Проверяем локальную запись в таблице books
-            Cursor c = db.rawQuery("SELECT percent, is_downloaded, last_read_timestamp, current_chapter, current_paragraph FROM books WHERE uuid = ?", new String[]{book.getUuid()});
+            Cursor c = db.rawQuery("SELECT percent, is_downloaded, last_read_timestamp, current_chapter, current_paragraph, shelf_type FROM books WHERE uuid = ?", new String[]{book.getUuid()});
             if (c != null) {
                 if (c.moveToFirst()) {
                     hasLocalRecord = true;
@@ -200,6 +201,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     long localTs = c.getLong(2);
                     int localCh = c.getInt(3);
                     int localPar = c.getInt(4);
+                    localShelfType = c.getString(5);
 
                     if (localDown == 1) {
                         effectiveDownloaded = true;
@@ -271,6 +273,43 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             }
         }
 
+        // Защита и приоритизация полок (Читаю / В планах / Прочитано):
+        String targetShelf;
+        if (overrideShelfType != null) {
+            targetShelf = overrideShelfType;
+        } else if (localShelfType != null) {
+            if ("done".equals(localShelfType)) {
+                // Книга локально отмечена как "Прочитано" — облачная карточка со статусом "to_read" не должна откатывать ее в планы
+                targetShelf = "done";
+            } else if ("reading".equals(localShelfType)) {
+                // Книга локально читается — облако не должно понижать ее в "to_read"
+                if ("done".equals(book.getShelfType()) || (effectivePercent >= 99.0 && effectiveChapter > 0)) {
+                    targetShelf = "done";
+                } else {
+                    targetShelf = "reading";
+                }
+            } else {
+                // Была to_read
+                if ("done".equals(book.getShelfType()) || (effectivePercent >= 99.0 && effectiveChapter > 0)) {
+                    targetShelf = "done";
+                } else if ("reading".equals(book.getShelfType()) || effectivePercent > 0.0) {
+                    targetShelf = "reading";
+                } else {
+                    targetShelf = "to_read";
+                }
+            }
+        } else {
+            if ("done".equals(book.getShelfType()) || (effectivePercent >= 99.0 && effectiveChapter > 0)) {
+                targetShelf = "done";
+            } else if ("reading".equals(book.getShelfType()) || effectivePercent > 0.0) {
+                targetShelf = "reading";
+            } else if (book.getShelfType() != null && !"catalog".equals(book.getShelfType()) && !"search".equals(book.getShelfType())) {
+                targetShelf = book.getShelfType();
+            } else {
+                targetShelf = "to_read";
+            }
+        }
+
         ContentValues cv = new ContentValues();
         cv.put("uuid", book.getUuid());
         cv.put("title", book.getTitle());
@@ -280,7 +319,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         cv.put("percent", effectivePercent);
         cv.put("current_chapter", effectiveChapter);
         cv.put("current_paragraph", effectiveParagraph);
-        cv.put("shelf_type", overrideShelfType != null ? overrideShelfType : book.getShelfType());
+        cv.put("shelf_type", targetShelf);
         cv.put("is_downloaded", effectiveDownloaded ? 1 : 0);
         cv.put("last_read_timestamp", effectiveTimestamp);
 
@@ -326,6 +365,40 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 pCv.put("timestamp", book.getLastReadTimestamp() > 0 ? book.getLastReadTimestamp() : System.currentTimeMillis());
                 pCv.put("is_synced", 1);
                 db.insertWithOnConflict("progress", null, pCv, SQLiteDatabase.CONFLICT_REPLACE);
+
+                if (book.getPercent() > 0.0 && book.getPercent() < 99.0) {
+                    ensureCloudSyncBookmarkInternal(db, book.getUuid(), book.getCurrentChapterIndex(), 0, book.getPercent());
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    public synchronized void ensureCloudSyncBookmark(String bookUuid, int chapterIndex, int pageIndex, double percent) {
+        SQLiteDatabase db = getWritableDatabase();
+        ensureCloudSyncBookmarkInternal(db, bookUuid, chapterIndex, pageIndex, percent);
+    }
+
+    private void ensureCloudSyncBookmarkInternal(SQLiteDatabase db, String bookUuid, int chapterIndex, int pageIndex, double percent) {
+        try {
+            ensureBookmarksTable(db);
+            Cursor bc = db.rawQuery("SELECT id FROM bookmarks WHERE book_uuid = ? AND title LIKE 'Облако%'", new String[]{bookUuid});
+            boolean exists = (bc != null && bc.moveToFirst());
+            long existingId = exists ? bc.getLong(0) : -1L;
+            if (bc != null) bc.close();
+
+            ContentValues bCv = new ContentValues();
+            bCv.put("book_uuid", bookUuid);
+            bCv.put("chapter_index", Math.max(0, chapterIndex));
+            bCv.put("page_index", Math.max(0, pageIndex));
+            String pctStr = String.format(java.util.Locale.getDefault(), "%.0f%%", percent);
+            bCv.put("title", "Облако (" + pctStr + ")");
+            bCv.put("snippet", "Место с другого устройства: Гл. " + (Math.max(0, chapterIndex) + 1) + ", " + pctStr);
+            bCv.put("created_at", System.currentTimeMillis());
+
+            if (exists && existingId > 0) {
+                db.update("bookmarks", bCv, "id = ?", new String[]{String.valueOf(existingId)});
+            } else {
+                db.insert("bookmarks", null, bCv);
             }
         } catch (Exception ignored) {}
     }
@@ -335,6 +408,13 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         ContentValues cv = new ContentValues();
         cv.put("is_downloaded", isDownloaded ? 1 : 0);
         db.update("books", cv, "uuid = ?", new String[]{uuid});
+
+        if (isDownloaded) {
+            Book b = getBookByUuid(uuid);
+            if (b != null && b.getPercent() > 0.0 && b.getPercent() < 99.0) {
+                ensureCloudSyncBookmarkInternal(db, uuid, b.getCurrentChapterIndex(), b.getCurrentParagraphIndex(), b.getPercent());
+            }
+        }
     }
 
     public synchronized void updateBookShelf(String uuid, String shelfType) {

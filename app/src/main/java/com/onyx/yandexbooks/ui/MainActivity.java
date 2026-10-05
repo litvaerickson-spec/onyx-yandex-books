@@ -422,7 +422,7 @@ public class MainActivity extends Activity {
                         btnCheckUpdate.setVisibility(View.VISIBLE);
                         btnCheckUpdate.setText(release.tagName);
                         btnCheckUpdate.setBackgroundResource(R.drawable.btn_eink_primary);
-                        btnCheckUpdate.setTextColor(Color.WHITE);
+                        btnCheckUpdate.setTextColor(Color.BLACK);
                     }
                     if (userTriggered) {
                         AppUpdateManager.getInstance().showUpdateDialog(MainActivity.this, release);
@@ -656,16 +656,20 @@ public class MainActivity extends Activity {
         boolean isSearch = "search".equals(currentShelf);
 
         tabReadingBtn.setBackgroundResource(isReading ? R.drawable.tab_eink_active : R.drawable.tab_eink_inactive);
-        tabReadingBtn.setTextColor(getResources().getColor(isReading ? R.color.eink_white : R.color.eink_black));
+        tabReadingBtn.setTextColor(Color.BLACK);
+        tabReadingBtn.setTypeface(null, isReading ? Typeface.BOLD : Typeface.NORMAL);
 
         tabToReadBtn.setBackgroundResource(isToRead ? R.drawable.tab_eink_active : R.drawable.tab_eink_inactive);
-        tabToReadBtn.setTextColor(getResources().getColor(isToRead ? R.color.eink_white : R.color.eink_black));
+        tabToReadBtn.setTextColor(Color.BLACK);
+        tabToReadBtn.setTypeface(null, isToRead ? Typeface.BOLD : Typeface.NORMAL);
 
         tabCatalogBtn.setBackgroundResource(isCatalog ? R.drawable.tab_eink_active : R.drawable.tab_eink_inactive);
-        tabCatalogBtn.setTextColor(getResources().getColor(isCatalog ? R.color.eink_white : R.color.eink_black));
+        tabCatalogBtn.setTextColor(Color.BLACK);
+        tabCatalogBtn.setTypeface(null, isCatalog ? Typeface.BOLD : Typeface.NORMAL);
 
         tabSearchBtn.setBackgroundResource(isSearch ? R.drawable.tab_eink_active : R.drawable.tab_eink_inactive);
-        tabSearchBtn.setTextColor(getResources().getColor(isSearch ? R.color.eink_white : R.color.eink_black));
+        tabSearchBtn.setTextColor(Color.BLACK);
+        tabSearchBtn.setTypeface(null, isSearch ? Typeface.BOLD : Typeface.NORMAL);
     }
 
     private void updateTabBadges() {
@@ -882,6 +886,9 @@ public class MainActivity extends Activity {
         ensureBookOnReadingShelf(book, new Runnable() {
             @Override
             public void run() {
+                // При открытии книги автоматически переводим активный раздел на "Читаю",
+                // чтобы по возвращении из читалки пользователь видел список читаемых книг с актуальным прогрессом
+                currentShelf = "reading";
                 if (appSettings.isOnyxReaderPreferred()) {
                     openInOnyxReader(book);
                 } else {
@@ -906,6 +913,11 @@ public class MainActivity extends Activity {
             dbHelper.updateBookShelf(book.getUuid(), "reading");
         }
         updateTabBadges();
+
+        // Автоматическая полусинхронизация: если есть облачный прогресс, гарантируем создание закладки
+        if (book.getPercent() > 0.0 && book.getPercent() < 99.0) {
+            dbHelper.ensureCloudSyncBookmark(book.getUuid(), book.getCurrentChapterIndex(), 0, book.getPercent());
+        }
 
         if (needsShelfUpdate) {
             apiClient.updateBookShelfState(book.getUuid(), "reading", new YandexBooksApiClient.ApiCallback<Boolean>() {
@@ -934,6 +946,21 @@ public class MainActivity extends Activity {
             dbHelper.updateBookShelf(book.getUuid(), targetShelf);
         }
         updateTabBadges();
+
+        // Если мы находимся на полке, с которой книга перемещена, убираем ее из текущего списка
+        if (!"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
+            if (!currentShelf.equals(targetShelf)) {
+                for (int i = 0; i < currentBooks.size(); i++) {
+                    if (book.getUuid().equals(currentBooks.get(i).getUuid())) {
+                        currentBooks.remove(i);
+                        break;
+                    }
+                }
+                adapter.notifyDataSetChanged();
+                updateEmptyState();
+                updateShelfFooter();
+            }
+        }
 
         apiClient.updateBookShelfState(book.getUuid(), targetShelf, new YandexBooksApiClient.ApiCallback<Boolean>() {
             @Override
@@ -1006,25 +1033,34 @@ public class MainActivity extends Activity {
         boolean isDone = "done".equals(activeShelf);
 
         btnReading.setBackgroundResource(isReading ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
-        btnReading.setTextColor(isReading ? Color.WHITE : Color.BLACK);
+        btnReading.setTextColor(Color.BLACK);
+        btnReading.setTypeface(null, isReading ? Typeface.BOLD : Typeface.NORMAL);
         btnReading.setText(isReading ? "✓ Читаю" : "Читаю");
 
         btnToRead.setBackgroundResource(isToRead ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
-        btnToRead.setTextColor(isToRead ? Color.WHITE : Color.BLACK);
+        btnToRead.setTextColor(Color.BLACK);
+        btnToRead.setTypeface(null, isToRead ? Typeface.BOLD : Typeface.NORMAL);
         btnToRead.setText(isToRead ? "✓ В планы" : "В планы");
 
         btnDone.setBackgroundResource(isDone ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
-        btnDone.setTextColor(isDone ? Color.WHITE : Color.BLACK);
+        btnDone.setTextColor(Color.BLACK);
+        btnDone.setTypeface(null, isDone ? Typeface.BOLD : Typeface.NORMAL);
         btnDone.setText(isDone ? "✓ Прочитано" : "Прочитано");
     }
 
     private void openInOnyxReader(final Book book) {
         File epub = cacheManager.ensurePublicEpubFile(book.getUuid(), book.getTitle());
         if (epub != null && epub.exists() && epub.length() > 0) {
-            boolean ok = CacheManager.openInSystemReader(this, epub);
+            // Полусинхронизация: создаем закладку места чтения с другого устройства
+            if (book.getPercent() > 0.0 && book.getPercent() < 99.0) {
+                dbHelper.ensureCloudSyncBookmark(book.getUuid(), book.getCurrentChapterIndex(), 0, book.getPercent());
+            }
+            boolean ok = CacheManager.openInSystemReader(this, epub, book.getPercent(), book.getCurrentChapterIndex());
             if (!ok) {
                 Toast.makeText(this, "Читалка Onyx не найдена. Открываем в читалке Онлайн...", Toast.LENGTH_SHORT).show();
                 openInLiteReader(book);
+            } else if (book.getPercent() > 0.0) {
+                Toast.makeText(this, String.format(java.util.Locale.getDefault(), "Позиция в облаке: %.0f%% (Гл. %d)", book.getPercent(), book.getCurrentChapterIndex() + 1), Toast.LENGTH_LONG).show();
             }
             return;
         }
@@ -1039,11 +1075,16 @@ public class MainActivity extends Activity {
             public void onComplete() {
                 dismissEinkLoadingDialog(dialog);
                 adapter.notifyDataSetChanged();
+                if (book.getPercent() > 0.0 && book.getPercent() < 99.0) {
+                    dbHelper.ensureCloudSyncBookmark(book.getUuid(), book.getCurrentChapterIndex(), 0, book.getPercent());
+                }
                 File readyEpub = cacheManager.ensurePublicEpubFile(book.getUuid(), book.getTitle());
                 if (readyEpub != null && readyEpub.exists()) {
-                    boolean ok = CacheManager.openInSystemReader(MainActivity.this, readyEpub);
+                    boolean ok = CacheManager.openInSystemReader(MainActivity.this, readyEpub, book.getPercent(), book.getCurrentChapterIndex());
                     if (!ok) {
                         openInLiteReader(book);
+                    } else if (book.getPercent() > 0.0) {
+                        Toast.makeText(MainActivity.this, String.format(java.util.Locale.getDefault(), "Позиция в облаке: %.0f%% (Гл. %d)", book.getPercent(), book.getCurrentChapterIndex() + 1), Toast.LENGTH_LONG).show();
                     }
                 } else {
                     openInLiteReader(book);
@@ -1267,7 +1308,7 @@ public class MainActivity extends Activity {
         btnOnyx.setText("Onyx Reader");
         btnOnyx.setTextSize(11);
         btnOnyx.setTypeface(null, Typeface.BOLD);
-        btnOnyx.setTextColor(Color.WHITE);
+        btnOnyx.setTextColor(Color.BLACK);
         btnOnyx.setBackgroundResource(R.drawable.btn_eink_primary);
         LinearLayout.LayoutParams lpOnyx = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
         lpOnyx.setMargins(0, 0, (int) (4 * density), 0);

@@ -605,6 +605,10 @@ public class CacheManager {
     }
 
     public static boolean openInSystemReader(android.app.Activity activity, File epubFile) {
+        return openInSystemReader(activity, epubFile, 0.0, 0);
+    }
+
+    public static boolean openInSystemReader(android.app.Activity activity, File epubFile, double percent, int chapterIndex) {
         if (epubFile == null || !epubFile.exists()) {
             return false;
         }
@@ -614,6 +618,15 @@ public class CacheManager {
         android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW);
         intent.setDataAndType(uri, "application/epub+zip");
         intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+
+        if (percent > 0.0) {
+            intent.putExtra("percent", (float) percent);
+            intent.putExtra("position", (int) Math.round(percent * 100.0));
+            intent.putExtra("progress", (float) (percent / 100.0));
+            intent.putExtra("chapter", Math.max(0, chapterIndex));
+            intent.putExtra("chapter_index", Math.max(0, chapterIndex));
+            intent.putExtra("org.geometerplus.zlibrary.ui.android.action.VIEW", uri);
+        }
 
         try {
             activity.startActivity(intent);
@@ -630,6 +643,10 @@ public class CacheManager {
                     android.content.Intent fallback = new android.content.Intent(android.content.Intent.ACTION_VIEW);
                     fallback.setDataAndType(uri, "*/*");
                     fallback.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                    if (percent > 0.0) {
+                        fallback.putExtra("percent", (float) percent);
+                        fallback.putExtra("progress", (float) (percent / 100.0));
+                    }
                     activity.startActivity(fallback);
                     return true;
                 } catch (Exception e2) {
