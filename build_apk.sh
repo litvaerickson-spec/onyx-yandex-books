@@ -58,7 +58,7 @@ echo "[5/6] Выравнивание байтов (zipalign)..."
 "$BUILD_TOOLS/zipalign" -f -p 4 build/unaligned.apk build/aligned.apk
 
 echo "[6/6] Удаление старых версий и подпись нового APK (v1 + v2 схемы)..."
-rm -f "$PROJECT_DIR"/yandex-books-lite*.apk*
+rm -f "$PROJECT_DIR"/yandex-books-lite*.apk* "$PROJECT_DIR"/build/*.apk*
 
 if [ ! -f debug.keystore ]; then
   "$JAVA_HOME/bin/keytool" -genkey -v -keystore debug.keystore \
@@ -75,6 +75,9 @@ fi
   --v2-signing-enabled true \
   --out "$TARGET_APK" \
   build/aligned.apk
+
+# Очистка промежуточных APK файлов из build/
+rm -f build/unaligned.apk build/aligned.apk
 
 echo "=== Проверка цифровой подписи ==="
 "$BUILD_TOOLS/apksigner" verify --verbose "$TARGET_APK"
