@@ -71,7 +71,11 @@ public class CacheManager {
         if (!bDir.exists()) {
             bDir.mkdirs();
         }
-        return new File(bDir, "ch_" + chapterId + ".txt");
+        String cleanId = chapterId != null ? chapterId.trim() : "0";
+        if (cleanId.startsWith("ch_")) {
+            cleanId = cleanId.substring(3);
+        }
+        return new File(bDir, "ch_" + cleanId + ".txt");
     }
 
     public File getTocFile(String bookUuid) {
@@ -214,8 +218,26 @@ public class CacheManager {
     public String loadChapter(String bookUuid, String chapterId) {
         File file = getChapterFile(bookUuid, chapterId);
         if (!file.exists()) {
+            // Проверяем альтернативные форматы имен файлов из кэша
+            File bDir = new File(booksDir, bookUuid);
+            String rawId = chapterId != null ? chapterId.trim() : "0";
+            File f1 = new File(bDir, rawId + ".txt");
+            File f2 = new File(bDir, "ch_" + rawId + ".txt");
+            File f3 = new File(bDir, "ch_ch_" + rawId + ".txt");
+            if (f1.exists()) file = f1;
+            else if (f2.exists()) file = f2;
+            else if (f3.exists()) file = f3;
+        }
+
+        if (!file.exists()) {
+            // Файла нет на диске: на лету извлекаем из book.epub!
+            String onTheFly = extractChapterOnTheFly(bookUuid, chapterId);
+            if (onTheFly != null) {
+                return onTheFly;
+            }
             return null;
         }
+
         StringBuilder sb = new StringBuilder();
         try (FileInputStream fis = new FileInputStream(file);
              BufferedReader reader = new BufferedReader(new InputStreamReader(fis, StandardCharsets.UTF_8))) {
@@ -223,11 +245,84 @@ public class CacheManager {
             while ((line = reader.readLine()) != null) {
                 sb.append(line).append("\n");
             }
-            return sb.toString();
+            String content = sb.toString();
+            if (content.trim().isEmpty()) {
+                // Если файл оказался пустым (0 байт), извлекаем из EPUB
+                String onTheFly = extractChapterOnTheFly(bookUuid, chapterId);
+                if (onTheFly != null && !onTheFly.trim().isEmpty()) {
+                    return onTheFly;
+                }
+            }
+            return content;
         } catch (Exception e) {
             Log.e(TAG, "Error reading chapter " + chapterId, e);
-            return null;
+            return extractChapterOnTheFly(bookUuid, chapterId);
         }
+    }
+
+    public synchronized String extractChapterOnTheFly(String bookUuid, String chapterId) {
+        try {
+            File epub = getEpubFile(bookUuid);
+            if (!epub.exists() || epub.length() == 0) return null;
+
+            int chIndex = -1;
+            String cleanId = chapterId != null ? chapterId.trim() : "0";
+            if (cleanId.startsWith("ch_")) cleanId = cleanId.substring(3);
+            try {
+                chIndex = Integer.parseInt(cleanId);
+            } catch (Exception ignored) {}
+
+            EpubParser.ParseResult parsed = EpubParser.parseEpubFull(epub);
+            if (parsed == null || parsed.chapters == null || parsed.chapters.isEmpty()) return null;
+
+            EpubParser.ChapterData targetCd = null;
+            if (chIndex >= 0 && chIndex < parsed.chapters.size()) {
+                targetCd = parsed.chapters.get(chIndex);
+            } else {
+                for (EpubParser.ChapterData cd : parsed.chapters) {
+                    if (cd.id != null && (cd.id.equals(chapterId) || cd.id.equals("ch_" + cleanId) || cd.id.equals(cleanId))) {
+                        targetCd = cd;
+                        break;
+                    }
+                }
+            }
+
+            if (targetCd != null) {
+                String text = targetCd.textContent != null ? targetCd.textContent : "";
+                saveChapter(bookUuid, cleanId, text);
+                return text;
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed on-the-fly chapter extraction for " + chapterId, t);
+        }
+        return null;
+    }
+
+    public void deleteBookCache(String bookUuid, String title) {
+        try {
+            File bDir = new File(booksDir, bookUuid);
+            if (bDir.exists()) {
+                deleteDirRecursive(bDir);
+            }
+            File pub = getPublicEpubFile(title);
+            if (pub != null && pub.exists()) {
+                pub.delete();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error deleting book cache", e);
+        }
+    }
+
+    private void deleteDirRecursive(File dir) {
+        if (dir == null || !dir.exists()) return;
+        File[] files = dir.listFiles();
+        if (files != null) {
+            for (File f : files) {
+                if (f.isDirectory()) deleteDirRecursive(f);
+                else f.delete();
+            }
+        }
+        dir.delete();
     }
 
     /**

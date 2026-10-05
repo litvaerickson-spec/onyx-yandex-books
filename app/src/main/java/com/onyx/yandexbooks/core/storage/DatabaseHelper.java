@@ -19,7 +19,7 @@ import java.util.List;
 public class DatabaseHelper extends SQLiteOpenHelper {
 
     private static final String DATABASE_NAME = "yandex_books_lite.db";
-    private static final int DATABASE_VERSION = 5;
+    private static final int DATABASE_VERSION = 6;
 
     private static DatabaseHelper instance;
 
@@ -131,6 +131,14 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 // Сбрасываем старые индексы фрагментов, сохраняя процент прочитанного для корректного пересчета
                 db.execSQL("UPDATE progress SET chapter_index = -1, page_index = 0");
                 db.execSQL("UPDATE books SET current_chapter = -1");
+            } catch (Exception ignored) {}
+        }
+
+        if (oldVersion < 6) {
+            try {
+                // Сбрасываем ложный прогресс, ранее ошибочно записанный для книг каталога и поиска
+                db.execSQL("UPDATE books SET percent = 0.0, current_chapter = 0, current_paragraph = 0 " +
+                        "WHERE shelf_type = 'catalog' OR shelf_type = 'search'");
             } catch (Exception ignored) {}
         }
     }
@@ -320,6 +328,22 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         ContentValues cv = new ContentValues();
         cv.put("is_downloaded", isDownloaded ? 1 : 0);
         db.update("books", cv, "uuid = ?", new String[]{uuid});
+    }
+
+    public synchronized void updateBookShelf(String uuid, String shelfType) {
+        SQLiteDatabase db = getWritableDatabase();
+        ContentValues cv = new ContentValues();
+        cv.put("shelf_type", shelfType);
+        db.update("books", cv, "uuid = ?", new String[]{uuid});
+    }
+
+    public synchronized void removeBook(String uuid) {
+        SQLiteDatabase db = getWritableDatabase();
+        db.delete("books", "uuid = ?", new String[]{uuid});
+        db.delete("chapters", "book_uuid = ?", new String[]{uuid});
+        db.delete("progress", "book_uuid = ?", new String[]{uuid});
+        db.delete("bookmarks", "book_uuid = ?", new String[]{uuid});
+        db.delete("sync_queue", "book_uuid = ?", new String[]{uuid});
     }
 
     public synchronized int getBooksCountByShelf(String shelfType) {

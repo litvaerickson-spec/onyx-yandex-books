@@ -144,7 +144,7 @@ public class ReaderCanvasView extends View {
         // Чисто белый фон для E-Ink Carta
         canvas.drawColor(Color.WHITE);
 
-        if (currentPage == null || currentPage.lines.isEmpty()) {
+        if (currentPage == null) {
             return;
         }
 
@@ -162,50 +162,60 @@ public class ReaderCanvasView extends View {
             canvas.drawText(titleText, config.getPaddingLeftPx(), headerY, headerPaint);
         }
 
-        Paint.FontMetrics fm = textPaint.getFontMetrics();
-        float fontHeight = fm.bottom - fm.top;
-        float lineHeight = fontHeight * config.getLineSpacingMultiplier();
-
-        float startX = config.getPaddingLeftPx();
-        float currentY = config.getPaddingTopPx() + config.getHeaderReservedHeightPx() - fm.top;
-        float maxAllowedX = getWidth() - config.getPaddingRightPx();
-        float maxAllowedTextBottom = getHeight() - config.getPaddingBottomPx() - config.getFooterReservedHeightPx();
-
-        // Отрисовка строк текущей страницы
-        for (TextPaginator.Line line : currentPage.lines) {
-            if (currentY + fm.bottom > maxAllowedTextBottom + 6) {
-                break; // 100% математическая защита: текст физически не может наехать на колонтитул
+        if (currentPage.lines == null || currentPage.lines.isEmpty()) {
+            // Отрисовываем заголовок по центру, если в секции нет текста (титульный лист / иллюстрация)
+            if (chapterTitle != null && !chapterTitle.trim().isEmpty()) {
+                float textW = textPaint.measureText(chapterTitle.trim());
+                float textX = Math.max(config.getPaddingLeftPx(), (getWidth() - textW) / 2f);
+                float textY = getHeight() / 2f;
+                canvas.drawText(chapterTitle.trim(), textX, textY, textPaint);
             }
+        } else {
+            Paint.FontMetrics fm = textPaint.getFontMetrics();
+            float fontHeight = fm.bottom - fm.top;
+            float lineHeight = fontHeight * config.getLineSpacingMultiplier();
 
-            if (line.text.isEmpty()) {
-                currentY += lineHeight * 0.6f; // Компактный отступ между авторскими смысловыми секциями
-                continue;
-            }
+            float startX = config.getPaddingLeftPx();
+            float currentY = config.getPaddingTopPx() + config.getHeaderReservedHeightPx() - fm.top;
+            float maxAllowedX = getWidth() - config.getPaddingRightPx();
+            float maxAllowedTextBottom = getHeight() - config.getPaddingBottomPx() - config.getFooterReservedHeightPx();
 
-            String drawText = line.text;
-            if (drawText.indexOf('\uFFFC') >= 0 || drawText.indexOf('\uFFFD') >= 0) {
-                drawText = drawText.replace("\uFFFC", "").replace("\uFFFD", "");
-            }
-
-            float lineX = startX + (line.isParagraphStart ? config.getParagraphIndentPx() : 0);
-
-            if (config.isJustifyEnabled() && line.wordSpacing > 0 && !line.isLastLineOfParagraph) {
-                // Отрисовка с выравниванием по ширине (Justify)
-                String[] words = drawText.split(" ");
-                float wordX = lineX;
-                for (int i = 0; i < words.length; i++) {
-                    canvas.drawText(words[i], wordX, currentY, textPaint);
-                    wordX += textPaint.measureText(words[i]) + textPaint.measureText(" ") + line.wordSpacing;
-                    if (wordX > maxAllowedX) {
-                        break;
-                    }
+            // Отрисовка строк текущей страницы
+            for (TextPaginator.Line line : currentPage.lines) {
+                if (currentY + fm.bottom > maxAllowedTextBottom + 6) {
+                    break; // 100% математическая защита: текст физически не может наехать на колонтитул
                 }
-            } else {
-                // Стандартная отрисовка влево с соблюдением правого поля
-                canvas.drawText(drawText, lineX, currentY, textPaint);
-            }
 
-            currentY += lineHeight;
+                if (line.text.isEmpty()) {
+                    currentY += lineHeight * 0.6f; // Компактный отступ между авторскими смысловыми секциями
+                    continue;
+                }
+
+                String drawText = line.text;
+                if (drawText.indexOf('\uFFFC') >= 0 || drawText.indexOf('\uFFFD') >= 0) {
+                    drawText = drawText.replace("\uFFFC", "").replace("\uFFFD", "");
+                }
+
+                float lineX = startX + (line.isParagraphStart ? config.getParagraphIndentPx() : 0);
+
+                if (config.isJustifyEnabled() && line.wordSpacing > 0 && !line.isLastLineOfParagraph) {
+                    // Отрисовка с выравниванием по ширине (Justify)
+                    String[] words = drawText.split(" ");
+                    float wordX = lineX;
+                    for (int i = 0; i < words.length; i++) {
+                        canvas.drawText(words[i], wordX, currentY, textPaint);
+                        wordX += textPaint.measureText(words[i]) + textPaint.measureText(" ") + line.wordSpacing;
+                        if (wordX > maxAllowedX) {
+                            break;
+                        }
+                    }
+                } else {
+                    // Стандартная отрисовка влево с соблюдением правого поля
+                    canvas.drawText(drawText, lineX, currentY, textPaint);
+                }
+
+                currentY += lineHeight;
+            }
         }
 
         // 2. Нижний колонтитул: Сквозная нумерация от всей книги и процент

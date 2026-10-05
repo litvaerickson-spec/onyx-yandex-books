@@ -1652,8 +1652,8 @@ public class ReaderActivity extends Activity {
             return;
         }
 
-        // Иначе (если только процент, либо targetChapter <= 0, но percent > 2.0):
-        if (percent > 2.0 && percent < 99.0 && totalBookLength > 0 && chapters != null && !chapters.isEmpty()) {
+        // Если процент известен (> 0.5% и < 99.0%) и есть totalBookLength:
+        if (percent > 0.5 && percent < 99.0 && totalBookLength > 0 && chapters != null && !chapters.isEmpty()) {
             long targetGlobalOffset = (long) ((percent / 100.0) * totalBookLength);
             long acc = 0;
             int matchedCh = 0;
@@ -1669,13 +1669,32 @@ public class ReaderActivity extends Activity {
             }
             long curChLen = chapterLengths[matchedCh];
             double chapterFraction = (curChLen > 0) ? ((double) matchedOffset / (double) curChLen) : 0.0;
+
+            if (targetChapter > 0 && targetChapter < chapters.size()) {
+                if (Math.abs(targetChapter - matchedCh) <= 1) {
+                    currentChapterIndex = targetChapter;
+                    long tcLen = chapterLengths[targetChapter];
+                    long tcOffset = targetGlobalOffset - acc;
+                    double tcFrac = (tcLen > 0) ? Math.max(0.0, Math.min(1.0, (double) tcOffset / (double) tcLen)) : 0.0;
+                    loadChapterWithFraction(targetChapter, tcFrac);
+                    return;
+                }
+            }
             currentChapterIndex = matchedCh;
             loadChapterWithFraction(currentChapterIndex, chapterFraction);
-        } else {
-            currentChapterIndex = 0;
-            currentPageIndex = (targetChapter == 0) ? Math.max(0, targetPage) : 0;
-            loadChapter(currentChapterIndex, currentPageIndex);
+            return;
         }
+
+        if (targetChapter > 0 && chapters != null && targetChapter < chapters.size()) {
+            currentChapterIndex = targetChapter;
+            currentPageIndex = Math.max(0, targetPage);
+            loadChapter(currentChapterIndex, currentPageIndex);
+            return;
+        }
+
+        currentChapterIndex = 0;
+        currentPageIndex = (targetChapter == 0) ? Math.max(0, targetPage) : 0;
+        loadChapter(currentChapterIndex, currentPageIndex);
     }
 
     private void applyCloudProgressIfNewer(ReadingProgress cloudProgress) {
@@ -1771,11 +1790,20 @@ public class ReaderActivity extends Activity {
         final Chapter ch = chapters.get(index);
 
         String text = cacheManager.loadChapter(bookUuid, ch.getId());
-        if (text != null && !text.isEmpty()) {
-            displayChapterText(text, ch.getTitle(), anchorFraction, targetPage, targetCharOffset);
-        } else {
-            Toast.makeText(ReaderActivity.this, "Текст главы не найден", Toast.LENGTH_SHORT).show();
+        if (text == null) {
+            text = cacheManager.loadChapter(bookUuid, String.valueOf(index));
         }
+
+        if (text == null || text.trim().isEmpty()) {
+            // Если в главе нет текста (например, титульный лист, обложка или чистая иллюстрация)
+            String title = ch.getTitle();
+            if (title == null || title.trim().isEmpty()) {
+                title = "Глава " + (index + 1);
+            }
+            text = "\n\n[" + title + "]\n\n";
+        }
+
+        displayChapterText(text, ch.getTitle(), anchorFraction, targetPage, targetCharOffset);
     }
 
     private void displayChapterText(String rawText, String title) {

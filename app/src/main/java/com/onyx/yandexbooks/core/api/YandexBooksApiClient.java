@@ -175,18 +175,23 @@ public class YandexBooksApiClient {
 
     public static ParsedProgress extractProgress(JSONObject card, JSONObject bObj) {
         ParsedProgress result = new ParsedProgress();
-        if (card == null && bObj == null) return result;
+        if (card == null) return result;
 
-        String state = card != null ? card.optString("state", "") : "";
+        String state = card.optString("state", "");
+        boolean isUserCard = card.has("last_read_at") || card.has("state") || card.has("updated_at")
+                || card.has("last_reading_position") || card.has("reading_position") || card.has("position")
+                || card.has("library_card");
+
+        // Если это не карточка пользователя (а элемент каталога или публичной полки), прогресс строго нулевой
+        if (!isUserCard) {
+            return result;
+        }
 
         // 1. Приоритетные вложенные объекты позиции чтения (как в мобильном приложении на телефоне)
         JSONObject[] positionObjects = new JSONObject[] {
-            card != null ? card.optJSONObject("last_reading_position") : null,
-            card != null ? card.optJSONObject("reading_position") : null,
-            card != null ? card.optJSONObject("position") : null,
-            bObj != null ? bObj.optJSONObject("last_reading_position") : null,
-            bObj != null ? bObj.optJSONObject("reading_position") : null,
-            bObj != null ? bObj.optJSONObject("position") : null
+            card.optJSONObject("last_reading_position"),
+            card.optJSONObject("reading_position"),
+            card.optJSONObject("position")
         };
 
         // 1. Поиск процента прочитанного в специализированных объектах позиции
@@ -218,30 +223,25 @@ public class YandexBooksApiClient {
             }
         }
 
-        // 2. Если во вложенных объектах процент не найден, проверяем свойства верхнего уровня (кроме card.progress, который является enum статусом)
+        // 2. Если во вложенных объектах процент не найден, проверяем свойства самой пользовательской карточки
         if (result.percent <= 0.0) {
-            JSONObject[] rootObjects = new JSONObject[] { card, bObj };
-            for (JSONObject obj : rootObjects) {
-                if (obj == null) continue;
-                double p = -1.0;
-                if (obj.has("percent")) p = obj.optDouble("percent", -1.0);
-                else if (obj.has("reading_progress")) p = obj.optDouble("reading_progress", -1.0);
-                else if (obj.has("progress_percent")) p = obj.optDouble("progress_percent", -1.0);
-                else if (obj.has("percentage")) p = obj.optDouble("percentage", -1.0);
+            double p = -1.0;
+            if (card.has("percent")) p = card.optDouble("percent", -1.0);
+            else if (card.has("reading_progress")) p = card.optDouble("reading_progress", -1.0);
+            else if (card.has("progress_percent")) p = card.optDouble("progress_percent", -1.0);
+            else if (card.has("percentage")) p = card.optDouble("percentage", -1.0);
 
-                if (p > 0.0) {
-                    if (p < 1.0) {
-                        result.percent = p * 100.0;
-                    } else if (p == 1.0) {
-                        if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state) || "completed".equalsIgnoreCase(state) || "done".equalsIgnoreCase(state)) {
-                            result.percent = 100.0;
-                        } else {
-                            result.percent = 1.0;
-                        }
+            if (p > 0.0) {
+                if (p < 1.0) {
+                    result.percent = p * 100.0;
+                } else if (p == 1.0) {
+                    if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state) || "completed".equalsIgnoreCase(state) || "done".equalsIgnoreCase(state)) {
+                        result.percent = 100.0;
                     } else {
-                        result.percent = Math.min(100.0, p);
+                        result.percent = 1.0;
                     }
-                    break;
+                } else {
+                    result.percent = Math.min(100.0, p);
                 }
             }
         }
@@ -253,11 +253,9 @@ public class YandexBooksApiClient {
             }
         }
 
-        // 4. Поиск индекса главы (сначала в объектах позиции, затем в корневых объектах)
+        // 4. Поиск индекса главы СТРОГО в объектах позиции чтения (никогда не в метаданных книги bObj!)
         JSONObject[] allCandidates = new JSONObject[] {
-            positionObjects[0], positionObjects[1], positionObjects[2],
-            positionObjects[3], positionObjects[4], positionObjects[5],
-            card, bObj
+            positionObjects[0], positionObjects[1], positionObjects[2]
         };
 
         for (JSONObject obj : allCandidates) {
@@ -649,7 +647,12 @@ public class YandexBooksApiClient {
                     return;
                 }
 
-                saveResponseBodyToFile(response, destFile, callback);
+                saveResponseBodyToFile(response, destFile, callback, new Runnable() {
+                    @Override
+                    public void run() {
+                        downloadBookEpubFallback(bookUuid, destFile, callback, "v4 returned non-epub or empty file", isRetryAfterAdd);
+                    }
+                });
             }
         });
     }
@@ -694,7 +697,12 @@ public class YandexBooksApiClient {
                     tryFileEndpoint(bookUuid, destFile, callback, initialError + " -> HTTP " + response.code());
                     return;
                 }
-                saveResponseBodyToFile(response, destFile, callback);
+                saveResponseBodyToFile(response, destFile, callback, new Runnable() {
+                    @Override
+                    public void run() {
+                        tryFileEndpoint(bookUuid, destFile, callback, initialError + " -> content returned non-epub");
+                    }
+                });
             }
         });
     }
@@ -718,17 +726,21 @@ public class YandexBooksApiClient {
                     postError(callback, "Ошибка скачивания книги: " + initialError + " -> HTTP " + response.code());
                     return;
                 }
-                saveResponseBodyToFile(response, destFile, callback);
+                saveResponseBodyToFile(response, destFile, callback, null);
             }
         });
     }
 
-    private void saveResponseBodyToFile(Response response, File destFile, final ApiCallback<File> callback) {
+    private void saveResponseBodyToFile(Response response, File destFile, final ApiCallback<File> callback, final Runnable onFallback) {
         try {
             String contentType = response.header("Content-Type", "");
             if (contentType != null && (contentType.contains("json") || contentType.contains("html"))) {
                 String bodyStr = response.body().string();
-                postError(callback, "Сервер вернул сообщение вместо книги: " + bodyStr);
+                if (onFallback != null) {
+                    onFallback.run();
+                } else {
+                    postError(callback, "Сервер вернул сообщение вместо книги: " + bodyStr);
+                }
                 return;
             }
 
@@ -756,10 +768,18 @@ public class YandexBooksApiClient {
                 postSuccess(callback, destFile);
             } else {
                 if (tempFile.exists()) tempFile.delete();
-                postError(callback, "Файл книги оказался поврежден или пуст");
+                if (onFallback != null) {
+                    onFallback.run();
+                } else {
+                    postError(callback, "Файл книги оказался поврежден или пуст");
+                }
             }
         } catch (Exception e) {
-            postError(callback, "Ошибка записи файла книги: " + e.getMessage());
+            if (onFallback != null) {
+                onFallback.run();
+            } else {
+                postError(callback, "Ошибка записи файла книги: " + e.getMessage());
+            }
         }
     }
 
@@ -1021,6 +1041,9 @@ public class YandexBooksApiClient {
                             JSONObject bObj = booksArray.getJSONObject(i);
                             Book book = parseBookFromCard(bObj);
                             if (book != null) {
+                                book.setPercent(0.0);
+                                book.setCurrentChapterIndex(0);
+                                book.setCurrentParagraphIndex(0);
                                 book.setShelfType("catalog");
                                 books.add(book);
                             }
@@ -1142,6 +1165,9 @@ public class YandexBooksApiClient {
                                     book.setAuthor(authorText);
                                     book.setAnnotation(cleanAnn);
                                     book.setCoverUrl(coverUrl);
+                                    book.setPercent(0.0);
+                                    book.setCurrentChapterIndex(0);
+                                    book.setCurrentParagraphIndex(0);
                                     book.setShelfType("search");
                                     books.add(book);
                                 }
@@ -1187,6 +1213,112 @@ public class YandexBooksApiClient {
         } catch (Exception e) {
             postError(callback, "Ошибка отправки: " + e.getMessage());
         }
+    }
+
+    /**
+     * Перемещение книги на заданную полку («reading», «to_read», «finished»).
+     */
+    public void updateBookShelfState(final String bookUuid, final String shelfState, final ApiCallback<Boolean> callback) {
+        String endpoint = BASE_URL + "/profile/library_cards/" + bookUuid;
+        try {
+            JSONObject bodyJson = new JSONObject();
+            bodyJson.put("book_uuid", bookUuid);
+            bodyJson.put("state", shelfState);
+            RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString());
+            Request request = createAuthRequestBuilder(endpoint).patch(body).build();
+
+            httpClient.newCall(request).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    updateBookShelfFallbackPost(bookUuid, shelfState, callback);
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) {
+                    if (response.isSuccessful()) {
+                        postSuccess(callback, true);
+                    } else {
+                        updateBookShelfFallbackPost(bookUuid, shelfState, callback);
+                    }
+                }
+            });
+        } catch (Exception e) {
+            updateBookShelfFallbackPost(bookUuid, shelfState, callback);
+        }
+    }
+
+    private void updateBookShelfFallbackPost(final String bookUuid, final String shelfState, final ApiCallback<Boolean> callback) {
+        String endpoint = BASE_URL + "/profile/library_cards";
+        try {
+            JSONObject bodyJson = new JSONObject();
+            bodyJson.put("book_uuid", bookUuid);
+            bodyJson.put("state", shelfState);
+            RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString());
+            Request request = createAuthRequestBuilder(endpoint).post(body).build();
+
+            httpClient.newCall(request).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    postError(callback, "Ошибка сети: " + e.getMessage());
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) {
+                    if (response.isSuccessful() || response.code() == 409 || response.code() == 422) {
+                        postSuccess(callback, true);
+                    } else {
+                        postError(callback, "Ошибка сервера при смене полки: HTTP " + response.code());
+                    }
+                }
+            });
+        } catch (Exception e) {
+            postError(callback, e.getMessage());
+        }
+    }
+
+    /**
+     * Удаление книги из личной библиотеки («Убрать с полки»).
+     */
+    public void removeBookFromLibrary(final String bookUuid, final ApiCallback<Boolean> callback) {
+        String endpoint = BASE_URL + "/profile/library_cards/" + bookUuid;
+        Request request = createAuthRequestBuilder(endpoint).delete().build();
+
+        httpClient.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                removeBookFallback(bookUuid, callback);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) {
+                if (response.isSuccessful() || response.code() == 404) {
+                    postSuccess(callback, true);
+                } else {
+                    removeBookFallback(bookUuid, callback);
+                }
+            }
+        });
+    }
+
+    private void removeBookFallback(final String bookUuid, final ApiCallback<Boolean> callback) {
+        String endpoint = BASE_URL + "/profile/library_cards?book_uuid=" + bookUuid;
+        Request request = createAuthRequestBuilder(endpoint).delete().build();
+
+        httpClient.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                postError(callback, "Ошибка сети: " + e.getMessage());
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) {
+                if (response.isSuccessful() || response.code() == 404) {
+                    postSuccess(callback, true);
+                } else {
+                    postError(callback, "Ошибка сервера при удалении: HTTP " + response.code());
+                }
+            }
+        });
     }
 
     private <T> void postSuccess(final ApiCallback<T> callback, final T result) {
