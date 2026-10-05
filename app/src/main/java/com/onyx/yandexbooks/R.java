@@ -34,15 +34,15 @@ public final class R {
     public static final class id {
         public static final int auth_webview=0x7f07000c;
         public static final int auth_webview_tip=0x7f07000b;
-        public static final int book_annotation=0x7f07004c;
-        public static final int book_author=0x7f07004b;
-        public static final int book_cover=0x7f070049;
-        public static final int book_download_btn=0x7f070051;
-        public static final int book_progress=0x7f07004e;
-        public static final int book_progress_bar=0x7f07004d;
-        public static final int book_read_btn=0x7f070050;
-        public static final int book_status_tag=0x7f07004f;
-        public static final int book_title=0x7f07004a;
+        public static final int book_annotation=0x7f07004f;
+        public static final int book_author=0x7f07004e;
+        public static final int book_cover=0x7f07004c;
+        public static final int book_download_btn=0x7f070054;
+        public static final int book_progress=0x7f070051;
+        public static final int book_progress_bar=0x7f070050;
+        public static final int book_read_btn=0x7f070053;
+        public static final int book_status_tag=0x7f070052;
+        public static final int book_title=0x7f07004d;
         public static final int books_list_view=0x7f07001a;
         public static final int btn_check_update=0x7f07000f;
         public static final int btn_close_webview=0x7f070007;
@@ -96,6 +96,9 @@ public final class R {
         public static final int reader_canvas=0x7f070024;
         public static final int reader_chapter_title_view=0x7f07002c;
         public static final int reader_format_panel=0x7f070033;
+        public static final int reader_loading_overlay=0x7f070049;
+        public static final int reader_loading_progress=0x7f07004a;
+        public static final int reader_loading_text=0x7f07004b;
         public static final int reader_page_counter=0x7f070032;
         public static final int reader_page_seekbar=0x7f070030;
         public static final int reader_top_bar=0x7f070025;

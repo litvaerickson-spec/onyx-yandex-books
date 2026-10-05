@@ -49,6 +49,11 @@ public class ReaderCanvasView extends View {
     private OnReaderInteractionListener interactionListener;
     private ImageLoader imageLoader;
 
+    // Координаты и время для распознавания жестов свайпа и тапов
+    private float touchDownX = 0f;
+    private float touchDownY = 0f;
+    private long touchDownTime = 0L;
+
     public ReaderCanvasView(Context context) {
         super(context);
         init();
@@ -241,12 +246,12 @@ public class ReaderCanvasView extends View {
             float startX = config.getPaddingLeftPx();
             float currentY = config.getPaddingTopPx() + config.getHeaderReservedHeightPx() - fm.top;
             float maxAllowedX = getWidth() - config.getPaddingRightPx();
-            float screenLimitY = getHeight() - config.getPaddingBottomPx();
+            float screenLimitY = getHeight() - config.getPaddingBottomPx() - config.getFooterReservedHeightPx();
 
             // Отрисовка строк текущей страницы (строки уже гарантированно рассчитаны TextPaginator)
             for (TextPaginator.Line line : currentPage.lines) {
-                if (currentY + fm.top > screenLimitY) {
-                    break; // Предотвращаем выход за пределы физического экрана
+                if (currentY + fm.bottom > screenLimitY + 4) {
+                    break; // Предотвращаем выход за пределы отведенной области
                 }
 
                 if (line.text.isEmpty()) {
@@ -292,23 +297,46 @@ public class ReaderCanvasView extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (event.getAction() == MotionEvent.ACTION_UP) {
-            float x = event.getX();
-            float width = getWidth();
+        switch (event.getAction()) {
+            case MotionEvent.ACTION_DOWN:
+                touchDownX = event.getX();
+                touchDownY = event.getY();
+                touchDownTime = System.currentTimeMillis();
+                return true;
 
-            if (interactionListener != null) {
-                if (x < width * 0.3f) {
-                    // Левая треть экрана: назад
-                    interactionListener.onPageBackward();
-                } else if (x > width * 0.7f) {
-                    // Правая треть экрана: вперед
-                    interactionListener.onPageForward();
-                } else {
-                    // Центральная область: меню
-                    interactionListener.onCenterTap();
+            case MotionEvent.ACTION_UP:
+                float upX = event.getX();
+                float upY = event.getY();
+                float deltaX = upX - touchDownX;
+                float deltaY = upY - touchDownY;
+                long duration = System.currentTimeMillis() - touchDownTime;
+                float width = getWidth();
+
+                if (interactionListener != null) {
+                    // 1. Определение горизонтального свайпа (смещение >= 35px, горизонталь преобладает над вертикалью)
+                    if (Math.abs(deltaX) >= 35 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2f) {
+                        if (deltaX < 0) {
+                            // Свайп справа налево -> Следующая страница (Вперед)
+                            interactionListener.onPageForward();
+                        } else {
+                            // Свайп слева направо -> Предыдущая страница (Назад)
+                            interactionListener.onPageBackward();
+                        }
+                    } else if (duration < 700) {
+                        // 2. Дискретный тап по зонам (даже при мелком дрожании пальца на E-Ink тачскрине)
+                        if (upX < width * 0.30f) {
+                            // Левые 30% экрана: Назад
+                            interactionListener.onPageBackward();
+                        } else if (upX > width * 0.70f) {
+                            // Правые 30% экрана: Вперед
+                            interactionListener.onPageForward();
+                        } else {
+                            // Центральные 40% экрана: Меню читалки
+                            interactionListener.onCenterTap();
+                        }
+                    }
                 }
-            }
-            return true;
+                return true;
         }
         return true;
     }

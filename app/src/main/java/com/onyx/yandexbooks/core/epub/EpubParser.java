@@ -247,6 +247,7 @@ public class EpubParser {
                 // Связываем дерево TOC со сформированными главами и символьными смещениями charOffset
                 resolveNodeOffsets(tocTree, chapters, chapterHrefs, rawHtmlCache);
             }
+            rawHtmlCache.clear();
 
             result.chapters = chapters;
             result.tocTree = tocTree;

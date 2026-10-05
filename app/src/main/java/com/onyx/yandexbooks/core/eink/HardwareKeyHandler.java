@@ -31,6 +31,11 @@ public class HardwareKeyHandler {
             }
         }
 
+        // Подавление аппаратного автоповтора при удерживании кнопки (защита от пролистывания пачками на E-Ink)
+        if (event.getRepeatCount() > 0) {
+            return true;
+        }
+
         switch (keyCode) {
             // Листание вперед (правая боковая клавиша)
             case KeyEvent.KEYCODE_PAGE_DOWN:

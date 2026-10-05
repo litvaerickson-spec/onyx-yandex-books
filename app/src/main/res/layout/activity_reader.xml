@@ -695,4 +695,32 @@
 
     </LinearLayout>
 
+    <!-- Индикатор загрузки и подготовки книги к чтению -->
+    <LinearLayout
+        android:id="@+id/reader_loading_overlay"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_centerInParent="true"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="@drawable/btn_eink"
+        android:padding="20dp"
+        android:visibility="gone">
+
+        <ProgressBar
+            android:id="@+id/reader_loading_progress"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginBottom="10dp" />
+
+        <TextView
+            android:id="@+id/reader_loading_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Загрузка книги..."
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/eink_black" />
+    </LinearLayout>
+
 </RelativeLayout>
