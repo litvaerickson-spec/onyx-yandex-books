@@ -161,8 +161,8 @@ public class MainActivity extends Activity {
                 updateReaderModeButton();
                 adapter.notifyDataSetChanged();
                 String msg = appSettings.isOnyxReaderPreferred() 
-                        ? "Читалка: Системная Onyx (NeoReader/AlReader)" 
-                        : "Читалка: Встроенная Онлайн (с синхронизацией)";
+                        ? "Основной ридер: Системный Onyx (NeoReader/AlReader)" 
+                        : "Основной ридер: Встроенный (с синхронизацией)";
                 Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show();
             }
         });
@@ -839,7 +839,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (tokenStorage.isAuthorized()) {
-            // Перезагружаем прогресс после возврата из читалки (не затирая результаты поиска и каталога)
+            // Перезагружаем прогресс после возврата из ридера (не затирая результаты поиска и каталога)
             if (!"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
                 currentBooks = dbHelper.getBooksByShelf(currentShelf);
                 adapter.notifyDataSetChanged();
@@ -887,7 +887,7 @@ public class MainActivity extends Activity {
             @Override
             public void run() {
                 // При открытии книги автоматически переводим активный раздел на "Читаю",
-                // чтобы по возвращении из читалки пользователь видел список читаемых книг с актуальным прогрессом
+                // чтобы по возвращении из ридера пользователь видел список читаемых книг с актуальным прогрессом
                 currentShelf = "reading";
                 if (appSettings.isOnyxReaderPreferred()) {
                     openInOnyxReader(book);
@@ -1057,7 +1057,7 @@ public class MainActivity extends Activity {
             }
             boolean ok = CacheManager.openInSystemReader(this, epub, book.getPercent(), book.getCurrentChapterIndex());
             if (!ok) {
-                Toast.makeText(this, "Читалка Onyx не найдена. Открываем в читалке Онлайн...", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Внешний ридер не найден. Открываем во встроенном ридере...", Toast.LENGTH_SHORT).show();
                 openInLiteReader(book);
             } else if (book.getPercent() > 0.0) {
                 Toast.makeText(this, String.format(java.util.Locale.getDefault(), "Позиция в облаке: %.0f%% (Гл. %d)", book.getPercent(), book.getCurrentChapterIndex() + 1), Toast.LENGTH_LONG).show();
@@ -1094,7 +1094,7 @@ public class MainActivity extends Activity {
             @Override
             public void onError(String message) {
                 dismissEinkLoadingDialog(dialog);
-                Toast.makeText(MainActivity.this, "Ошибка скачивания: " + message + ". Открываем в читалке Онлайн.", Toast.LENGTH_LONG).show();
+                Toast.makeText(MainActivity.this, "Ошибка скачивания: " + message + ". Открываем во встроенном ридере.", Toast.LENGTH_LONG).show();
                 openInLiteReader(book);
             }
         });
@@ -1299,7 +1299,7 @@ public class MainActivity extends Activity {
         int row1Height = (int) (36 * density);
         int row2Height = (int) (32 * density);
 
-        // Строка 1: Кнопки чтения [ Onyx Reader ] и [ Читалка Онлайн ] бок о бок (50% / 50%)
+        // Строка 1: Кнопки чтения [ Onyx Reader ] и [ Встроенный ридер ] бок о бок (50% / 50%)
         LinearLayout readRow = new LinearLayout(this);
         readRow.setOrientation(LinearLayout.HORIZONTAL);
         readRow.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, row1Height));
@@ -1328,7 +1328,7 @@ public class MainActivity extends Activity {
         readRow.addView(btnOnyx);
 
         Button btnLite = new Button(this);
-        btnLite.setText("Читалка Онлайн");
+        btnLite.setText("Встроенный ридер");
         btnLite.setTextSize(11);
         btnLite.setTypeface(null, Typeface.BOLD);
         btnLite.setTextColor(Color.BLACK);

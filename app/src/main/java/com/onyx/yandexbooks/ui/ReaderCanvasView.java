@@ -350,7 +350,7 @@ public class ReaderCanvasView extends View {
                             // Правые 30% экрана: Вперед
                             interactionListener.onPageForward();
                         } else {
-                            // Центральные 40% экрана: Меню читалки
+                            // Центральные 40% экрана: Меню ридера
                             interactionListener.onCenterTap();
                         }
                     }

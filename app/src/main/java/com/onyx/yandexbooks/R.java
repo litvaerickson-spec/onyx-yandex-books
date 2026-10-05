@@ -156,7 +156,7 @@ public final class R {
         public static final int line_spacing=0x7f050021;
         public static final int logout_confirm_message=0x7f050015;
         public static final int logout_confirm_title=0x7f050014;
-        /**  Читалка и типографика 
+        /**  Режим чтения и типографика 
          */
         public static final int settings_typography=0x7f05001f;
         public static final int sync_conflict_message=0x7f05001b;

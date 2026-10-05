@@ -143,7 +143,7 @@ public class AuthActivity extends Activity {
             statusTextView.setText("Интернет-мост: активен | Локальный Wi-Fi: " + localIp + ":8888\nОжидание подтверждения со смартфона...");
         } else {
             localUrlTextView.setText(cloudUrl);
-            statusTextView.setText("Подключите Wi-Fi на читалке для облачного входа\nили используйте импорт из файла / ручной ввод.");
+            statusTextView.setText("Подключите Wi-Fi на устройстве для облачного входа\nили используйте импорт из файла / ручной ввод.");
         }
 
         // QR-код ведет на облачный шлюз ntfy.sh, доступный из любой мобильной сети (4G/LTE)
@@ -166,7 +166,7 @@ public class AuthActivity extends Activity {
                     org.json.JSONObject json = new org.json.JSONObject();
                     json.put("topic", topic);
                     json.put("title", "Вход в Яндекс Книги — Onyx Boox");
-                    json.put("message", "1. Нажмите «Войти в Яндекс» ниже.\n2. Скопируйте адрес страницы.\n3. Отправьте ссылку сюда (стрелочка) — читалка авторизуется!");
+                    json.put("message", "1. Нажмите «Войти в Яндекс» ниже.\n2. Скопируйте адрес страницы.\n3. Отправьте ссылку сюда (стрелочка) — устройство авторизуется!");
                     json.put("priority", 4);
 
                     org.json.JSONArray actions = new org.json.JSONArray();
@@ -309,10 +309,10 @@ public class AuthActivity extends Activity {
     private void showFileNotFoundDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("Файл yandex_token.txt не найден");
-        builder.setMessage("1. Подключите читалку к компьютеру или телефону по USB кабелю.\n\n" +
-                "2. Создайте в корне памяти читалки текстовый файл yandex_token.txt и вставьте туда токен (y0_...).\n\n" +
+        builder.setMessage("1. Подключите устройство к компьютеру или телефону по USB кабелю.\n\n" +
+                "2. Создайте в корне памяти устройства текстовый файл yandex_token.txt и вставьте туда токен (y0_...).\n\n" +
                 "3. Нажмите кнопку «Загрузить токен из файла» снова.\n\n" +
-                "Либо воспользуйтесь кнопкой «Войти прямо на читалке».");
+                "Либо воспользуйтесь кнопкой «Войти на этом устройстве».");
         builder.setPositiveButton("Понятно", null);
         builder.show();
     }

@@ -227,7 +227,7 @@ public class LocalAuthServer {
                 "</head>\n" +
                 "<body>\n" +
                 "  <div class=\"card\">\n" +
-                "    <div style=\"text-align: center;\"><span class=\"badge\">Связь с читалкой Onyx Boox установлена</span></div>\n" +
+                "    <div style=\"text-align: center;\"><span class=\"badge\">Связь с устройством Onyx Boox установлена</span></div>\n" +
                 "    <h2>Авторизация в Яндекс Книгах</h2>\n" +
                 "    <p>Для входа с аккаунтом (включая <b>Яндекс.Ключ / 2FA</b>) пароль вводить не нужно — всё подтверждается в 1 клик:</p>\n" +
                 "    <div class=\"step-box\">\n" +
@@ -236,7 +236,7 @@ public class LocalAuthServer {
                 "      <a class=\"btn-yandex\" href=\"" + yandexAuthUrl + "\" target=\"_blank\">1. Открыть подтверждение в Яндекс ID</a>\n" +
                 "    </div>\n" +
                 "    <div class=\"step-box\">\n" +
-                "      <div class=\"step-num\">Шаг 2. Передайте ключ на читалку</div>\n" +
+                "      <div class=\"step-num\">Шаг 2. Передайте ключ на устройство</div>\n" +
                 "      <div class=\"note\">После нажатия «Войти» или «Разрешить» скопируйте адрес страницы из браузера (или токен <code>y0_...</code>) и вставьте сюда:</div>\n" +
                 "      <form method=\"POST\" action=\"/save\">\n" +
                 "        <input class=\"input-field\" type=\"text\" name=\"token_input\" id=\"token_input\" placeholder=\"Вставьте скопированный адрес или токен...\" required autofocus>\n" +
@@ -265,8 +265,8 @@ public class LocalAuthServer {
                 "<body>\n" +
                 "  <div class=\"card\">\n" +
                 "    <h2>Вход успешно выполнен!</h2>\n" +
-                "    <p>Токен Яндекс Книг передан на читалку Onyx Boox.</p>\n" +
-                "    <p>Читалка уже открывает вашу библиотеку и книжные полки.</p>\n" +
+                "    <p>Токен Яндекс Книг передан на устройство Onyx Boox.</p>\n" +
+                "    <p>Приложение уже открывает вашу библиотеку и книжные полки.</p>\n" +
                 "    <p style=\"color: #94a3b8; font-size: 13px;\">Эту страницу на смартфоне можно закрыть.</p>\n" +
                 "  </div>\n" +
                 "</body>\n" +

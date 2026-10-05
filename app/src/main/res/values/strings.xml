@@ -17,7 +17,7 @@
     <string name="auth_manual_token">Ввести токен вручную</string>
     <string name="auth_manual_token_title">Ввод OAuth токена</string>
     <string name="auth_manual_token_hint">Вставьте токен (начинается с y0_)</string>
-    <string name="auth_btn_webview">Войти прямо на читалке (Яндекс ID / Ключ)</string>
+    <string name="auth_btn_webview">Войти на устройстве (Яндекс ID / Ключ)</string>
     <string name="auth_btn_import_file">Загрузить токен из файла (yandex_token.txt)</string>
     <string name="auth_webview_desc">Не требует второго устройства. Поддерживает сканирование QR-кода приложением «Яндекс Ключ» прямо с экрана.</string>
     <string name="auth_cloud_desc">Или отсканируйте смартфоном (через интернет 4G / Wi-Fi):</string>
@@ -25,7 +25,7 @@
     <string name="btn_cancel">Отмена</string>
     <string name="btn_logout">Выйти</string>
     <string name="logout_confirm_title">Выход из аккаунта</string>
-    <string name="logout_confirm_message">Вы действительно хотите выйти из Яндекс Книг на этой читалке?</string>
+    <string name="logout_confirm_message">Вы действительно хотите выйти из Яндекс Книг на этом устройстве?</string>
     <string name="empty_shelf_title">На этой полке пока нет книг</string>
     <string name="empty_shelf_hint">Откройте книгу в приложении Яндекс Книги на смартфоне или добавьте из каталога, и она появится здесь.</string>
     <string name="btn_refresh">Обновить</string>
@@ -38,7 +38,7 @@
     <string name="btn_stay">Остаться</string>
     <string name="btn_download">Скачать офлайн</string>
 
-    <!-- Читалка и типографика -->
+    <!-- Режим чтения и типографика -->
     <string name="settings_typography">Настройки верстки</string>
     <string name="font_size">Размер шрифта</string>
     <string name="line_spacing">Межстрочный интервал</string>

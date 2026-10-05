@@ -634,7 +634,7 @@ public class CacheManager {
         } catch (android.content.ActivityNotFoundException e) {
             // 2. Попытка с общим MIME-типом или chooser
             try {
-                android.content.Intent chooser = android.content.Intent.createChooser(intent, "Выберите читалку Onyx:");
+                android.content.Intent chooser = android.content.Intent.createChooser(intent, "Выберите приложение для чтения:");
                 chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
                 activity.startActivity(chooser);
                 return true;
