@@ -1,9 +1,12 @@
 package com.onyx.yandexbooks.core.storage;
 
 import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.AsyncTask;
 import android.os.Environment;
 import android.util.Log;
+import android.util.LruCache;
 
 import com.onyx.yandexbooks.core.api.YandexBooksApiClient;
 import com.onyx.yandexbooks.core.api.models.Chapter;
@@ -22,7 +25,10 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.List;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 /**
  * Менеджер кэширования и загрузки книг в формате EPUB.
@@ -36,6 +42,7 @@ public class CacheManager {
     private final File booksDir;
     private final YandexBooksApiClient apiClient;
     private final DatabaseHelper dbHelper;
+    private final LruCache<String, Bitmap> imageCache;
 
     public interface DownloadProgressCallback {
         void onProgress(int downloadedCount, int totalCount);
@@ -56,6 +63,16 @@ public class CacheManager {
         }
         this.apiClient = apiClient;
         this.dbHelper = DatabaseHelper.getInstance(this.context);
+
+        // Выделяем до 6 МБ под кэш декодированных картинок на E-Ink ридере
+        int maxMemory = (int) (Runtime.getRuntime().maxMemory() / 1024);
+        int cacheSize = Math.max(2048, Math.min(6144, maxMemory / 8));
+        this.imageCache = new LruCache<String, Bitmap>(cacheSize) {
+            @Override
+            protected int sizeOf(String key, Bitmap bitmap) {
+                return bitmap.getByteCount() / 1024;
+            }
+        };
     }
 
     public File getEpubFile(String bookUuid) {
@@ -606,6 +623,133 @@ public class CacheManager {
                 }
             }
         }
+    }
+
+    public Bitmap loadImageFromEpub(String bookUuid, String zipPath, int reqWidth, int reqHeight) {
+        if (bookUuid == null || zipPath == null || zipPath.trim().isEmpty()) return null;
+        String key = bookUuid + ":" + zipPath.trim();
+        Bitmap cached = imageCache.get(key);
+        if (cached != null && !cached.isRecycled()) {
+            return cached;
+        }
+
+        File epubFile = getEpubFile(bookUuid);
+        if (!epubFile.exists() || epubFile.length() == 0) {
+            return null;
+        }
+
+        try (ZipFile zip = new ZipFile(epubFile)) {
+            ZipEntry entry = zip.getEntry(zipPath.trim());
+            if (entry == null) {
+                // Fallback: регистронезависимый поиск или поиск по имени файла
+                String cleanTarget = zipPath.trim().toLowerCase();
+                String targetFileName = cleanTarget.contains("/") ? cleanTarget.substring(cleanTarget.lastIndexOf('/') + 1) : cleanTarget;
+                Enumeration<? extends ZipEntry> en = zip.entries();
+                while (en.hasMoreElements()) {
+                    ZipEntry ze = en.nextElement();
+                    String name = ze.getName().toLowerCase();
+                    if (name.equals(cleanTarget) || name.endsWith("/" + cleanTarget) || name.endsWith("/" + targetFileName)) {
+                        entry = ze;
+                        break;
+                    }
+                }
+            }
+
+            if (entry == null) return null;
+
+            // 1. Быстрый замер размеров изображения без аллокации пикселей
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inJustDecodeBounds = true;
+            try (InputStream is = zip.getInputStream(entry)) {
+                BitmapFactory.decodeStream(is, null, opts);
+            }
+            if (opts.outWidth <= 0 || opts.outHeight <= 0) {
+                return null;
+            }
+
+            // 2. Расчет коэффициента дискретизации и декодирование в RGB_565 для экономии RAM на Onyx
+            opts.inSampleSize = calculateInSampleSize(opts, Math.max(100, reqWidth), Math.max(100, reqHeight));
+            opts.inJustDecodeBounds = false;
+            opts.inPreferredConfig = Bitmap.Config.RGB_565;
+
+            Bitmap bmp;
+            try (InputStream is2 = zip.getInputStream(entry)) {
+                bmp = BitmapFactory.decodeStream(is2, null, opts);
+            }
+
+            if (bmp != null) {
+                imageCache.put(key, bmp);
+            }
+            return bmp;
+        } catch (Throwable t) {
+            Log.w(TAG, "Error loading image from epub: " + zipPath, t);
+            return null;
+        }
+    }
+
+    public Bitmap getCoverBitmap(String bookUuid, int reqWidth, int reqHeight) {
+        if (bookUuid == null) return null;
+        String key = bookUuid + ":__cover__";
+        Bitmap cached = imageCache.get(key);
+        if (cached != null && !cached.isRecycled()) {
+            return cached;
+        }
+
+        // 1. Проверяем локальный кэш обложек на диске
+        File diskCover = new File(context.getCacheDir(), "covers/" + bookUuid + ".jpg");
+        if (diskCover.exists() && diskCover.length() > 0) {
+            try {
+                BitmapFactory.Options opts = new BitmapFactory.Options();
+                opts.inJustDecodeBounds = true;
+                BitmapFactory.decodeFile(diskCover.getAbsolutePath(), opts);
+                if (opts.outWidth > 0 && opts.outHeight > 0) {
+                    opts.inSampleSize = calculateInSampleSize(opts, reqWidth, reqHeight);
+                    opts.inJustDecodeBounds = false;
+                    opts.inPreferredConfig = Bitmap.Config.RGB_565;
+                    Bitmap bmp = BitmapFactory.decodeFile(diskCover.getAbsolutePath(), opts);
+                    if (bmp != null) {
+                        imageCache.put(key, bmp);
+                        return bmp;
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+
+        // 2. Проверяем наличие обложки в самом EPUB файле
+        File epubFile = getEpubFile(bookUuid);
+        if (epubFile.exists() && epubFile.length() > 0) {
+            try (ZipFile zip = new ZipFile(epubFile)) {
+                Enumeration<? extends ZipEntry> en = zip.entries();
+                while (en.hasMoreElements()) {
+                    ZipEntry ze = en.nextElement();
+                    String name = ze.getName().toLowerCase();
+                    if ((name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png")) && name.contains("cover")) {
+                        Bitmap bmp = loadImageFromEpub(bookUuid, ze.getName(), reqWidth, reqHeight);
+                        if (bmp != null) {
+                            imageCache.put(key, bmp);
+                            return bmp;
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+
+        return null;
+    }
+
+    private static int calculateInSampleSize(BitmapFactory.Options options, int reqWidth, int reqHeight) {
+        final int height = options.outHeight;
+        final int width = options.outWidth;
+        int inSampleSize = 1;
+
+        if (height > reqHeight || width > reqWidth) {
+            final int halfHeight = height / 2;
+            final int halfWidth = width / 2;
+            while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+                inSampleSize *= 2;
+            }
+        }
+        return inSampleSize;
     }
 
     private void copyFile(File src, File dst) throws Exception {

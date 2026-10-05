@@ -96,6 +96,7 @@ public class EpubParser {
     public static class ParseResult {
         public List<ChapterData> chapters = new ArrayList<>();
         public List<TocNode> tocTree = new ArrayList<>();
+        public String coverImagePath = null;
     }
 
     public static List<ChapterData> parseEpub(File epubFile) {
@@ -131,6 +132,7 @@ public class EpubParser {
                 chapterHrefs = parseOpfSpine(zip, opfPath, opfBaseDir, manifestHrefMap);
                 ncxPathFromOpf = findNcxPathFromOpf(zip, opfPath, opfBaseDir);
                 navPathFromOpf = findNavPathFromOpf(zip, opfPath, opfBaseDir);
+                result.coverImagePath = findCoverImageFromOpf(zip, opfPath, opfBaseDir);
             }
 
             // Fallback: если spine не удалось прочесть, собираем все xhtml/html файлы
@@ -189,7 +191,7 @@ public class EpubParser {
                     if (rawHtml == null) rawHtml = "";
                     rawHtmlCache.put(s, rawHtml);
 
-                    String cleanText = cleanHtmlText(rawHtml);
+                    String cleanText = cleanHtmlText(rawHtml, href);
 
                     ChapterData cd = new ChapterData();
                     cd.id = "ch_" + chIndex;
@@ -210,6 +212,25 @@ public class EpubParser {
 
                     chapters.add(cd);
                     chIndex++;
+                }
+            }
+
+            // 4.1 Гарантированное отображение обложки на первой странице книги (Глава 0)
+            if (result.coverImagePath != null && !result.coverImagePath.isEmpty() && !chapters.isEmpty()) {
+                ChapterData firstCh = chapters.get(0);
+                boolean firstHasImage = (firstCh.textContent != null && firstCh.textContent.contains("[IMG:"))
+                        || (firstCh.fileHref != null && firstCh.fileHref.toLowerCase().contains("cover"));
+                if (!firstHasImage) {
+                    ChapterData coverCh = new ChapterData();
+                    coverCh.id = "ch_0_cover";
+                    coverCh.title = "Обложка";
+                    coverCh.textContent = "[IMG:" + result.coverImagePath + "]";
+                    coverCh.fileHref = result.coverImagePath;
+                    coverCh.spineIndex = 0;
+                    chapters.add(0, coverCh);
+                    for (int i = 0; i < chapters.size(); i++) {
+                        chapters.get(i).spineIndex = i;
+                    }
                 }
             }
 
@@ -579,6 +600,44 @@ public class EpubParser {
         return null;
     }
 
+    public static String findCoverImageFromOpf(ZipFile zip, String opfPath, String baseDir) {
+        ZipEntry opfEntry = zip.getEntry(opfPath);
+        if (opfEntry == null) return null;
+        try (InputStream is = zip.getInputStream(opfEntry)) {
+            String opfXml = readStreamToString(is);
+            // 1. EPUB 2: <meta name="cover" content="id"/>
+            Pattern metaPattern = Pattern.compile("<meta\\s+[^>]*?name\\s*=\\s*[\"']cover[\"'][^>]*?content\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
+            Matcher metaM = metaPattern.matcher(opfXml);
+            if (!metaM.find()) {
+                metaPattern = Pattern.compile("<meta\\s+[^>]*?content\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?name\\s*=\\s*[\"']cover[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
+                metaM = metaPattern.matcher(opfXml);
+            }
+            if (metaM.find()) {
+                String coverId = metaM.group(1);
+                Pattern itemPattern = Pattern.compile("<item\\s+[^>]*?id\\s*=\\s*[\"']" + Pattern.quote(coverId) + "[\"'][^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
+                Matcher m = itemPattern.matcher(opfXml);
+                if (m.find()) {
+                    return resolveZipPath(baseDir, m.group(1));
+                }
+            }
+
+            // 2. EPUB 3: <item ... properties="...cover-image..." href="..." ...>
+            Pattern propPattern = Pattern.compile("<item\\s+[^>]*?properties\\s*=\\s*[\"'][^\"']*cover-image[^\"']*[\"'][^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
+            Matcher propM = propPattern.matcher(opfXml);
+            if (propM.find()) {
+                return resolveZipPath(baseDir, propM.group(1));
+            }
+
+            // 3. Fallback: <item id="cover" ... href="...jpg|png..." ...>
+            Pattern idPattern = Pattern.compile("<item\\s+[^>]*?id\\s*=\\s*[\"'](?:cover|cover-image|book-cover)[\"'][^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
+            Matcher idM = idPattern.matcher(opfXml);
+            if (idM.find()) {
+                return resolveZipPath(baseDir, idM.group(1));
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
     /**
      * Построение подлинного иерархического дерева оглавления из NCX (DAISY).
      */
@@ -825,11 +884,98 @@ public class EpubParser {
      * - Формирует нормальное книжное расстояние между абзацами
      * - Сохраняет пропуск одной строки только для явных смысловых разделителей автора
      */
+    public static String resolveZipPath(String baseDir, String relativePath) {
+        if (relativePath == null || relativePath.trim().isEmpty()) return "";
+        String path = relativePath.trim();
+        if (path.contains("#")) {
+            path = path.substring(0, path.indexOf('#')).trim();
+        }
+        if (path.contains("?")) {
+            path = path.substring(0, path.indexOf('?')).trim();
+        }
+        try {
+            path = URLDecoder.decode(path, "UTF-8");
+        } catch (Exception ignored) {}
+
+        if (path.startsWith("/")) {
+            path = path.substring(1);
+        } else if (baseDir != null && !baseDir.isEmpty()) {
+            path = baseDir + path;
+        }
+
+        String[] parts = path.split("/");
+        List<String> normalized = new ArrayList<>();
+        for (String p : parts) {
+            if (p.isEmpty() || ".".equals(p)) continue;
+            if ("..".equals(p)) {
+                if (!normalized.isEmpty()) {
+                    normalized.remove(normalized.size() - 1);
+                }
+            } else {
+                normalized.add(p);
+            }
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < normalized.size(); i++) {
+            if (i > 0) sb.append("/");
+            sb.append(normalized.get(i));
+        }
+        return sb.toString();
+    }
+
     public static String cleanHtmlText(String html) {
+        return cleanHtmlText(html, "");
+    }
+
+    /**
+     * Высокопроизводительный очиститель HTML для E-Ink ридеров:
+     * - Сохраняет графические иллюстрации в виде тегов [IMG:zipPath]
+     * - Исключает появление символов [OBJ] (\uFFFC) и битых глифов (\uFFFD, \uFEFF)
+     * - Исключает просачивание любых обрывков тегов и атрибутов (id="...", <h1, <h2)
+     * - Формирует нормальное книжное расстояние между абзацами
+     * - Сохраняет пропуск одной строки только для явных смысловых разделителей автора
+     */
+    public static String cleanHtmlText(String html, String chapterFileHref) {
         if (html == null || html.isEmpty()) return "";
         try {
+            String baseDir = "";
+            if (chapterFileHref != null && chapterFileHref.contains("/")) {
+                baseDir = chapterFileHref.substring(0, chapterFileHref.lastIndexOf('/') + 1);
+            }
+
             // 1. Удаление <head>, <style>, <script>
             String text = html.replaceAll("(?is)<(script|style|head).*?>.*?</\\1>", "");
+
+            // 1.1 Преобразование тегов изображений <img> и <image> (SVG) в маркеры
+            Pattern imgPattern = Pattern.compile("<img\\s+[^>]*?src\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
+            Matcher mImg = imgPattern.matcher(text);
+            StringBuffer sbImg = new StringBuffer();
+            while (mImg.find()) {
+                String rawSrc = mImg.group(1);
+                String resolved = resolveZipPath(baseDir, rawSrc);
+                if (!resolved.isEmpty()) {
+                    mImg.appendReplacement(sbImg, "\n___IMG_MARKER___:" + Matcher.quoteReplacement(resolved) + "\n");
+                } else {
+                    mImg.appendReplacement(sbImg, "");
+                }
+            }
+            mImg.appendTail(sbImg);
+            text = sbImg.toString();
+
+            Pattern svgImgPattern = Pattern.compile("<image\\s+[^>]*?(?:xlink:href|href)\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
+            Matcher mSvg = svgImgPattern.matcher(text);
+            StringBuffer sbSvg = new StringBuffer();
+            while (mSvg.find()) {
+                String rawSrc = mSvg.group(1);
+                String resolved = resolveZipPath(baseDir, rawSrc);
+                if (!resolved.isEmpty()) {
+                    mSvg.appendReplacement(sbSvg, "\n___IMG_MARKER___:" + Matcher.quoteReplacement(resolved) + "\n");
+                } else {
+                    mSvg.appendReplacement(sbSvg, "");
+                }
+            }
+            mSvg.appendTail(sbSvg);
+            text = sbSvg.toString();
 
             // 2. Тотальное удаление любых обрывков атрибутов, заканчивающихся на '>' (например, id="mh_toc_975">)
             text = text.replaceAll("(?i)\\b(?:id|name|class|style)\\s*=\\s*[\"'][^\"']*[\"']\\s*>", "");
@@ -848,7 +994,7 @@ public class EpubParser {
             text = text.replaceAll("(?i)<br\\s*/?>", "\n");
             text = text.replaceAll("(?i)</?(p|div|h[1-6]|li|blockquote|tr)[^>]*>", "\n");
 
-            // 7. Удаление всех остальных тегов (включая <img>, <span>, <i>, <b> и др.)
+            // 7. Удаление всех остальных тегов (включая <span>, <i>, <b> и др.)
             text = text.replaceAll("<[^>]+>", "");
 
             // 8. Удаление отдельно стоящих обрывков тегов заголовков на своих строках
@@ -889,6 +1035,18 @@ public class EpubParser {
             for (String line : lines) {
                 String trimmed = line.trim();
                 if (trimmed.isEmpty()) {
+                    continue;
+                }
+
+                if (trimmed.startsWith("___IMG_MARKER___:")) {
+                    String imgPath = trimmed.substring("___IMG_MARKER___:".length()).trim();
+                    if (!imgPath.isEmpty()) {
+                        if (result.length() > 0) {
+                            result.append("\n");
+                        }
+                        result.append("[IMG:").append(imgPath).append("]");
+                        allowEmptyLine = true;
+                    }
                     continue;
                 }
 

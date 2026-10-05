@@ -102,6 +102,23 @@ public class TextPaginator {
                 lastWasEmptyLine = true;
                 continue;
             }
+
+            // Отдельная страница для иллюстраций и обложек
+            if (trimmed.startsWith("[IMG:") && trimmed.endsWith("]")) {
+                if (!currentLines.isEmpty()) {
+                    pages.add(new Page(pageIndex++, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
+                    currentLines.clear();
+                    pageStartCharOffset = globalCharOffset;
+                }
+                List<Line> imgLines = new ArrayList<>();
+                imgLines.add(new Line(trimmed, false, false, 0));
+                pages.add(new Page(pageIndex++, imgLines, globalCharOffset, globalCharOffset + trimmed.length()));
+                globalCharOffset += trimmed.length() + 1;
+                pageStartCharOffset = globalCharOffset;
+                lastWasEmptyLine = false;
+                continue;
+            }
+
             lastWasEmptyLine = false;
 
             String[] words = trimmed.split("\\s+");

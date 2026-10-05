@@ -1,9 +1,12 @@
 package com.onyx.yandexbooks.ui;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
@@ -26,6 +29,11 @@ public class ReaderCanvasView extends View {
         void onCenterTap();
     }
 
+    public interface ImageLoader {
+        Bitmap loadImage(String imagePath, int reqWidth, int reqHeight);
+        Bitmap loadCover(int reqWidth, int reqHeight);
+    }
+
     private Paint textPaint;
     private Paint footerPaint;
     private Paint headerPaint;
@@ -39,6 +47,7 @@ public class ReaderCanvasView extends View {
     private int totalChapters = 1;
     private double globalPercent = 0.0;
     private OnReaderInteractionListener interactionListener;
+    private ImageLoader imageLoader;
 
     public ReaderCanvasView(Context context) {
         super(context);
@@ -125,6 +134,10 @@ public class ReaderCanvasView extends View {
         setPage(page, (page != null ? page.pageIndex + 1 : 1), Math.max(1, totalPages), chapterTitle, currentChapterIndex, totalChapters, globalPercent);
     }
 
+    public void setImageLoader(ImageLoader loader) {
+        this.imageLoader = loader;
+    }
+
     public void setPage(TextPaginator.Page page, int globalPageIndex, int totalBookPages, String chapterTitle, int currentChapterIndex, int totalChapters, double globalPercent) {
         this.currentPage = page;
         this.globalPageIndex = Math.max(1, globalPageIndex);
@@ -162,9 +175,59 @@ public class ReaderCanvasView extends View {
             canvas.drawText(titleText, config.getPaddingLeftPx(), headerY, headerPaint);
         }
 
-        if (currentPage.lines == null || currentPage.lines.isEmpty()) {
-            // Отрисовываем заголовок по центру, если в секции нет текста (титульный лист / иллюстрация)
-            if (chapterTitle != null && !chapterTitle.trim().isEmpty()) {
+        boolean isImagePage = false;
+        String imgPath = null;
+        if (currentPage.lines != null && !currentPage.lines.isEmpty()) {
+            String firstLine = currentPage.lines.get(0).text.trim();
+            if (firstLine.startsWith("[IMG:") && firstLine.endsWith("]")) {
+                isImagePage = true;
+                imgPath = firstLine.substring(5, firstLine.length() - 1).trim();
+            }
+        }
+
+        if (isImagePage && imgPath != null) {
+            float availW = getWidth() - config.getPaddingLeftPx() - config.getPaddingRightPx();
+            float availH = getHeight() - config.getPaddingTopPx() - config.getHeaderReservedHeightPx() - config.getPaddingBottomPx() - config.getFooterReservedHeightPx();
+            Bitmap bmp = (imageLoader != null) ? imageLoader.loadImage(imgPath, (int) availW, (int) availH) : null;
+            if (bmp != null && !bmp.isRecycled()) {
+                float bw = bmp.getWidth();
+                float bh = bmp.getHeight();
+                float scale = Math.min(availW / bw, availH / bh);
+                if (scale > 1.0f) scale = 1.0f; // Не масштабируем мелкие иконки больше 100%
+                float destW = bw * scale;
+                float destH = bh * scale;
+                float destX = config.getPaddingLeftPx() + (availW - destW) / 2f;
+                float destY = config.getPaddingTopPx() + config.getHeaderReservedHeightPx() + (availH - destH) / 2f;
+                Rect srcRect = new Rect(0, 0, (int) bw, (int) bh);
+                RectF dstRect = new RectF(destX, destY, destX + destW, destY + destH);
+                Paint imgPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+                canvas.drawBitmap(bmp, srcRect, dstRect, imgPaint);
+            } else {
+                // Fallback: аккуратная плашка иллюстрации
+                String label = "Иллюстрация";
+                float textW = textPaint.measureText(label);
+                float textX = Math.max(config.getPaddingLeftPx(), (getWidth() - textW) / 2f);
+                float textY = getHeight() / 2f;
+                canvas.drawText(label, textX, textY, textPaint);
+            }
+        } else if (currentPage.lines == null || currentPage.lines.isEmpty()) {
+            Bitmap coverBmp = (imageLoader != null && globalPageIndex <= 1) ? imageLoader.loadCover((int) (getWidth() - config.getPaddingLeftPx() - config.getPaddingRightPx()), (int) (getHeight() - config.getPaddingTopPx() - config.getPaddingBottomPx())) : null;
+            if (coverBmp != null && !coverBmp.isRecycled()) {
+                float availW = getWidth() - config.getPaddingLeftPx() - config.getPaddingRightPx();
+                float availH = getHeight() - config.getPaddingTopPx() - config.getHeaderReservedHeightPx() - config.getPaddingBottomPx() - config.getFooterReservedHeightPx();
+                float bw = coverBmp.getWidth();
+                float bh = coverBmp.getHeight();
+                float scale = Math.min(availW / bw, availH / bh);
+                if (scale > 1.0f) scale = 1.0f;
+                float destW = bw * scale;
+                float destH = bh * scale;
+                float destX = config.getPaddingLeftPx() + (availW - destW) / 2f;
+                float destY = config.getPaddingTopPx() + config.getHeaderReservedHeightPx() + (availH - destH) / 2f;
+                Rect srcRect = new Rect(0, 0, (int) bw, (int) bh);
+                RectF dstRect = new RectF(destX, destY, destX + destW, destY + destH);
+                Paint imgPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+                canvas.drawBitmap(coverBmp, srcRect, dstRect, imgPaint);
+            } else if (chapterTitle != null && !chapterTitle.trim().isEmpty()) {
                 float textW = textPaint.measureText(chapterTitle.trim());
                 float textX = Math.max(config.getPaddingLeftPx(), (getWidth() - textW) / 2f);
                 float textY = getHeight() / 2f;
@@ -178,12 +241,12 @@ public class ReaderCanvasView extends View {
             float startX = config.getPaddingLeftPx();
             float currentY = config.getPaddingTopPx() + config.getHeaderReservedHeightPx() - fm.top;
             float maxAllowedX = getWidth() - config.getPaddingRightPx();
-            float maxAllowedTextBottom = getHeight() - config.getPaddingBottomPx() - config.getFooterReservedHeightPx();
+            float screenLimitY = getHeight() - config.getPaddingBottomPx();
 
-            // Отрисовка строк текущей страницы
+            // Отрисовка строк текущей страницы (строки уже гарантированно рассчитаны TextPaginator)
             for (TextPaginator.Line line : currentPage.lines) {
-                if (currentY + fm.bottom > maxAllowedTextBottom + 6) {
-                    break; // 100% математическая защита: текст физически не может наехать на колонтитул
+                if (currentY + fm.top > screenLimitY) {
+                    break; // Предотвращаем выход за пределы физического экрана
                 }
 
                 if (line.text.isEmpty()) {

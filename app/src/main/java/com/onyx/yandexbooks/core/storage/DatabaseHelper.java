@@ -19,7 +19,7 @@ import java.util.List;
 public class DatabaseHelper extends SQLiteOpenHelper {
 
     private static final String DATABASE_NAME = "yandex_books_lite.db";
-    private static final int DATABASE_VERSION = 6;
+    private static final int DATABASE_VERSION = 7;
 
     private static DatabaseHelper instance;
 
@@ -139,6 +139,13 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 // Сбрасываем ложный прогресс, ранее ошибочно записанный для книг каталога и поиска
                 db.execSQL("UPDATE books SET percent = 0.0, current_chapter = 0, current_paragraph = 0 " +
                         "WHERE shelf_type = 'catalog' OR shelf_type = 'search'");
+            } catch (Exception ignored) {}
+        }
+
+        if (oldVersion < 7) {
+            try {
+                // Очищаем кэшированные главы без изображений для автоматического перепарсинга с поддержкой графики
+                db.execSQL("DELETE FROM chapters");
             } catch (Exception ignored) {}
         }
     }

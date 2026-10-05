@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.Dialog;
 import android.content.DialogInterface;
 import java.io.File;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Typeface;
@@ -241,6 +242,20 @@ public class ReaderActivity extends Activity {
         cacheManager = new CacheManager(this, apiClient);
         dbHelper = DatabaseHelper.getInstance(this);
         syncManager = new SyncManager(this, apiClient);
+
+        if (readerCanvas != null) {
+            readerCanvas.setImageLoader(new ReaderCanvasView.ImageLoader() {
+                @Override
+                public Bitmap loadImage(String imagePath, int reqWidth, int reqHeight) {
+                    return cacheManager.loadImageFromEpub(bookUuid, imagePath, reqWidth, reqHeight);
+                }
+
+                @Override
+                public Bitmap loadCover(int reqWidth, int reqHeight) {
+                    return cacheManager.getCoverBitmap(bookUuid, reqWidth, reqHeight);
+                }
+            });
+        }
 
         setupHardwareKeys();
         setupCanvasListeners();

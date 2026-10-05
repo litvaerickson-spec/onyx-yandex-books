@@ -178,12 +178,19 @@ public class YandexBooksApiClient {
         if (card == null) return result;
 
         String state = card.optString("state", "");
-        boolean isUserCard = card.has("last_read_at") || card.has("state") || card.has("updated_at")
-                || card.has("last_reading_position") || card.has("reading_position") || card.has("position")
-                || card.has("library_card");
+        String lastReadAt = card.optString("last_read_at", "");
+        boolean hasLastRead = !lastReadAt.isEmpty() && !"null".equalsIgnoreCase(lastReadAt);
+        boolean hasPosObject = card.has("last_reading_position") || card.has("reading_position") || card.has("position");
+        boolean isUserCard = hasLastRead || hasPosObject || card.has("library_card")
+                || (!state.isEmpty() && !"null".equalsIgnoreCase(state) && !"catalog".equalsIgnoreCase(state) && !"search".equalsIgnoreCase(state));
 
         // Если это не карточка пользователя (а элемент каталога или публичной полки), прогресс строго нулевой
         if (!isUserCard) {
+            return result;
+        }
+
+        // Если книга только в планах (to_read / want_to_read) и нет объекта позиции, прогресс строго 0
+        if (("to_read".equalsIgnoreCase(state) || "want_to_read".equalsIgnoreCase(state)) && !hasPosObject) {
             return result;
         }
 
@@ -201,10 +208,7 @@ public class YandexBooksApiClient {
             if (obj.has("percent")) p = obj.optDouble("percent", -1.0);
             else if (obj.has("reading_progress")) p = obj.optDouble("reading_progress", -1.0);
             else if (obj.has("progress_percent")) p = obj.optDouble("progress_percent", -1.0);
-            else if (obj.has("percentage")) p = obj.optDouble("percentage", -1.0);
-            else if (obj.has("progress")) {
-                p = obj.optDouble("progress", -1.0);
-            }
+            else if (obj.has("progress")) p = obj.optDouble("progress", -1.0);
 
             if (p > 0.0) {
                 if (p < 1.0) {
@@ -224,12 +228,13 @@ public class YandexBooksApiClient {
         }
 
         // 2. Если во вложенных объектах процент не найден, проверяем свойства самой пользовательской карточки
-        if (result.percent <= 0.0) {
+        // ВАЖНО: только при явном наличии last_read_at или library_card (исключаем скидочные проценты каталога)
+        if (result.percent <= 0.0 && (hasLastRead || card.has("library_card"))) {
             double p = -1.0;
             if (card.has("percent")) p = card.optDouble("percent", -1.0);
             else if (card.has("reading_progress")) p = card.optDouble("reading_progress", -1.0);
             else if (card.has("progress_percent")) p = card.optDouble("progress_percent", -1.0);
-            else if (card.has("percentage")) p = card.optDouble("percentage", -1.0);
+            else if (card.has("progress")) p = card.optDouble("progress", -1.0);
 
             if (p > 0.0) {
                 if (p < 1.0) {

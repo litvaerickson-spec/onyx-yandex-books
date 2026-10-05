@@ -911,16 +911,16 @@ public class MainActivity extends Activity {
             apiClient.updateBookShelfState(book.getUuid(), "reading", new YandexBooksApiClient.ApiCallback<Boolean>() {
                 @Override
                 public void onSuccess(Boolean result) {
-                    runOnUiThread(onReady);
+                    // Полка на сервере успешно синхронизирована в фоне
                 }
 
                 @Override
                 public void onError(String errorMessage) {
-                    // Даже если сетевая ошибка или книга уже в библиотеке, открываем книгу без задержки
-                    runOnUiThread(onReady);
+                    // Локальное состояние уже сохранено в SQLite, сбой сети не блокирует чтение
                 }
             });
-        } else {
+        }
+        if (onReady != null) {
             onReady.run();
         }
     }
