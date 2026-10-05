@@ -32,3 +32,6 @@ docs/physical_test_*
 # Temporary release notes drafts (use CHANGELOG.md for official logs)
 release_notes*.md
 
+# Design proposals drafts
+docs/icon_proposals/
+
