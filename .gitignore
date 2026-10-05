@@ -29,3 +29,6 @@ marketing/
 # Test generated artifacts
 docs/physical_test_*
 
+# Temporary release notes drafts (use CHANGELOG.md for official logs)
+release_notes*.md
+
