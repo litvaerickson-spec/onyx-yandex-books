@@ -57,7 +57,7 @@ public class TextPaginator {
         }
 
         float availableWidth = screenWidth - config.getPaddingLeftPx() - config.getPaddingRightPx();
-        float availableHeight = screenHeight - config.getPaddingTopPx() - config.getPaddingBottomPx() - config.getFooterReservedHeightPx();
+        float availableHeight = screenHeight - config.getPaddingTopPx() - config.getHeaderReservedHeightPx() - config.getPaddingBottomPx() - config.getFooterReservedHeightPx();
 
         Paint.FontMetrics fm = paint.getFontMetrics();
         float lineHeight = (fm.bottom - fm.top) * config.getLineSpacingMultiplier();

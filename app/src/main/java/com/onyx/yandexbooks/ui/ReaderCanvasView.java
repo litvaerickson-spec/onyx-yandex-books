@@ -28,8 +28,11 @@ public class ReaderCanvasView extends View {
 
     private Paint textPaint;
     private Paint footerPaint;
+    private Paint headerPaint;
     private TypographyConfig config;
     private TextPaginator.Page currentPage;
+    private int globalPageIndex = 1;
+    private int totalBookPages = 1;
     private int totalPages = 1;
     private String chapterTitle = "";
     private int currentChapterIndex = 0;
@@ -60,6 +63,12 @@ public class ReaderCanvasView extends View {
         textPaint.setSubpixelText(false);
         textPaint.setDither(false);
         textPaint.setFakeBoldText(config.isBoldText());
+
+        headerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        headerPaint.setColor(Color.BLACK);
+        headerPaint.setTextSize(spToPx(11));
+        headerPaint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL));
+        headerPaint.setSubpixelText(false);
 
         footerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         footerPaint.setColor(Color.BLACK); // Насыщенный черный цвет для E-Ink
@@ -109,12 +118,18 @@ public class ReaderCanvasView extends View {
     }
 
     public void setPage(TextPaginator.Page page, int totalPages, String chapterTitle) {
-        setPage(page, totalPages, chapterTitle, 0, 1, 0.0);
+        setPage(page, (page != null ? page.pageIndex + 1 : 1), Math.max(1, totalPages), chapterTitle, 0, 1, 0.0);
     }
 
     public void setPage(TextPaginator.Page page, int totalPages, String chapterTitle, int currentChapterIndex, int totalChapters, double globalPercent) {
+        setPage(page, (page != null ? page.pageIndex + 1 : 1), Math.max(1, totalPages), chapterTitle, currentChapterIndex, totalChapters, globalPercent);
+    }
+
+    public void setPage(TextPaginator.Page page, int globalPageIndex, int totalBookPages, String chapterTitle, int currentChapterIndex, int totalChapters, double globalPercent) {
         this.currentPage = page;
-        this.totalPages = Math.max(1, totalPages);
+        this.globalPageIndex = Math.max(1, globalPageIndex);
+        this.totalBookPages = Math.max(1, totalBookPages);
+        this.totalPages = Math.max(1, totalBookPages);
         this.chapterTitle = chapterTitle != null ? chapterTitle : "";
         this.currentChapterIndex = currentChapterIndex;
         this.totalChapters = Math.max(1, totalChapters);
@@ -133,12 +148,26 @@ public class ReaderCanvasView extends View {
             return;
         }
 
+        // 1. Верхний колонтитул: Название текущей главы
+        float headerY = config.getPaddingTopPx() + 16;
+        if (chapterTitle != null && !chapterTitle.trim().isEmpty()) {
+            String titleText = chapterTitle.trim();
+            float maxHeaderWidth = getWidth() - config.getPaddingLeftPx() - config.getPaddingRightPx();
+            while (titleText.length() > 3 && headerPaint.measureText(titleText + "…") > maxHeaderWidth) {
+                titleText = titleText.substring(0, titleText.length() - 1);
+            }
+            if (titleText.length() < chapterTitle.trim().length()) {
+                titleText += "…";
+            }
+            canvas.drawText(titleText, config.getPaddingLeftPx(), headerY, headerPaint);
+        }
+
         Paint.FontMetrics fm = textPaint.getFontMetrics();
         float fontHeight = fm.bottom - fm.top;
         float lineHeight = fontHeight * config.getLineSpacingMultiplier();
 
         float startX = config.getPaddingLeftPx();
-        float currentY = config.getPaddingTopPx() - fm.top;
+        float currentY = config.getPaddingTopPx() + config.getHeaderReservedHeightPx() - fm.top;
         float maxAllowedX = getWidth() - config.getPaddingRightPx();
         float maxAllowedTextBottom = getHeight() - config.getPaddingBottomPx() - config.getFooterReservedHeightPx();
 
@@ -174,26 +203,13 @@ public class ReaderCanvasView extends View {
             currentY += lineHeight;
         }
 
-        // Отрисовка нижнего колонтитула с математической защитой от набегания текста
-        float footerY = getHeight() - 10;
-        String pageInfo = "Стр. " + (currentPage.pageIndex + 1) + "/" + totalPages + String.format(" (%.0f%%)", globalPercent);
+        // 2. Нижний колонтитул: Сквозная нумерация от всей книги и процент
+        float footerY = getHeight() - 12;
+        String pageInfo = "Стр. " + globalPageIndex + " из " + totalBookPages + String.format(java.util.Locale.getDefault(), " (%.0f%%)", globalPercent);
         float pageInfoWidth = footerPaint.measureText(pageInfo);
 
         // Страница и процент справа
         canvas.drawText(pageInfo, getWidth() - config.getPaddingRightPx() - pageInfoWidth, footerY, footerPaint);
-
-        // Название слева: жестко ограничивается по ширине, исключая наложение на номер страницы
-        float maxLeftWidth = getWidth() - config.getPaddingLeftPx() - config.getPaddingRightPx() - pageInfoWidth - 24;
-        if (maxLeftWidth > 60 && chapterTitle != null && !chapterTitle.trim().isEmpty()) {
-            String titleText = chapterTitle.trim();
-            while (titleText.length() > 3 && footerPaint.measureText(titleText + "…") > maxLeftWidth) {
-                titleText = titleText.substring(0, titleText.length() - 1);
-            }
-            if (titleText.length() < chapterTitle.trim().length()) {
-                titleText += "…";
-            }
-            canvas.drawText(titleText, config.getPaddingLeftPx(), footerY, footerPaint);
-        }
     }
 
     @Override

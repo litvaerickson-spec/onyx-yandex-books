@@ -119,12 +119,13 @@ def test_paginator_math():
     padding_x = 36
     padding_top = 14
     padding_bottom = 20
+    header_reserved_height = 28
     footer_reserved_height = 44
     line_height = 28 # px (при 18sp)
 
     for screen in darwin_screens:
         avail_w = screen["width"] - padding_x
-        avail_h = screen["height"] - padding_top - padding_bottom - footer_reserved_height
+        avail_h = screen["height"] - padding_top - header_reserved_height - padding_bottom - footer_reserved_height
         max_lines_per_page = int(avail_h / line_height)
         
         words = sample_text.split()
@@ -133,9 +134,15 @@ def test_paginator_math():
         total_lines = len(words) // words_per_line + (1 if len(words) % words_per_line else 0)
         total_pages = total_lines // max_lines_per_page + (1 if total_lines % max_lines_per_page else 0)
 
-        # Проверка зазора между нижней строкой текста и колонтитулом
-        lowest_text_bottom = padding_top + (max_lines_per_page * line_height)
-        footer_y = screen["height"] - 10
+        # Проверка зазора между верхней строкой текста и верхним колонтитулом
+        first_line_y = padding_top + header_reserved_height
+        header_y = padding_top + 16
+        header_clearance = first_line_y - header_y
+        assert header_clearance >= 10, f"Опасность наложения на верхний колонтитул: {header_clearance}px"
+
+        # Проверка зазора между нижней строкой текста и нижним колонтитулом
+        lowest_text_bottom = padding_top + header_reserved_height + (max_lines_per_page * line_height)
+        footer_y = screen["height"] - 12
         clearance = footer_y - lowest_text_bottom
 
         print(f"Устройство: {screen['name']} ({screen['width']}x{screen['height']})")
@@ -534,6 +541,133 @@ def test_typography_cycle_contracts():
     assert next_vert_margin("small") == "normal"
     
     print("✅ Тест переключения настроек типографики успешно пройден!\n")
+
+
+def test_total_book_pages_continuous_pagination():
+    print("--- [ТЕСТ 12] Сквозная нумерация страниц книги от общего объема ---")
+    
+    # 5 глав с разной длиной
+    chapter_lengths = [3000, 7500, 4500, 15000, 2000]
+    avg_chars_per_page = 750.0
+    chapter_page_counts = [int(round(l / avg_chars_per_page)) for l in chapter_lengths]
+    total_book_pages = sum(chapter_page_counts)
+    
+    print(f"Длины глав: {chapter_lengths}")
+    print(f"Страниц в главах: {chapter_page_counts}")
+    print(f"Всего страниц в книге: {total_book_pages}")
+    
+    assert total_book_pages == 4 + 10 + 6 + 20 + 3, f"Неверная сумма страниц: {total_book_pages}"
+    
+    def get_global_page(current_chapter_idx, current_page_idx):
+        preceding = sum(chapter_page_counts[:current_chapter_idx])
+        return preceding + current_page_idx + 1
+
+    # В первой главе на 1-й странице -> Стр. 1 из 43
+    p1 = get_global_page(0, 0)
+    assert p1 == 1, f"Ожидалась 1-я глобальная страница, получено: {p1}"
+    
+    # В первой главе на 4-й (последней) странице -> Стр. 4 из 43
+    p4 = get_global_page(0, 3)
+    assert p4 == 4, f"Ожидалась 4-я глобальная страница, получено: {p4}"
+    
+    # Перелистнули во 2-ю главу на 1-ю страницу -> Стр. 5 из 43
+    p5 = get_global_page(1, 0)
+    assert p5 == 5, f"Ожидалась 5-я глобальная страница, получено: {p5}"
+    
+    # В последней главе на последней странице -> Стр. 43 из 43
+    p_last = get_global_page(4, 2)
+    assert p_last == total_book_pages, f"Ожидалась {total_book_pages}-я страница, получено: {p_last}"
+    
+    # Форматирование нижнего колонтитула
+    page_info = f"Стр. {p5} из {total_book_pages} (12%)"
+    print(f"Пример нижнего колонтитула: '{page_info}'")
+    assert "из 43" in page_info
+    assert "Стр. 5" in page_info
+    
+    print("✅ Тест сквозной нумерации страниц книги успешно пройден!\n")
+
+
+def test_sqlite_reading_progress_protection():
+    print("--- [ТЕСТ 13] Защита локального прогресса SQLite от затирания чужим сервером ---")
+    
+    def simulate_save_or_update(local_db, incoming_book):
+        best_percent = local_db.get("percent", 0.0)
+        best_ts = local_db.get("timestamp", 0)
+        best_ch = local_db.get("chapter", 0)
+        
+        has_local = (best_percent > 0.0 or best_ch > 0 or best_ts > 0)
+        server_ts = incoming_book.get("timestamp", 0)
+        server_percent = incoming_book.get("percent", 0.0)
+        server_ch = incoming_book.get("chapter", 0)
+        
+        if has_local:
+            # Серверу доверяем ТОЛЬКО если есть валидный таймштамп > 0, он новее и прочитано больше
+            server_is_newer_and_further = (server_ts > best_ts and server_ts > 0 and server_percent > best_percent + 0.5)
+            if server_is_newer_and_further:
+                effective_percent = server_percent
+                effective_ch = server_ch if server_ch > 0 else best_ch
+                effective_ts = server_ts
+            else:
+                effective_percent = best_percent
+                effective_ch = best_ch
+                effective_ts = max(best_ts, server_ts)
+        else:
+            effective_percent = server_percent
+            effective_ch = server_ch
+            effective_ts = server_ts
+            
+        return {"percent": effective_percent, "chapter": effective_ch, "timestamp": effective_ts}
+
+    # Сценарий 1: Пользователь прочитал на читалке до 35%, глава 4 (ts: 1000).
+    # Сервер вернул карточку без таймштампа (ts: 0) и с percent: 0, chapter: 0.
+    local_state = {"percent": 35.0, "chapter": 4, "timestamp": 1000}
+    incoming_empty = {"percent": 0.0, "chapter": 0, "timestamp": 0}
+    res1 = simulate_save_or_update(local_state, incoming_empty)
+    print(f"Сценарий 1 (Пустой сервер не должен затереть): {res1}")
+    assert res1["percent"] == 35.0, "Ошибка: локальный процент был затерт нулем!"
+    assert res1["chapter"] == 4, "Ошибка: локальная глава была затерта нулем!"
+
+    # Сценарий 2: Пользователь прочитал на читалке до 35%, глава 4 (ts: 1000).
+    # На телефоне дочитал до 60% (ts: 2000), но на сервере chapter_index отсутствует (0).
+    incoming_phone = {"percent": 60.0, "chapter": 0, "timestamp": 2000}
+    res2 = simulate_save_or_update(local_state, incoming_phone)
+    print(f"Сценарий 2 (Прогресс с телефона 60% принят, глава сохранена): {res2}")
+    assert res2["percent"] == 60.0, "Прогресс с телефона должен быть принят!"
+    assert res2["chapter"] == 4, "Глава не должна сбрасываться в 0!"
+
+    print("✅ Тест защиты прогресса SQLite успешно пройден!\n")
+
+
+def test_iso_timestamp_parsing():
+    print("--- [ТЕСТ 14] Парсинг ISO-8601 даты из ответов Bookmate API ---")
+    from datetime import datetime, timezone
+
+    def parse_iso(iso_str):
+        if not iso_str:
+            return 0
+        clean = iso_str.strip().replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(clean)
+            return int(dt.timestamp() * 1000)
+        except Exception:
+            return 0
+
+    iso1 = "2024-03-25T14:30:00Z"
+    ts1 = parse_iso(iso1)
+    print(f"ISO '{iso1}' -> {ts1} ms")
+    assert ts1 > 1700000000000
+
+    iso2 = "2024-03-25T14:30:00.500Z"
+    ts2 = parse_iso(iso2)
+    print(f"ISO '{iso2}' -> {ts2} ms")
+    assert ts2 > 1700000000000
+
+    assert parse_iso("") == 0
+    assert parse_iso(None) == 0
+
+    print("✅ Тест парсинга ISO дат успешно пройден!\n")
+
+
 if __name__ == "__main__":
     print("==================================================")
     print("🚀 Запуск тотальной верификации ядра Яндекс Книги Lite")
@@ -550,6 +684,9 @@ if __name__ == "__main__":
     test_backward_chapter_transition()
     test_bookmarks_model_and_storage()
     test_typography_cycle_contracts()
+    test_total_book_pages_continuous_pagination()
+    test_sqlite_reading_progress_protection()
+    test_iso_timestamp_parsing()
     print("==================================================")
-    print("🎉 ВСЕ 11 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 14 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

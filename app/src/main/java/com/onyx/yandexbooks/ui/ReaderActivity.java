@@ -128,6 +128,12 @@ public class ReaderActivity extends Activity {
     private long totalBookLength = 0;
     private boolean isInitialLoading = true; // Защита от перезаписи облачного прогресса при старте
 
+    // Сквозной подсчет страниц книги от общего объема
+    private int[] chapterPageCounts;
+    private int totalBookPages = 1;
+    private int globalPageIndex = 1;
+    private double avgCharsPerPage = 750.0;
+
     // Фоновый исполнитель пагинации: полностью исключает блокировку UI-потока и ANR
     private final ExecutorService paginationExecutor = Executors.newSingleThreadExecutor();
     private final AtomicLong paginationTaskId = new AtomicLong(0);
@@ -399,9 +405,21 @@ public class ReaderActivity extends Activity {
             readerPageSeekbar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 @Override
                 public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                    if (fromUser && currentPages != null && !currentPages.isEmpty()) {
-                        currentPageIndex = Math.max(0, Math.min(progress, currentPages.size() - 1));
-                        updatePageCounterText();
+                    if (fromUser && chapters != null && !chapters.isEmpty()) {
+                        int targetGlobal = progress;
+                        int acc = 0;
+                        for (int i = 0; i < chapters.size(); i++) {
+                            int chPages = (chapterPageCounts != null && i < chapterPageCounts.length) ? chapterPageCounts[i] : 1;
+                            if (targetGlobal < acc + chPages || i == chapters.size() - 1) {
+                                break;
+                            }
+                            acc += chPages;
+                        }
+                        globalPageIndex = Math.max(1, Math.min(totalBookPages, progress + 1));
+                        if (readerPageCounter != null) {
+                            double percent = calculateCurrentGlobalPercent();
+                            readerPageCounter.setText(String.format(Locale.getDefault(), "%d/%d (%.0f%%)", globalPageIndex, totalBookPages, percent));
+                        }
                     }
                 }
 
@@ -410,10 +428,29 @@ public class ReaderActivity extends Activity {
 
                 @Override
                 public void onStopTrackingTouch(SeekBar seekBar) {
-                    if (currentPages != null && !currentPages.isEmpty()) {
-                        currentPageIndex = Math.max(0, Math.min(seekBar.getProgress(), currentPages.size() - 1));
+                    if (chapters != null && !chapters.isEmpty()) {
+                        int targetGlobal = seekBar.getProgress();
+                        int acc = 0;
+                        int targetCh = 0;
+                        int targetP = 0;
+                        for (int i = 0; i < chapters.size(); i++) {
+                            int chPages = (chapterPageCounts != null && i < chapterPageCounts.length) ? chapterPageCounts[i] : 1;
+                            if (targetGlobal < acc + chPages || i == chapters.size() - 1) {
+                                targetCh = i;
+                                targetP = Math.max(0, targetGlobal - acc);
+                                break;
+                            }
+                            acc += chPages;
+                        }
                         isInitialLoading = false;
-                        renderCurrentPage();
+                        if (targetCh == currentChapterIndex) {
+                            currentPageIndex = Math.min(targetP, (currentPages != null && !currentPages.isEmpty()) ? currentPages.size() - 1 : 0);
+                            renderCurrentPage();
+                        } else {
+                            currentChapterIndex = targetCh;
+                            currentPageIndex = targetP;
+                            loadChapter(targetCh, targetP);
+                        }
                         EpdController.requestFullRefresh(ReaderActivity.this, readerCanvas);
                     }
                 }
@@ -831,10 +868,11 @@ public class ReaderActivity extends Activity {
             }
         }
 
-        int totalP = (currentPages != null) ? Math.max(1, currentPages.size()) : 1;
+        recalculateTotalBookPages();
+
         if (readerPageSeekbar != null) {
-            readerPageSeekbar.setMax(Math.max(0, totalP - 1));
-            readerPageSeekbar.setProgress(Math.max(0, Math.min(currentPageIndex, totalP - 1)));
+            readerPageSeekbar.setMax(Math.max(0, totalBookPages - 1));
+            readerPageSeekbar.setProgress(Math.max(0, Math.min(globalPageIndex - 1, totalBookPages - 1)));
         }
 
         updatePageCounterText();
@@ -842,10 +880,9 @@ public class ReaderActivity extends Activity {
 
     private void updatePageCounterText() {
         if (readerPageCounter != null) {
-            int totalP = (currentPages != null) ? Math.max(1, currentPages.size()) : 1;
-            int curP = Math.min(currentPageIndex + 1, totalP);
+            recalculateTotalBookPages();
             double percent = calculateCurrentGlobalPercent();
-            readerPageCounter.setText(String.format(Locale.getDefault(), "%d/%d (%.0f%%)", curP, totalP, percent));
+            readerPageCounter.setText(String.format(Locale.getDefault(), "%d/%d (%.0f%%)", globalPageIndex, totalBookPages, percent));
         }
     }
 
@@ -1318,10 +1355,16 @@ public class ReaderActivity extends Activity {
     private void calculateChapterLengths() {
         if (chapters == null || chapters.isEmpty()) {
             chapterLengths = new long[0];
+            chapterPageCounts = new int[0];
             totalBookLength = 0;
+            totalBookPages = 1;
+            globalPageIndex = 1;
             return;
         }
         chapterLengths = new long[chapters.size()];
+        if (chapterPageCounts == null || chapterPageCounts.length != chapters.size()) {
+            chapterPageCounts = new int[chapters.size()];
+        }
         totalBookLength = 0;
         for (int i = 0; i < chapters.size(); i++) {
             Chapter ch = chapters.get(i);
@@ -1332,6 +1375,36 @@ public class ReaderActivity extends Activity {
             chapterLengths[i] = len;
             totalBookLength += len;
         }
+        recalculateTotalBookPages();
+    }
+
+    private void recalculateTotalBookPages() {
+        if (chapters == null || chapters.isEmpty()) {
+            totalBookPages = 1;
+            globalPageIndex = 1;
+            return;
+        }
+        double safeAvgChars = (avgCharsPerPage > 50.0) ? avgCharsPerPage : 750.0;
+        int total = 0;
+        int preceding = 0;
+
+        for (int i = 0; i < chapters.size(); i++) {
+            int pages = (chapterPageCounts != null && i < chapterPageCounts.length) ? chapterPageCounts[i] : 0;
+            if (pages <= 0) {
+                long chLen = (chapterLengths != null && i < chapterLengths.length) ? chapterLengths[i] : 10000;
+                pages = Math.max(1, (int) Math.round(chLen / safeAvgChars));
+                if (chapterPageCounts != null && i < chapterPageCounts.length) {
+                    chapterPageCounts[i] = pages;
+                }
+            }
+            if (i < currentChapterIndex) {
+                preceding += pages;
+            }
+            total += pages;
+        }
+
+        totalBookPages = Math.max(1, total);
+        globalPageIndex = Math.max(1, Math.min(totalBookPages, preceding + currentPageIndex + 1));
     }
 
     private void loadBookData() {
@@ -1429,16 +1502,16 @@ public class ReaderActivity extends Activity {
             return;
         }
 
-        // Если есть конкретный индекс главы:
-        if (chapters != null && !chapters.isEmpty() && targetChapter >= 0 && targetChapter < chapters.size()) {
+        // Если есть конкретный индекс главы > 0:
+        if (chapters != null && !chapters.isEmpty() && targetChapter > 0 && targetChapter < chapters.size()) {
             currentChapterIndex = targetChapter;
             currentPageIndex = Math.max(0, targetPage);
             loadChapter(currentChapterIndex, currentPageIndex);
             return;
         }
 
-        // Иначе (если только процент без главы) – маппинг по общей длине
-        if (percent > 0 && percent < 99.0 && totalBookLength > 0 && chapters != null && !chapters.isEmpty()) {
+        // Иначе (если только процент, либо targetChapter <= 0, но percent > 2.0):
+        if (percent > 2.0 && percent < 99.0 && totalBookLength > 0 && chapters != null && !chapters.isEmpty()) {
             long targetGlobalOffset = (long) ((percent / 100.0) * totalBookLength);
             long acc = 0;
             int matchedCh = 0;
@@ -1458,13 +1531,16 @@ public class ReaderActivity extends Activity {
             loadChapterWithFraction(currentChapterIndex, chapterFraction);
         } else {
             currentChapterIndex = 0;
-            currentPageIndex = 0;
-            loadChapter(0, 0);
+            currentPageIndex = (targetChapter == 0) ? Math.max(0, targetPage) : 0;
+            loadChapter(currentChapterIndex, currentPageIndex);
         }
     }
 
     private void applyCloudProgressIfNewer(ReadingProgress cloudProgress) {
         if (chapters == null || chapters.isEmpty()) return;
+        // Если читатель уже листает страницы книги, не перебиваем его фоновой облачной синхронизацией
+        if (!isInitialLoading) return;
+
         ReadingProgress local = dbHelper.getProgress(bookUuid);
         double curPercent = calculateCurrentGlobalPercent();
         double cloudPercent = cloudProgress.getPercent();
@@ -1475,21 +1551,30 @@ public class ReaderActivity extends Activity {
             return;
         }
 
-        boolean isNewer = (local == null) ||
-                (cloudProgress.getTimestamp() > local.getTimestamp()) ||
-                (cloudPercent > curPercent + 1.0);
+        long localTs = (local != null) ? local.getTimestamp() : 0L;
+        long cloudTs = cloudProgress.getTimestamp();
+
+        boolean isNewer = false;
+        if (local == null) {
+            isNewer = (cloudPercent > 0);
+        } else if (cloudTs > localTs && cloudTs > 0 && Math.abs(cloudPercent - curPercent) > 1.5) {
+            isNewer = true;
+        } else if (cloudPercent > curPercent + 2.0 && cloudTs >= localTs) {
+            isNewer = true;
+        }
 
         if (isNewer) {
-            // Если сервер возвращает конкретную главу в допустимом диапазоне
-            if (cloudChapter >= 0 && cloudChapter < chapters.size()) {
+            // Если сервер возвращает конкретную главу в допустимом диапазоне (> 0)
+            if (cloudChapter > 0 && cloudChapter < chapters.size()) {
                 if (cloudChapter != currentChapterIndex || Math.abs(cloudPercent - curPercent) > 2.0) {
                     currentChapterIndex = cloudChapter;
                     currentPageIndex = Math.max(0, cloudProgress.getPageIndex());
                     loadChapter(currentChapterIndex, currentPageIndex);
+                    dbHelper.saveProgress(cloudProgress);
                     Toast.makeText(ReaderActivity.this, String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)", cloudPercent, currentChapterIndex + 1), Toast.LENGTH_SHORT).show();
                 }
             } else if (cloudPercent > 0 && cloudPercent < 99.0 && totalBookLength > 0) {
-                // Fallback по проценту, если номер главы не указан
+                // Если номер главы не указан (или 0 при высоком проценте) – маппинг по общей длине
                 if (chapterLengths == null || chapterLengths.length != chapters.size()) {
                     calculateChapterLengths();
                 }
@@ -1512,6 +1597,7 @@ public class ReaderActivity extends Activity {
                 if (matchedCh != currentChapterIndex || Math.abs(cloudPercent - curPercent) > 2.0) {
                     currentChapterIndex = matchedCh;
                     loadChapterWithFraction(currentChapterIndex, chapterFraction);
+                    dbHelper.saveProgress(cloudProgress);
                     Toast.makeText(ReaderActivity.this, String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)", cloudPercent, currentChapterIndex + 1), Toast.LENGTH_SHORT).show();
                 }
             }
@@ -1606,6 +1692,14 @@ public class ReaderActivity extends Activity {
                         currentPages = pages;
 
                         if (currentPages != null && !currentPages.isEmpty()) {
+                            if (chapterPageCounts != null && currentChapterIndex < chapterPageCounts.length) {
+                                chapterPageCounts[currentChapterIndex] = currentPages.size();
+                            }
+                            if (rawText != null && rawText.length() > 0) {
+                                avgCharsPerPage = (double) rawText.length() / (double) currentPages.size();
+                            }
+                            recalculateTotalBookPages();
+
                             if (targetPage == -999) {
                                 currentPageIndex = currentPages.size() - 1;
                             } else if (anchorFraction >= 0.0) {
@@ -1681,11 +1775,12 @@ public class ReaderActivity extends Activity {
     }
 
     private void renderCurrentPage() {
+        recalculateTotalBookPages();
         if (!currentPages.isEmpty() && currentPageIndex < currentPages.size()) {
             String title = (chapters != null && currentChapterIndex < chapters.size()) ? chapters.get(currentChapterIndex).getTitle() : bookTitle;
             double percent = calculateCurrentGlobalPercent();
             int totalChapters = chapters != null ? chapters.size() : 1;
-            readerCanvas.setPage(currentPages.get(currentPageIndex), currentPages.size(), title, currentChapterIndex, totalChapters, percent);
+            readerCanvas.setPage(currentPages.get(currentPageIndex), globalPageIndex, totalBookPages, title, currentChapterIndex, totalChapters, percent);
         }
 
         if (!hasPerformedInitialRefresh) {
@@ -1735,6 +1830,7 @@ public class ReaderActivity extends Activity {
 
     private void saveProgress() {
         double percent = calculateCurrentGlobalPercent();
+        long now = System.currentTimeMillis();
 
         ReadingProgress progress = new ReadingProgress(
                 bookUuid,
@@ -1742,9 +1838,13 @@ public class ReaderActivity extends Activity {
                 currentChapterIndex,
                 0,
                 currentPageIndex,
-                System.currentTimeMillis()
+                now
         );
 
+        // Мгновенно сохраняем в локальную SQLite базу читалки
+        dbHelper.saveProgress(progress);
+
+        // Отправка в облако Яндекса
         syncManager.saveAndSyncProgress(progress, true, null);
     }
 

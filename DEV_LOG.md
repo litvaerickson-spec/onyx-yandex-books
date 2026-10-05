@@ -418,3 +418,24 @@
       - `AndroidManifest.xml` & `build.gradle`: `versionCode="19"`, `versionName="1.3.6"`.
       - Успешно пройдены все 11 тестов `verify_core_logic.py`.
       - Собран и подписан **`yandex-books-lite-v1.3.6.apk`** (2.2 МБ).
+
+  - **Версия 1.3.7 (Release: 05.10.2026)**:
+    - **Полное исправление сохранения прогресса в памяти и двусторонней синхронизации**:
+      - В `YandexBooksApiClient`: реализован статический парсинг временных меток ISO-8601 (`parseIsoTimestamp`) для полей `updated_at`, `last_read_at`, `timestamp`.
+      - Ликвидирована подмена отсутствующего серверного времени на `System.currentTimeMillis()`, что гарантирует, что карточки книг из библиотеки/каталога больше никогда не затирают реальный локальный прогресс чтения и не сбрасывают номер главы в 0.
+      - В `DatabaseHelper`: внедрена строгая валидация новизны облачных данных (`cloud.timestamp > local.timestamp`) и защита локального номера главы от сброса в 0 при пустых серверных данных. В `syncInitialCloudProgress` исключена перезапись локальной таблицы `progress` нулевыми данными.
+      - В `ReaderActivity`: реализовано немедленное синхронное сохранение в SQLite `dbHelper.saveProgress(progress)` перед отправкой сетевого запроса. В `applyCloudProgressIfNewer` запрещено перебивание позиции во время активного чтения (`!isInitialLoading`).
+      - В `sendReadingProgress` отправляются все поддерживаемые поля API (`percent`, `chapter_index`, `paragraph_index`, `point`, `timestamp`) с fallback на эндпоинт `/books/{uuid}/reading_position`.
+    - **Верхний колонтитул (Header) с названием главы**:
+      - В `TypographyConfig` выделена область верхнего колонтитула (`headerReservedHeightPx = 28`).
+      - В `TextPaginator` полезная высота страницы уменьшена на высоту верхнего колонтитула (`screenHeight - paddingTop - headerReservedHeight - paddingBottom - footerReservedHeight`), гарантируя отсутствие наезжания текста на название главы.
+      - В `ReaderCanvasView` добавлена кисть `headerPaint` (Sans-Serif, 11sp, антиалиасинг). Название главы вынесено в верхний колонтитул с автоматическим усечением многоточием.
+    - **Сквозная нумерация страниц книги от общего объема**:
+      - В `ReaderCanvasView` и `ReaderActivity` ликвидирована локальная нумерация по отдельным главам (`1/7`).
+      - Реализован расчет и кэширование общего числа страниц книги (`totalBookPages`, `globalPageIndex`, `chapterPageCounts`).
+      - В нижнем колонтитуле (Footer) теперь отображается единый сквозной счетчик: `Стр. X из Y (Z%)`.
+      - Ползунок (SeekBar) и счетчик страниц в меню ридера переведены на сквозную нумерацию по всей книге.
+    - **Сборка и верификация**:
+      - `AndroidManifest.xml` & `build.gradle`: `versionCode="20"`, `versionName="1.3.7"`.
+      - Успешно пройдены все 14 тестов `verify_core_logic.py`.
+      - Собран и подписан **`yandex-books-lite-v1.3.7.apk`** (2.2 МБ).

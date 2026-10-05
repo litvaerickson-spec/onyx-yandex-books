@@ -17,8 +17,12 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
+import java.util.TimeZone;
 
 import okhttp3.Call;
 import okhttp3.Callback;
@@ -285,13 +289,20 @@ public class YandexBooksApiClient {
             }
         }
 
-        // 6. Поиск временной метки
+        // 6. Поиск временной метки (long timestamp или ISO-8601 строка)
         for (JSONObject obj : allCandidates) {
             if (obj == null) continue;
             long ts = 0L;
-            if (obj.has("timestamp")) ts = obj.optLong("timestamp", 0L);
-            else if (obj.has("updated_at")) ts = obj.optLong("updated_at", 0L);
-            else if (obj.has("last_read_at")) ts = obj.optLong("last_read_at", 0L);
+            if (obj.has("timestamp")) {
+                ts = obj.optLong("timestamp", 0L);
+                if (ts == 0L) ts = parseIsoTimestamp(obj.optString("timestamp", null));
+            } else if (obj.has("updated_at")) {
+                ts = obj.optLong("updated_at", 0L);
+                if (ts == 0L) ts = parseIsoTimestamp(obj.optString("updated_at", null));
+            } else if (obj.has("last_read_at")) {
+                ts = obj.optLong("last_read_at", 0L);
+                if (ts == 0L) ts = parseIsoTimestamp(obj.optString("last_read_at", null));
+            }
 
             if (ts > 0) {
                 if (ts < 10000000000L) ts *= 1000L;
@@ -299,8 +310,10 @@ public class YandexBooksApiClient {
                 break;
             }
         }
+        // ВАЖНО: Если сервер не прислал timestamp, оставляем 0L, а НЕ System.currentTimeMillis()!
+        // Иначе чужая карточка со свежим текущим временем затрет реальный локальный прогресс чтения.
         if (result.timestamp <= 0) {
-            result.timestamp = System.currentTimeMillis();
+            result.timestamp = 0L;
         }
 
         // 7. Защита от искажения 100%: если книга читается (reading) и глава 0, процент не может быть 100%
@@ -471,6 +484,34 @@ public class YandexBooksApiClient {
             if (!fn.isEmpty()) return fn;
         }
         return "";
+    }
+
+    private static long parseIsoTimestamp(String iso) {
+        if (iso == null || iso.trim().isEmpty()) return 0L;
+        try {
+            String clean = iso.trim();
+            SimpleDateFormat sdf;
+            if (clean.contains(".")) {
+                sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+            } else {
+                sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
+            }
+            sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
+            Date d = sdf.parse(clean);
+            return (d != null) ? d.getTime() : 0L;
+        } catch (Exception e) {
+            try {
+                String fallbackStr = iso.replace("Z", "+0000");
+                if (fallbackStr.length() > 6 && fallbackStr.charAt(fallbackStr.length() - 3) == ':') {
+                    fallbackStr = fallbackStr.substring(0, fallbackStr.length() - 3) + fallbackStr.substring(fallbackStr.length() - 2);
+                }
+                SimpleDateFormat sdf2 = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.US);
+                Date d = sdf2.parse(fallbackStr);
+                return (d != null) ? d.getTime() : 0L;
+            } catch (Exception ignored) {
+                return 0L;
+            }
+        }
     }
 
     private boolean isValidAuthor(String text) {
@@ -729,12 +770,17 @@ public class YandexBooksApiClient {
         String endpoint = BASE_URL + "/books/" + progress.getBookUuid() + "/progress";
 
         try {
-            double normalizedFraction = Math.min(1.0, Math.max(0.0, progress.getPercent() / 100.0));
+            double rawPercent = progress.getPercent();
+            double normalizedFraction = Math.min(1.0, Math.max(0.0, rawPercent / 100.0));
             JSONObject bodyJson = new JSONObject();
-            bodyJson.put("percent", normalizedFraction);
+            bodyJson.put("percent", rawPercent);
             bodyJson.put("reading_progress", normalizedFraction);
+            bodyJson.put("percentage", rawPercent);
             bodyJson.put("chapter_index", progress.getChapterIndex());
+            bodyJson.put("chapter", progress.getChapterIndex());
             bodyJson.put("paragraph_index", progress.getParagraphIndex());
+            bodyJson.put("paragraph", progress.getParagraphIndex());
+            bodyJson.put("point", progress.getParagraphIndex());
             bodyJson.put("timestamp", progress.getTimestamp());
 
             JSONObject posObj = new JSONObject();
@@ -742,7 +788,9 @@ public class YandexBooksApiClient {
             posObj.put("chapter_index", progress.getChapterIndex());
             posObj.put("paragraph", progress.getParagraphIndex());
             posObj.put("paragraph_index", progress.getParagraphIndex());
-            posObj.put("percent", normalizedFraction);
+            posObj.put("point", progress.getParagraphIndex());
+            posObj.put("percent", rawPercent);
+            posObj.put("reading_progress", normalizedFraction);
             posObj.put("timestamp", progress.getTimestamp());
             bodyJson.put("position", posObj);
             bodyJson.put("reading_position", posObj);
@@ -773,12 +821,54 @@ public class YandexBooksApiClient {
     private void sendReadingProgressFallback(final ReadingProgress progress, final ApiCallback<Boolean> callback) {
         String endpoint = BASE_URL + "/profile/library_cards/" + progress.getBookUuid() + "/reading_position";
         try {
-            double normalizedFraction = Math.min(1.0, Math.max(0.0, progress.getPercent() / 100.0));
+            double rawPercent = progress.getPercent();
+            double normalizedFraction = Math.min(1.0, Math.max(0.0, rawPercent / 100.0));
             JSONObject bodyJson = new JSONObject();
-            bodyJson.put("percent", normalizedFraction);
+            bodyJson.put("percent", rawPercent);
             bodyJson.put("reading_progress", normalizedFraction);
+            bodyJson.put("percentage", rawPercent);
             bodyJson.put("chapter_index", progress.getChapterIndex());
+            bodyJson.put("chapter", progress.getChapterIndex());
             bodyJson.put("paragraph_index", progress.getParagraphIndex());
+            bodyJson.put("point", progress.getParagraphIndex());
+            bodyJson.put("timestamp", progress.getTimestamp());
+
+            RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString());
+            Request request = createAuthRequestBuilder(endpoint).post(body).build();
+
+            httpClient.newCall(request).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    sendReadingProgressFallbackBooks(progress, callback);
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) {
+                    if (response.isSuccessful()) {
+                        postSuccess(callback, true);
+                    } else {
+                        sendReadingProgressFallbackBooks(progress, callback);
+                    }
+                }
+            });
+        } catch (Exception e) {
+            sendReadingProgressFallbackBooks(progress, callback);
+        }
+    }
+
+    private void sendReadingProgressFallbackBooks(final ReadingProgress progress, final ApiCallback<Boolean> callback) {
+        String endpoint = BASE_URL + "/books/" + progress.getBookUuid() + "/reading_position";
+        try {
+            double rawPercent = progress.getPercent();
+            double normalizedFraction = Math.min(1.0, Math.max(0.0, rawPercent / 100.0));
+            JSONObject bodyJson = new JSONObject();
+            bodyJson.put("percent", rawPercent);
+            bodyJson.put("reading_progress", normalizedFraction);
+            bodyJson.put("percentage", rawPercent);
+            bodyJson.put("chapter_index", progress.getChapterIndex());
+            bodyJson.put("chapter", progress.getChapterIndex());
+            bodyJson.put("paragraph_index", progress.getParagraphIndex());
+            bodyJson.put("point", progress.getParagraphIndex());
             bodyJson.put("timestamp", progress.getTimestamp());
 
             RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString());

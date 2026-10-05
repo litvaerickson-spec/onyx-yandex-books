@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.3.7] - 2026-10-05
+
+### Bug Fixes & Improvements
+- **Полное исправление сохранения прогресса в памяти и двусторонней синхронизации**:
+  - В `YandexBooksApiClient`: внедрен корректный парсер временных меток ISO-8601 (`updated_at`, `last_read_at`, `timestamp`) в миллисекунды.
+  - **Устранение затирания прогресса**: ликвидирована подмена отсутствующего серверного времени на `System.currentTimeMillis()`. Теперь карточки каталога и библиотеки без точного `timestamp` никогда не считаются «свежее» реального чтения читателя и не сбрасывают прочитанные главы в 0.
+  - В `DatabaseHelper`: добавлена строгая проверка новизны облачных данных (`cloud.timestamp > local.timestamp`) и защита локального номера главы от сброса в 0. В `syncInitialCloudProgress` заблокировано затирание локальной таблицы `progress` нулевыми данными.
+  - В `ReaderActivity`: реализована синхронная немедленная запись позиции в локальный SQLite `dbHelper.saveProgress(progress)` перед сетевыми вызовами, гарантирующая сохранность при выходе из ридера или отключении питания. В `applyCloudProgressIfNewer` заблокировано перебивание текущего чтения в процессе чтения (`!isInitialLoading`).
+  - Обеспечена отправка на сервер всех поддерживаемых API полей прогресса (`percent`, `chapter_index`, `paragraph_index`, `point`, `timestamp`) с fallback на эндпоинт `/books/{uuid}/reading_position`.
+- **Верхний колонтитул (Header) с названием главы**:
+  - В `TypographyConfig` выделена область верхнего колонтитула (`headerReservedHeightPx = 28`).
+  - В `TextPaginator` полезная высота страницы уменьшена на высоту верхнего колонтитула, гарантируя отсутствие наезжания текста на заголовок.
+  - В `ReaderCanvasView` добавлена кисть `headerPaint` (Sans-Serif, 11sp). Название главы вынесено в верхний колонтитул страницы с автоматическим усечением многоточием при превышении ширины экрана.
+- **Сквозная нумерация страниц книги от общего объема**:
+  - Ликвидирована локальная нумерация по отдельным главам (ранее `1/7`).
+  - В `ReaderActivity` реализован расчет и кэширование общего количества страниц книги (`totalBookPages`, `globalPageIndex`, `chapterPageCounts`).
+  - В нижнем колонтитуле (Footer) теперь отображается единый сквозной счетчик: `Стр. X из Y (Z%)`.
+  - Ползунок (SeekBar) и счетчик страниц в меню управления ридера переведены на сквозную нумерацию по всей книге.
+
 ## [v1.3.6] - 2026-10-05
 
 ### Bug Fixes & Improvements

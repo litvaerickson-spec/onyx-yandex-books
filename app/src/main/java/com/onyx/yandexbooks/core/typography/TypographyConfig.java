@@ -19,6 +19,9 @@ public class TypographyConfig implements Serializable {
     private int paddingTopPx = 14;
     private int paddingBottomPx = 20;
 
+    // Резерв высоты под верхний колонтитул (название текущей главы)
+    private int headerReservedHeightPx = 28;
+
     // Резерв высоты под нижний колонтитул (номер страницы, глава, глобальный процент),
     // исключающий физическое наложение текста книги на строку статуса
     private int footerReservedHeightPx = 44;
@@ -54,6 +57,9 @@ public class TypographyConfig implements Serializable {
 
     public int getPaddingBottomPx() { return paddingBottomPx; }
     public void setPaddingBottomPx(int paddingBottomPx) { this.paddingBottomPx = paddingBottomPx; }
+
+    public int getHeaderReservedHeightPx() { return headerReservedHeightPx; }
+    public void setHeaderReservedHeightPx(int headerReservedHeightPx) { this.headerReservedHeightPx = headerReservedHeightPx; }
 
     public int getFooterReservedHeightPx() { return footerReservedHeightPx; }
     public void setFooterReservedHeightPx(int footerReservedHeightPx) { this.footerReservedHeightPx = footerReservedHeightPx; }

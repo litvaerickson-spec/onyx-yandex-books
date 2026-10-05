@@ -158,38 +158,34 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         int effectiveChapter = book.getCurrentChapterIndex();
         int effectiveParagraph = book.getCurrentParagraphIndex();
 
-        // 1. Проверяем локальную БД: не перезаписываем уже прочитанное меньшим прогрессом,
-        // НО если локальный процент испорчен багом (100% при 0 главе),
-        // или если серверный timestamp новее — доверяем серверу!
+        double bestLocalPercent = 0.0;
+        long bestLocalTs = 0L;
+        int bestLocalCh = 0;
+        int bestLocalPar = 0;
+        boolean hasLocalRecord = false;
+
         try {
+            // 1. Проверяем локальную запись в таблице books
             Cursor c = db.rawQuery("SELECT percent, is_downloaded, last_read_timestamp, current_chapter, current_paragraph FROM books WHERE uuid = ?", new String[]{book.getUuid()});
             if (c != null) {
                 if (c.moveToFirst()) {
+                    hasLocalRecord = true;
                     double localPercent = c.getDouble(0);
                     int localDown = c.getInt(1);
                     long localTs = c.getLong(2);
                     int localCh = c.getInt(3);
                     int localPar = c.getInt(4);
 
-                    boolean localCorrupted = (localPercent >= 99.0 && localCh == 0);
-                    boolean serverIsNewer = (effectiveTimestamp > localTs && effectiveTimestamp > 0);
-
                     if (localDown == 1) {
                         effectiveDownloaded = true;
                     }
 
-                    if (!localCorrupted && !serverIsNewer && localPercent > effectivePercent) {
-                        effectivePercent = localPercent;
-                        effectiveChapter = localCh;
-                        effectiveParagraph = localPar;
-                    } else if (serverIsNewer) {
-                        effectivePercent = book.getPercent();
-                        effectiveChapter = book.getCurrentChapterIndex();
-                        effectiveParagraph = book.getCurrentParagraphIndex();
-                    }
-
-                    if (localTs > effectiveTimestamp && !localCorrupted) {
-                        effectiveTimestamp = localTs;
+                    boolean localCorrupted = (localPercent >= 99.0 && localCh == 0);
+                    if (!localCorrupted) {
+                        bestLocalPercent = localPercent;
+                        bestLocalTs = localTs;
+                        bestLocalCh = localCh;
+                        bestLocalPar = localPar;
                     }
                 }
                 c.close();
@@ -199,26 +195,56 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             Cursor pc = db.rawQuery("SELECT percent, timestamp, chapter_index, paragraph_index FROM progress WHERE book_uuid = ?", new String[]{book.getUuid()});
             if (pc != null) {
                 if (pc.moveToFirst()) {
+                    hasLocalRecord = true;
                     double progPercent = pc.getDouble(0);
                     long progTs = pc.getLong(1);
                     int progCh = pc.getInt(2);
                     int progPar = pc.getInt(3);
 
                     boolean progCorrupted = (progPercent >= 99.0 && progCh == 0);
-                    boolean serverIsNewer = (effectiveTimestamp > progTs && effectiveTimestamp > 0);
-
-                    if (!progCorrupted && !serverIsNewer && progPercent > effectivePercent) {
-                        effectivePercent = progPercent;
-                        effectiveChapter = progCh;
-                        effectiveParagraph = progPar;
-                    }
-                    if (progTs > effectiveTimestamp && !progCorrupted) {
-                        effectiveTimestamp = progTs;
+                    if (!progCorrupted) {
+                        if (progTs > bestLocalTs || progPercent > bestLocalPercent) {
+                            bestLocalPercent = Math.max(bestLocalPercent, progPercent);
+                            bestLocalTs = Math.max(bestLocalTs, progTs);
+                            if (progCh > 0 || (progCh == 0 && bestLocalCh == 0)) {
+                                bestLocalCh = progCh;
+                                bestLocalPar = progPar;
+                            }
+                        }
                     }
                 }
                 pc.close();
             }
         } catch (Exception ignored) {}
+
+        boolean hasLocalProgress = hasLocalRecord && (bestLocalPercent > 0.0 || bestLocalCh > 0 || bestLocalTs > 0);
+
+        if (hasLocalProgress) {
+            // Если на сервере есть реальный валидный таймштамп, он новее локального и прочитано больше:
+            boolean serverIsNewerAndFurther = (effectiveTimestamp > bestLocalTs && effectiveTimestamp > 0 && book.getPercent() > bestLocalPercent + 0.5);
+
+            if (serverIsNewerAndFurther) {
+                effectivePercent = book.getPercent();
+                if (book.getCurrentChapterIndex() > 0) {
+                    effectiveChapter = book.getCurrentChapterIndex();
+                    effectiveParagraph = book.getCurrentParagraphIndex();
+                } else {
+                    effectiveChapter = bestLocalCh;
+                    effectiveParagraph = bestLocalPar;
+                }
+            } else {
+                // Локальный прогресс читалки сохраняется и не затирается!
+                effectivePercent = bestLocalPercent;
+                effectiveChapter = bestLocalCh;
+                effectiveParagraph = bestLocalPar;
+                effectiveTimestamp = Math.max(bestLocalTs, effectiveTimestamp);
+            }
+        } else {
+            // Локального прогресса нет - защита от ложного 100% при 0 главе
+            if (effectivePercent >= 99.0 && effectiveChapter == 0) {
+                effectivePercent = 0.0;
+            }
+        }
 
         ContentValues cv = new ContentValues();
         cv.put("uuid", book.getUuid());
@@ -256,11 +282,9 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     boolean existingCorrupted = (existingPercent >= 99.0 && existingChapter == 0);
                     if (existingCorrupted) {
                         shouldUpdate = true;
-                    } else if (book.getLastReadTimestamp() > existingTs && book.getLastReadTimestamp() > 0) {
+                    } else if (book.getLastReadTimestamp() > existingTs && book.getLastReadTimestamp() > 0 && book.getPercent() >= existingPercent) {
                         shouldUpdate = true;
-                    } else if (existingPercent > book.getPercent()) {
-                        shouldUpdate = false;
-                    } else if (existingPercent == book.getPercent() && existingChapter >= book.getCurrentChapterIndex()) {
+                    } else if (existingPercent > book.getPercent() || existingChapter > book.getCurrentChapterIndex() || existingTs >= book.getLastReadTimestamp()) {
                         shouldUpdate = false;
                     }
                 }
