@@ -171,33 +171,42 @@ public class YandexBooksApiClient {
 
     public static ParsedProgress extractProgress(JSONObject card, JSONObject bObj) {
         ParsedProgress result = new ParsedProgress();
-        JSONObject[] candidates = new JSONObject[] {
+        if (card == null && bObj == null) return result;
+
+        String state = card != null ? card.optString("state", "") : "";
+
+        // 1. Приоритетные вложенные объекты позиции чтения (как в мобильном приложении на телефоне)
+        JSONObject[] positionObjects = new JSONObject[] {
             card != null ? card.optJSONObject("last_reading_position") : null,
             card != null ? card.optJSONObject("reading_position") : null,
             card != null ? card.optJSONObject("position") : null,
-            card != null ? card.optJSONObject("progress") : null,
-            card != null ? card.optJSONObject("reading_status") : null,
             bObj != null ? bObj.optJSONObject("last_reading_position") : null,
             bObj != null ? bObj.optJSONObject("reading_position") : null,
-            bObj != null ? bObj.optJSONObject("position") : null,
-            bObj != null ? bObj.optJSONObject("progress") : null,
-            card,
-            bObj
+            bObj != null ? bObj.optJSONObject("position") : null
         };
 
-        // 1. Поиск процента прочитанного
-        for (JSONObject obj : candidates) {
+        // 1. Поиск процента прочитанного в специализированных объектах позиции
+        for (JSONObject obj : positionObjects) {
             if (obj == null) continue;
             double p = -1.0;
             if (obj.has("percent")) p = obj.optDouble("percent", -1.0);
             else if (obj.has("reading_progress")) p = obj.optDouble("reading_progress", -1.0);
-            else if (obj.has("progress")) p = obj.optDouble("progress", -1.0);
             else if (obj.has("progress_percent")) p = obj.optDouble("progress_percent", -1.0);
             else if (obj.has("percentage")) p = obj.optDouble("percentage", -1.0);
+            else if (obj.has("progress")) {
+                p = obj.optDouble("progress", -1.0);
+            }
 
             if (p > 0.0) {
-                if (p <= 1.0) {
+                if (p < 1.0) {
                     result.percent = p * 100.0;
+                } else if (p == 1.0) {
+                    // 1.0: если книга явно прочитана, то 100%, иначе 1.0%
+                    if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state) || "completed".equalsIgnoreCase(state) || "done".equalsIgnoreCase(state)) {
+                        result.percent = 100.0;
+                    } else {
+                        result.percent = 1.0;
+                    }
                 } else {
                     result.percent = Math.min(100.0, p);
                 }
@@ -205,8 +214,49 @@ public class YandexBooksApiClient {
             }
         }
 
-        // 2. Поиск индекса главы
-        for (JSONObject obj : candidates) {
+        // 2. Если во вложенных объектах процент не найден, проверяем свойства верхнего уровня (кроме card.progress, который является enum статусом)
+        if (result.percent <= 0.0) {
+            JSONObject[] rootObjects = new JSONObject[] { card, bObj };
+            for (JSONObject obj : rootObjects) {
+                if (obj == null) continue;
+                double p = -1.0;
+                if (obj.has("percent")) p = obj.optDouble("percent", -1.0);
+                else if (obj.has("reading_progress")) p = obj.optDouble("reading_progress", -1.0);
+                else if (obj.has("progress_percent")) p = obj.optDouble("progress_percent", -1.0);
+                else if (obj.has("percentage")) p = obj.optDouble("percentage", -1.0);
+
+                if (p > 0.0) {
+                    if (p < 1.0) {
+                        result.percent = p * 100.0;
+                    } else if (p == 1.0) {
+                        if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state) || "completed".equalsIgnoreCase(state) || "done".equalsIgnoreCase(state)) {
+                            result.percent = 100.0;
+                        } else {
+                            result.percent = 1.0;
+                        }
+                    } else {
+                        result.percent = Math.min(100.0, p);
+                    }
+                    break;
+                }
+            }
+        }
+
+        // 3. Статус завершенности книги
+        if (result.percent <= 0.0) {
+            if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state) || "completed".equalsIgnoreCase(state) || "done".equalsIgnoreCase(state)) {
+                result.percent = 100.0;
+            }
+        }
+
+        // 4. Поиск индекса главы (сначала в объектах позиции, затем в корневых объектах)
+        JSONObject[] allCandidates = new JSONObject[] {
+            positionObjects[0], positionObjects[1], positionObjects[2],
+            positionObjects[3], positionObjects[4], positionObjects[5],
+            card, bObj
+        };
+
+        for (JSONObject obj : allCandidates) {
             if (obj == null) continue;
             int ch = -1;
             if (obj.has("chapter_index")) ch = obj.optInt("chapter_index", -1);
@@ -220,8 +270,8 @@ public class YandexBooksApiClient {
             }
         }
 
-        // 3. Поиск параграфа / смещения
-        for (JSONObject obj : candidates) {
+        // 5. Поиск параграфа / смещения
+        for (JSONObject obj : allCandidates) {
             if (obj == null) continue;
             int par = -1;
             if (obj.has("paragraph_index")) par = obj.optInt("paragraph_index", -1);
@@ -235,8 +285,8 @@ public class YandexBooksApiClient {
             }
         }
 
-        // 4. Поиск временной метки
-        for (JSONObject obj : candidates) {
+        // 6. Поиск временной метки
+        for (JSONObject obj : allCandidates) {
             if (obj == null) continue;
             long ts = 0L;
             if (obj.has("timestamp")) ts = obj.optLong("timestamp", 0L);
@@ -251,6 +301,11 @@ public class YandexBooksApiClient {
         }
         if (result.timestamp <= 0) {
             result.timestamp = System.currentTimeMillis();
+        }
+
+        // 7. Защита от искажения 100%: если книга читается (reading) и глава 0, процент не может быть 100%
+        if (result.percent >= 99.0 && "reading".equalsIgnoreCase(state) && result.chapterIndex == 0) {
+            result.percent = 0.0;
         }
 
         return result;
@@ -296,7 +351,7 @@ public class YandexBooksApiClient {
             mappedShelf = "done";
         } else {
             // Если state неизвестен, классифицируем по прогрессу
-            if (pr.percent >= 99.0) {
+            if (pr.percent >= 99.0 && pr.chapterIndex > 0) {
                 mappedShelf = "done";
             } else if (pr.percent > 0.0) {
                 mappedShelf = "reading";

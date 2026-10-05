@@ -165,38 +165,61 @@ def test_cloud_reading_progress_extraction():
     print("--- [ТЕСТ 5] Извлечение и нормализация прогресса чтения Bookmate API ---")
 
     def extract_progress(card, b_obj):
-        candidates = [
+        state = card.get("state", "") if card else ""
+        position_objects = [
             card.get("last_reading_position") if card else None,
             card.get("reading_position") if card else None,
             card.get("position") if card else None,
-            card.get("progress") if card else None,
-            card.get("reading_status") if card else None,
             b_obj.get("last_reading_position") if b_obj else None,
             b_obj.get("reading_position") if b_obj else None,
             b_obj.get("position") if b_obj else None,
-            b_obj.get("progress") if b_obj else None,
-            card,
-            b_obj
         ]
 
         percent = 0.0
-        for obj in candidates:
+        # 1. Поиск процента в объектах позиции
+        for obj in position_objects:
             if not obj or not isinstance(obj, dict):
                 continue
-            for key in ["percent", "reading_progress", "progress", "progress_percent", "percentage"]:
+            for key in ["percent", "reading_progress", "progress_percent", "percentage", "progress"]:
                 if key in obj:
                     val = float(obj[key])
                     if val > 0.0:
-                        if val <= 1.0:
+                        if val < 1.0:
                             percent = val * 100.0
+                        elif val == 1.0:
+                            percent = 100.0 if state.lower() in ["finished", "read", "completed", "done"] else 1.0
                         else:
                             percent = min(100.0, val)
                         break
             if percent > 0.0:
                 break
 
+        # 2. Если не найден, проверяем свойства верхнего уровня (кроме card.progress, который является статусом enum)
+        if percent <= 0.0:
+            root_objects = [card, b_obj]
+            for obj in root_objects:
+                if not obj or not isinstance(obj, dict):
+                    continue
+                for key in ["percent", "reading_progress", "progress_percent", "percentage"]:
+                    if key in obj:
+                        val = float(obj[key])
+                        if val > 0.0:
+                            if val < 1.0:
+                                percent = val * 100.0
+                            elif val == 1.0:
+                                percent = 100.0 if state.lower() in ["finished", "read", "completed", "done"] else 1.0
+                            else:
+                                percent = min(100.0, val)
+                            break
+                if percent > 0.0:
+                    break
+
+        if percent <= 0.0 and state.lower() in ["finished", "read", "completed", "done"]:
+            percent = 100.0
+
+        all_candidates = position_objects + [card, b_obj]
         chapter = 0
-        for obj in candidates:
+        for obj in all_candidates:
             if not obj or not isinstance(obj, dict):
                 continue
             for key in ["chapter_index", "chapter", "chap_index", "chapter_number"]:
@@ -205,6 +228,10 @@ def test_cloud_reading_progress_extraction():
                     break
             if chapter > 0:
                 break
+
+        # Защита от искажения 100%: если книга читается и глава 0
+        if percent >= 99.0 and state.lower() == "reading" and chapter == 0:
+            percent = 0.0
 
         return percent, chapter
 
@@ -235,7 +262,27 @@ def test_cloud_reading_progress_extraction():
     assert abs(p3 - 25.0) < 0.001, f"Ожидалось 25.0%, получено {p3}"
     assert ch3 == 5, f"Ожидалась глава 5, получено {ch3}"
 
-    print("✅ Тест извлечения прогресса чтения Bookmate успешно пройден!\n")
+    # Кейс 4 (КРИТИЧЕСКИЙ БАГФИКС): карточка Bookmate с progress: 1 и state: reading
+    # Не должна превращаться в 100%! Должна быть 0.0%
+    card4 = {
+        "uuid": "c4",
+        "state": "reading",
+        "progress": 1
+    }
+    p4, ch4 = extract_progress(card4, None)
+    assert p4 == 0.0, f"КРИТИЧЕСКАЯ ОШИБКА: progress: 1 превратился в {p4}% вместо 0.0%!"
+    assert ch4 == 0, f"Ожидалась глава 0, получено {ch4}"
+
+    # Кейс 5: Завершенная книга (finished)
+    card5 = {
+        "uuid": "c5",
+        "state": "finished",
+        "progress": 2
+    }
+    p5, ch5 = extract_progress(card5, None)
+    assert p5 == 100.0, f"Завершенная книга должна иметь 100%, получено {p5}%"
+
+    print("✅ Тест извлечения прогресса чтения Bookmate и защиты от false-100% успешно пройден!\n")
 
 
 def test_ota_update_semver_and_github_contract():

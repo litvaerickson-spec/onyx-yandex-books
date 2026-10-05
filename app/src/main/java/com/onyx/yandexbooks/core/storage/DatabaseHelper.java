@@ -19,7 +19,7 @@ import java.util.List;
 public class DatabaseHelper extends SQLiteOpenHelper {
 
     private static final String DATABASE_NAME = "yandex_books_lite.db";
-    private static final int DATABASE_VERSION = 3;
+    private static final int DATABASE_VERSION = 4;
 
     private static DatabaseHelper instance;
 
@@ -37,6 +37,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     @Override
     public void onCreate(SQLiteDatabase db) {
         createTables(db);
+        ensureBookmarksTable(db);
     }
 
     private void createTables(SQLiteDatabase db) {
@@ -94,20 +95,34 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 ")");
 
         // Закладки пользователя
-        db.execSQL("CREATE TABLE IF NOT EXISTS bookmarks (" +
-                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
-                "book_uuid TEXT," +
-                "chapter_index INTEGER," +
-                "page_index INTEGER," +
-                "title TEXT," +
-                "snippet TEXT," +
-                "timestamp INTEGER" +
-                ")");
+        ensureBookmarksTable(db);
+    }
+
+    private void ensureBookmarksTable(SQLiteDatabase db) {
+        try {
+            db.execSQL("CREATE TABLE IF NOT EXISTS bookmarks (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "book_uuid TEXT," +
+                    "chapter_index INTEGER," +
+                    "page_index INTEGER," +
+                    "title TEXT," +
+                    "snippet TEXT," +
+                    "timestamp INTEGER" +
+                    ")");
+        } catch (Exception ignored) {}
     }
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         createTables(db);
+        ensureBookmarksTable(db);
+        try {
+            // Очищаем искаженный багом progress:1 прогресс (100% при 0 главе или на полках "reading"/"to_read")
+            db.execSQL("UPDATE books SET percent = 0.0, current_chapter = 0, current_paragraph = 0 " +
+                    "WHERE percent >= 99.0 AND (shelf_type = 'reading' OR shelf_type = 'to_read' OR current_chapter = 0)");
+            db.execSQL("UPDATE progress SET percent = 0.0, chapter_index = 0, paragraph_index = 0, page_index = 0 " +
+                    "WHERE percent >= 99.0 AND chapter_index = 0");
+        } catch (Exception ignored) {}
     }
 
     public synchronized void saveBooks(List<Book> books, String shelfType) {
@@ -143,7 +158,9 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         int effectiveChapter = book.getCurrentChapterIndex();
         int effectiveParagraph = book.getCurrentParagraphIndex();
 
-        // 1. Проверяем локальную БД: не перезаписываем уже прочитанное меньшим прогрессом
+        // 1. Проверяем локальную БД: не перезаписываем уже прочитанное меньшим прогрессом,
+        // НО если локальный процент испорчен багом (100% при 0 главе),
+        // или если серверный timestamp новее — доверяем серверу!
         try {
             Cursor c = db.rawQuery("SELECT percent, is_downloaded, last_read_timestamp, current_chapter, current_paragraph FROM books WHERE uuid = ?", new String[]{book.getUuid()});
             if (c != null) {
@@ -154,15 +171,24 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     int localCh = c.getInt(3);
                     int localPar = c.getInt(4);
 
-                    if (localPercent > effectivePercent) {
-                        effectivePercent = localPercent;
-                        effectiveChapter = localCh;
-                        effectiveParagraph = localPar;
-                    }
+                    boolean localCorrupted = (localPercent >= 99.0 && localCh == 0);
+                    boolean serverIsNewer = (effectiveTimestamp > localTs && effectiveTimestamp > 0);
+
                     if (localDown == 1) {
                         effectiveDownloaded = true;
                     }
-                    if (localTs > effectiveTimestamp) {
+
+                    if (!localCorrupted && !serverIsNewer && localPercent > effectivePercent) {
+                        effectivePercent = localPercent;
+                        effectiveChapter = localCh;
+                        effectiveParagraph = localPar;
+                    } else if (serverIsNewer) {
+                        effectivePercent = book.getPercent();
+                        effectiveChapter = book.getCurrentChapterIndex();
+                        effectiveParagraph = book.getCurrentParagraphIndex();
+                    }
+
+                    if (localTs > effectiveTimestamp && !localCorrupted) {
                         effectiveTimestamp = localTs;
                     }
                 }
@@ -178,12 +204,15 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     int progCh = pc.getInt(2);
                     int progPar = pc.getInt(3);
 
-                    if (progPercent > effectivePercent) {
+                    boolean progCorrupted = (progPercent >= 99.0 && progCh == 0);
+                    boolean serverIsNewer = (effectiveTimestamp > progTs && effectiveTimestamp > 0);
+
+                    if (!progCorrupted && !serverIsNewer && progPercent > effectivePercent) {
                         effectivePercent = progPercent;
                         effectiveChapter = progCh;
                         effectiveParagraph = progPar;
                     }
-                    if (progTs > effectiveTimestamp) {
+                    if (progTs > effectiveTimestamp && !progCorrupted) {
                         effectiveTimestamp = progTs;
                     }
                 }
@@ -221,8 +250,15 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             if (c != null) {
                 if (c.moveToFirst()) {
                     double existingPercent = c.getDouble(0);
+                    long existingTs = c.getLong(1);
                     int existingChapter = c.getInt(2);
-                    if (existingPercent > book.getPercent()) {
+
+                    boolean existingCorrupted = (existingPercent >= 99.0 && existingChapter == 0);
+                    if (existingCorrupted) {
+                        shouldUpdate = true;
+                    } else if (book.getLastReadTimestamp() > existingTs && book.getLastReadTimestamp() > 0) {
+                        shouldUpdate = true;
+                    } else if (existingPercent > book.getPercent()) {
                         shouldUpdate = false;
                     } else if (existingPercent == book.getPercent() && existingChapter >= book.getCurrentChapterIndex()) {
                         shouldUpdate = false;
@@ -444,40 +480,56 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     public synchronized long addBookmark(String bookUuid, int chapterIndex, int pageIndex, String title, String snippet) {
-        SQLiteDatabase db = getWritableDatabase();
-        ContentValues cv = new ContentValues();
-        cv.put("book_uuid", bookUuid);
-        cv.put("chapter_index", chapterIndex);
-        cv.put("page_index", pageIndex);
-        cv.put("title", title);
-        cv.put("snippet", snippet);
-        cv.put("timestamp", System.currentTimeMillis());
-        return db.insert("bookmarks", null, cv);
+        try {
+            SQLiteDatabase db = getWritableDatabase();
+            ensureBookmarksTable(db);
+            ContentValues cv = new ContentValues();
+            cv.put("book_uuid", bookUuid);
+            cv.put("chapter_index", chapterIndex);
+            cv.put("page_index", pageIndex);
+            cv.put("title", title);
+            cv.put("snippet", snippet);
+            cv.put("timestamp", System.currentTimeMillis());
+            return db.insert("bookmarks", null, cv);
+        } catch (Exception e) {
+            android.util.Log.e("DatabaseHelper", "Failed to add bookmark", e);
+            return -1;
+        }
     }
 
     public synchronized List<Bookmark> getBookmarks(String bookUuid) {
         List<Bookmark> list = new ArrayList<>();
-        SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT * FROM bookmarks WHERE book_uuid = ? ORDER BY timestamp DESC", new String[]{bookUuid});
-        if (c != null) {
-            while (c.moveToNext()) {
-                Bookmark b = new Bookmark();
-                b.id = c.getLong(c.getColumnIndex("id"));
-                b.bookUuid = c.getString(c.getColumnIndex("book_uuid"));
-                b.chapterIndex = c.getInt(c.getColumnIndex("chapter_index"));
-                b.pageIndex = c.getInt(c.getColumnIndex("page_index"));
-                b.title = c.getString(c.getColumnIndex("title"));
-                b.snippet = c.getString(c.getColumnIndex("snippet"));
-                b.timestamp = c.getLong(c.getColumnIndex("timestamp"));
-                list.add(b);
+        try {
+            SQLiteDatabase db = getWritableDatabase();
+            ensureBookmarksTable(db);
+            Cursor c = db.rawQuery("SELECT * FROM bookmarks WHERE book_uuid = ? ORDER BY timestamp DESC", new String[]{bookUuid});
+            if (c != null) {
+                while (c.moveToNext()) {
+                    Bookmark b = new Bookmark();
+                    b.id = c.getLong(c.getColumnIndex("id"));
+                    b.bookUuid = c.getString(c.getColumnIndex("book_uuid"));
+                    b.chapterIndex = c.getInt(c.getColumnIndex("chapter_index"));
+                    b.pageIndex = c.getInt(c.getColumnIndex("page_index"));
+                    b.title = c.getString(c.getColumnIndex("title"));
+                    b.snippet = c.getString(c.getColumnIndex("snippet"));
+                    b.timestamp = c.getLong(c.getColumnIndex("timestamp"));
+                    list.add(b);
+                }
+                c.close();
             }
-            c.close();
+        } catch (Exception e) {
+            android.util.Log.e("DatabaseHelper", "Failed to get bookmarks", e);
         }
         return list;
     }
 
     public synchronized void deleteBookmark(long id) {
-        SQLiteDatabase db = getWritableDatabase();
-        db.delete("bookmarks", "id = ?", new String[]{String.valueOf(id)});
+        try {
+            SQLiteDatabase db = getWritableDatabase();
+            ensureBookmarksTable(db);
+            db.delete("bookmarks", "id = ?", new String[]{String.valueOf(id)});
+        } catch (Exception e) {
+            android.util.Log.e("DatabaseHelper", "Failed to delete bookmark", e);
+        }
     }
 }

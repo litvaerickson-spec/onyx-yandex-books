@@ -10,6 +10,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.DisplayMetrics;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -53,6 +54,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * аппаратным управлением Darwin, интерактивным слайдером и типографикой AlReader.
  */
 public class ReaderActivity extends Activity {
+
+    private static final String TAG = "ReaderActivity";
 
     private ReaderCanvasView readerCanvas;
 
@@ -847,10 +850,11 @@ public class ReaderActivity extends Activity {
     }
 
     private void showTableOfContentsDialog() {
-        if (chapters == null || chapters.isEmpty()) {
-            Toast.makeText(this, "Оглавление недоступно", Toast.LENGTH_SHORT).show();
-            return;
-        }
+        try {
+            if (chapters == null || chapters.isEmpty()) {
+                Toast.makeText(this, "Оглавление недоступно", Toast.LENGTH_SHORT).show();
+                return;
+            }
 
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -1212,6 +1216,10 @@ public class ReaderActivity extends Activity {
             dialog.getWindow().setLayout(w, h);
         }
         dialog.show();
+        } catch (Throwable t) {
+            Log.e(TAG, "Error displaying TOC dialog", t);
+            Toast.makeText(this, "Ошибка отображения оглавления", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void showProgressDialog() {
@@ -1381,33 +1389,56 @@ public class ReaderActivity extends Activity {
 
         ReadingProgress p = dbHelper.getProgress(bookUuid);
         double percent = 0.0;
-        int targetChapter = 0;
+        int targetChapter = -1;
         int targetPage = 0;
 
         double intentPercent = getIntent().getDoubleExtra("book_percent", 0.0);
         int intentChapter = getIntent().getIntExtra("book_chapter", -1);
 
-        if (p != null && p.getPercent() > 0) {
+        if (p != null) {
             percent = p.getPercent();
             targetChapter = p.getChapterIndex();
             targetPage = p.getPageIndex();
         } else {
             Book b = dbHelper.getBookByUuid(bookUuid);
-            if (b != null && b.getPercent() > 0) {
+            if (b != null) {
                 percent = b.getPercent();
                 targetChapter = b.getCurrentChapterIndex();
                 targetPage = 0;
             }
         }
 
-        if (intentPercent > percent) {
+        if (intentPercent > percent && intentChapter >= 0) {
             percent = intentPercent;
-            if (intentChapter >= 0) {
-                targetChapter = intentChapter;
-            }
+            targetChapter = intentChapter;
         }
 
-        if (percent > 0 && totalBookLength > 0 && chapters != null && !chapters.isEmpty()) {
+        // Защита от ложного 100% (когда глава 0 или книга только открыта)
+        if (percent >= 99.0 && targetChapter <= 0) {
+            percent = 0.0;
+            targetChapter = 0;
+            targetPage = 0;
+        }
+
+        // Если книга завершена (100% и последняя глава), при повторном открытии для чтения
+        // начинаем с первой главы (Глава 0), чтобы ридер не зависал на странице выходных данных/тиража
+        if (chapters != null && !chapters.isEmpty() && targetChapter >= chapters.size() - 1 && percent >= 99.0) {
+            currentChapterIndex = 0;
+            currentPageIndex = 0;
+            loadChapter(0, 0);
+            return;
+        }
+
+        // Если есть конкретный индекс главы:
+        if (chapters != null && !chapters.isEmpty() && targetChapter >= 0 && targetChapter < chapters.size()) {
+            currentChapterIndex = targetChapter;
+            currentPageIndex = Math.max(0, targetPage);
+            loadChapter(currentChapterIndex, currentPageIndex);
+            return;
+        }
+
+        // Иначе (если только процент без главы) – маппинг по общей длине
+        if (percent > 0 && percent < 99.0 && totalBookLength > 0 && chapters != null && !chapters.isEmpty()) {
             long targetGlobalOffset = (long) ((percent / 100.0) * totalBookLength);
             long acc = 0;
             int matchedCh = 0;
@@ -1426,13 +1457,9 @@ public class ReaderActivity extends Activity {
             currentChapterIndex = matchedCh;
             loadChapterWithFraction(currentChapterIndex, chapterFraction);
         } else {
-            if (targetChapter > 0 && chapters != null && targetChapter < chapters.size()) {
-                currentChapterIndex = targetChapter;
-            } else {
-                currentChapterIndex = 0;
-            }
-            currentPageIndex = Math.max(0, targetPage);
-            loadChapter(currentChapterIndex, currentPageIndex);
+            currentChapterIndex = 0;
+            currentPageIndex = 0;
+            loadChapter(0, 0);
         }
     }
 
@@ -1441,16 +1468,31 @@ public class ReaderActivity extends Activity {
         ReadingProgress local = dbHelper.getProgress(bookUuid);
         double curPercent = calculateCurrentGlobalPercent();
         double cloudPercent = cloudProgress.getPercent();
+        int cloudChapter = cloudProgress.getChapterIndex();
+
+        // Защита от искаженного 100% при 0 главе
+        if (cloudPercent >= 99.0 && cloudChapter <= 0) {
+            return;
+        }
 
         boolean isNewer = (local == null) ||
                 (cloudProgress.getTimestamp() > local.getTimestamp()) ||
                 (cloudPercent > curPercent + 1.0);
 
-        if (isNewer && cloudPercent > 0) {
-            if (chapterLengths == null || chapterLengths.length != chapters.size()) {
-                calculateChapterLengths();
-            }
-            if (totalBookLength > 0) {
+        if (isNewer) {
+            // Если сервер возвращает конкретную главу в допустимом диапазоне
+            if (cloudChapter >= 0 && cloudChapter < chapters.size()) {
+                if (cloudChapter != currentChapterIndex || Math.abs(cloudPercent - curPercent) > 2.0) {
+                    currentChapterIndex = cloudChapter;
+                    currentPageIndex = Math.max(0, cloudProgress.getPageIndex());
+                    loadChapter(currentChapterIndex, currentPageIndex);
+                    Toast.makeText(ReaderActivity.this, String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)", cloudPercent, currentChapterIndex + 1), Toast.LENGTH_SHORT).show();
+                }
+            } else if (cloudPercent > 0 && cloudPercent < 99.0 && totalBookLength > 0) {
+                // Fallback по проценту, если номер главы не указан
+                if (chapterLengths == null || chapterLengths.length != chapters.size()) {
+                    calculateChapterLengths();
+                }
                 long targetGlobalOffset = (long) ((cloudPercent / 100.0) * totalBookLength);
                 long acc = 0;
                 int matchedCh = 0;
@@ -1467,7 +1509,7 @@ public class ReaderActivity extends Activity {
                 long curChLen = chapterLengths[matchedCh];
                 double chapterFraction = (curChLen > 0) ? ((double) matchedOffset / (double) curChLen) : 0.0;
 
-                if (matchedCh != currentChapterIndex || Math.abs(cloudPercent - curPercent) > 1.0) {
+                if (matchedCh != currentChapterIndex || Math.abs(cloudPercent - curPercent) > 2.0) {
                     currentChapterIndex = matchedCh;
                     loadChapterWithFraction(currentChapterIndex, chapterFraction);
                     Toast.makeText(ReaderActivity.this, String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)", cloudPercent, currentChapterIndex + 1), Toast.LENGTH_SHORT).show();

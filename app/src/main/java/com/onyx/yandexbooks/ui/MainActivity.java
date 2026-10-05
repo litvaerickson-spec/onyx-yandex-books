@@ -994,7 +994,7 @@ public class MainActivity extends Activity {
         TextView authorView = new TextView(this);
         authorView.setText("Автор: " + (book.getAuthor() != null ? book.getAuthor() : "Не указан"));
         authorView.setTextSize(12);
-        authorView.setTypeface(null, Typeface.BOLD);
+        authorView.setTypeface(null, Typeface.NORMAL);
         authorView.setTextColor(Color.BLACK);
         metaLayout.addView(authorView);
 
