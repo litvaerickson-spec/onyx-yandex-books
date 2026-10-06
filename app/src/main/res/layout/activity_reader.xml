@@ -524,6 +524,37 @@
                         android:background="@drawable/btn_eink"
                         android:includeFontPadding="false" />
                 </LinearLayout>
+
+                <!-- Цветовая тема (Светлая / Тёмная) -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="32dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="4dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Цветовая тема"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/eink_black" />
+
+                    <Button
+                        android:id="@+id/btn_toggle_night_mode"
+                        android:layout_width="140dp"
+                        android:layout_height="28dp"
+                        android:minHeight="0dp"
+                        android:minWidth="0dp"
+                        android:text="Светлая"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/btn_eink_text_color"
+                        android:background="@drawable/btn_eink"
+                        android:includeFontPadding="false" />
+                </LinearLayout>
             </LinearLayout>
 
             <!-- Контейнер подвкладки 3: Между строк -->

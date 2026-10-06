@@ -68,6 +68,7 @@ public class AppSettings {
     public static final String KEY_BOLD_TEXT = "bold_text_enabled";
     public static final String KEY_CONTRAST_MODE = "contrast_mode";
     public static final String KEY_VERTICAL_MARGIN = "vertical_margin_mode";
+    public static final String KEY_NIGHT_MODE = "night_mode_enabled";
 
     public int getFontSizeSp() { return prefs.getInt(KEY_FONT_SIZE, 18); }
     public void setFontSizeSp(int size) { prefs.edit().putInt(KEY_FONT_SIZE, size).apply(); }
@@ -92,6 +93,9 @@ public class AppSettings {
 
     public String getVerticalMarginMode() { return prefs.getString(KEY_VERTICAL_MARGIN, "normal"); }
     public void setVerticalMarginMode(String mode) { prefs.edit().putString(KEY_VERTICAL_MARGIN, mode).apply(); }
+
+    public boolean isNightMode() { return prefs.getBoolean(KEY_NIGHT_MODE, false); }
+    public void setNightMode(boolean enabled) { prefs.edit().putBoolean(KEY_NIGHT_MODE, enabled).apply(); }
 
     public int getInt(String key, int defValue) { return prefs.getInt(key, defValue); }
     public void putInt(String key, int value) { prefs.edit().putInt(key, value).apply(); }

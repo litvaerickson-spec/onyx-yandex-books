@@ -33,6 +33,7 @@ public class TypographyConfig implements Serializable {
     private String contrastMode = "high"; // high, normal
     private String verticalMarginMode = "normal"; // small, normal, large
     private String customFontPath = null;
+    private boolean isNightMode = false;
     private int epdFullRefreshInterval = 8; // Полный сброс артефактов E-Ink каждые 8 страниц
 
     public TypographyConfig() {}
@@ -96,6 +97,9 @@ public class TypographyConfig implements Serializable {
 
     public String getCustomFontPath() { return customFontPath; }
     public void setCustomFontPath(String customFontPath) { this.customFontPath = customFontPath; }
+
+    public boolean isNightMode() { return isNightMode; }
+    public void setNightMode(boolean nightMode) { this.isNightMode = nightMode; }
 
     public int getEpdFullRefreshInterval() { return epdFullRefreshInterval; }
     public void setEpdFullRefreshInterval(int epdFullRefreshInterval) { this.epdFullRefreshInterval = epdFullRefreshInterval; }

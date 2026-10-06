@@ -138,6 +138,12 @@ public class ReaderCanvasView extends View {
             textPaint.setStyle(Paint.Style.FILL);
         }
 
+        boolean isNight = config != null && config.isNightMode();
+        int textColor = isNight ? Color.WHITE : Color.BLACK;
+        textPaint.setColor(textColor);
+        headerPaint.setColor(textColor);
+        footerPaint.setColor(textColor);
+
         if (config.getCustomFontPath() != null) {
             File fontFile = new File(config.getCustomFontPath());
             if (fontFile.exists()) {
@@ -178,8 +184,15 @@ public class ReaderCanvasView extends View {
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
 
-        // Чисто белый фон для E-Ink Carta
-        canvas.drawColor(Color.WHITE);
+        boolean isNight = config != null && config.isNightMode();
+        int bgColor = isNight ? Color.BLACK : Color.WHITE;
+        int textColor = isNight ? Color.WHITE : Color.BLACK;
+
+        // Фон для E-Ink Carta (Чистый белый или глубокий черный для ночи)
+        canvas.drawColor(bgColor);
+        textPaint.setColor(textColor);
+        headerPaint.setColor(textColor);
+        footerPaint.setColor(textColor);
 
         if (currentPage == null) {
             return;

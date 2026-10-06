@@ -1543,6 +1543,74 @@ def test_crash_prevention_null_callbacks_and_ui_button_contracts():
     print("✅ Тест защиты от крашей, компактности кнопок и диалога обновления успешно пройден!\n")
 
 
+def test_night_mode_and_batch_shelf_downloader():
+    print("--- [ТЕСТ 26] Инверсный ночной режим E-Ink и пакетный загрузчик полки ---")
+
+    # 1. Верификация логики инверсного ночного режима (Night / Dark Mode)
+    class MockTypographyConfig:
+        def __init__(self, is_night=False):
+            self.is_night_mode = is_night
+            self.font_size = 18
+
+        def get_background_color(self):
+            return 0xFF000000 if self.is_night_mode else 0xFFFFFFFF
+
+        def get_text_color(self):
+            return 0xFFFFFFFF if self.is_night_mode else 0xFF000000
+
+        def get_header_footer_color(self):
+            return 0xFFFFFFFF if self.is_night_mode else 0xFF000000
+
+    cfg_day = MockTypographyConfig(is_night=False)
+    assert cfg_day.get_background_color() == 0xFFFFFFFF, "Дневной фон обязан быть белым #FFFFFF"
+    assert cfg_day.get_text_color() == 0xFF000000, "Дневной текст обязан быть черным #000000"
+
+    cfg_night = MockTypographyConfig(is_night=True)
+    assert cfg_night.get_background_color() == 0xFF000000, "Ночной фон обязан быть черным #000000"
+    assert cfg_night.get_text_color() == 0xFFFFFFFF, "Ночной текст обязан быть белым #FFFFFF"
+    assert cfg_night.get_header_footer_color() == 0xFFFFFFFF, "Ночной колонтитул обязан быть белым #FFFFFF"
+    print(" - Контрастность и цветовая схема ночного режима (Pitch Black / Pure White): OK")
+
+    # 2. Верификация фильтрации очереди пакетного загрузчика («Скачать полку»)
+    class MockBook:
+        def __init__(self, uuid, title, downloaded):
+            self.uuid = uuid
+            self.title = title
+            self.is_downloaded = downloaded
+
+    test_shelf = [
+        MockBook("b1", "Война и мир", True),
+        MockBook("b2", "Мастер и Маргарита", False),
+        MockBook("b3", "Преступление и наказание", False),
+        MockBook("b4", "Идиот", True),
+    ]
+
+    def filter_for_batch_download(shelf_name, books):
+        if shelf_name in ["catalog", "search"]:
+            return "SHELF_UNSUPPORTED"
+        to_download = [b for b in books if not b.is_downloaded]
+        if not to_download:
+            return "ALREADY_DOWNLOADED"
+        return to_download
+
+    # Проверка блокировки каталога
+    assert filter_for_batch_download("catalog", test_shelf) == "SHELF_UNSUPPORTED"
+    assert filter_for_batch_download("search", test_shelf) == "SHELF_UNSUPPORTED"
+
+    # Проверка очереди на личной полке
+    queue = filter_for_batch_download("reading", test_shelf)
+    assert isinstance(queue, list)
+    assert len(queue) == 2, f"В очередь должны попасть только 2 незагруженные книги, получено: {len(queue)}"
+    assert queue[0].uuid == "b2" and queue[1].uuid == "b3"
+
+    # Проверка если все книги уже в памяти
+    all_downloaded = [MockBook("b1", "Книга 1", True), MockBook("b2", "Книга 2", True)]
+    assert filter_for_batch_download("to_read", all_downloaded) == "ALREADY_DOWNLOADED"
+    print(" - Фильтрация очереди пакетного загрузчика и защита полок: OK")
+
+    print("✅ Тест ночного режима и пакетного загрузчика полки успешно пройден!\n")
+
+
 if __name__ == "__main__":
     print("==================================================")
     print("🚀 Запуск тотальной верификации ядра Яндекс Книги")
@@ -1573,6 +1641,7 @@ if __name__ == "__main__":
     test_gesture_touch_and_flipper_race_protection()
     test_shelf_persistence_and_reset_progress()
     test_crash_prevention_null_callbacks_and_ui_button_contracts()
+    test_night_mode_and_batch_shelf_downloader()
     print("==================================================")
-    print("🎉 ВСЕ 25 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 26 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

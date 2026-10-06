@@ -115,6 +115,7 @@ public class ReaderActivity extends Activity {
     private Button btnToggleContrast; // Утолщение текста
     private Button btnToggleHyphenation; // Переносы слов TeX
     private Button btnToggleEinkContrast; // Контраст E-Ink
+    private Button btnToggleNightMode; // Цветовая тема (Светлая / Тёмная)
 
     // Элементы подвкладки «Между строк»
     private Button btnToggleLineSpacing;
@@ -223,6 +224,7 @@ public class ReaderActivity extends Activity {
         btnToggleContrast = (Button) findViewById(R.id.btn_toggle_contrast);
         btnToggleHyphenation = (Button) findViewById(R.id.btn_toggle_hyphenation);
         btnToggleEinkContrast = (Button) findViewById(R.id.btn_toggle_eink_contrast);
+        btnToggleNightMode = (Button) findViewById(R.id.btn_toggle_night_mode);
 
         // Контролы подвкладки «Между строк»
         btnToggleLineSpacing = (Button) findViewById(R.id.btn_toggle_line_spacing);
@@ -243,6 +245,7 @@ public class ReaderActivity extends Activity {
         typographyConfig.setBoldText(appSettings.isBoldText());
         typographyConfig.setContrastMode(appSettings.getContrastMode());
         typographyConfig.setVerticalMarginMode(appSettings.getVerticalMarginMode());
+        typographyConfig.setNightMode(appSettings.isNightMode());
 
         int marginPx = appSettings.getMarginPaddingPx();
         typographyConfig.setPaddingLeftPx(marginPx);
@@ -713,6 +716,24 @@ public class ReaderActivity extends Activity {
             });
         }
 
+        updateNightModeButtonText();
+        if (btnToggleNightMode != null) {
+            btnToggleNightMode.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    boolean next = !typographyConfig.isNightMode();
+                    typographyConfig.setNightMode(next);
+                    appSettings.setNightMode(next);
+                    updateNightModeButtonText();
+                    if (readerCanvas != null) {
+                        readerCanvas.setTypographyConfig(typographyConfig);
+                        readerCanvas.invalidate();
+                    }
+                    forceEpdRefresh();
+                }
+            });
+        }
+
         // Подвкладка 3: Между строк (Межстрочный интервал, Боковые поля, Верх/низ поля)
         updateLineSpacingButtonText();
         if (btnToggleLineSpacing != null) {
@@ -837,6 +858,11 @@ public class ReaderActivity extends Activity {
     private void updateEinkContrastButtonText() {
         if (btnToggleEinkContrast == null) return;
         btnToggleEinkContrast.setText("high".equalsIgnoreCase(typographyConfig.getContrastMode()) ? "Высокий" : "Обычный");
+    }
+
+    private void updateNightModeButtonText() {
+        if (btnToggleNightMode == null) return;
+        btnToggleNightMode.setText(typographyConfig.isNightMode() ? "Тёмная" : "Светлая");
     }
 
     private void updateLineSpacingButtonText() {
