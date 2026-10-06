@@ -358,6 +358,50 @@ public class CacheManager {
     }
 
     /**
+     * Прямая синхронная загрузка книги (EPUB) и извлечение глав в текущем фоновом потоке.
+     */
+    public YandexBooksApiClient.DownloadResult downloadBookSync(final String bookUuid, final String bookTitle) {
+        final File epubFile = getEpubFile(bookUuid);
+
+        YandexBooksApiClient.DownloadResult dlResult = apiClient.downloadBookEpubSync(bookUuid, epubFile);
+        if (!dlResult.success || !epubFile.exists() || epubFile.length() < 500) {
+            return dlResult;
+        }
+
+        try {
+            EpubParser.ParseResult parsed = EpubParser.parseEpubFull(epubFile);
+            if (parsed == null || parsed.chapters.isEmpty()) {
+                return YandexBooksApiClient.DownloadResult.error("Не удалось извлечь главы из книги");
+            }
+
+            saveTocTree(bookUuid, parsed.tocTree);
+
+            List<Chapter> chapters = new ArrayList<>();
+            for (int i = 0; i < parsed.chapters.size(); i++) {
+                EpubParser.ChapterData cd = parsed.chapters.get(i);
+                String chId = String.valueOf(i);
+                saveChapter(bookUuid, chId, cd.textContent);
+
+                Chapter ch = new Chapter();
+                ch.setId(chId);
+                ch.setBookUuid(bookUuid);
+                ch.setChapterIndex(i);
+                ch.setTitle(cd.title);
+                chapters.add(ch);
+            }
+
+            dbHelper.saveChapters(bookUuid, chapters);
+            dbHelper.updateBookDownloaded(bookUuid, true);
+            exportToPublicBooksDir(epubFile, bookTitle);
+
+            return YandexBooksApiClient.DownloadResult.ok(epubFile);
+        } catch (Throwable e) {
+            Log.e(TAG, "Error in sync EPUB processing for " + bookUuid, e);
+            return YandexBooksApiClient.DownloadResult.error("Ошибка парсинга: " + e.getMessage());
+        }
+    }
+
+    /**
      * Загрузка книги (EPUB) и извлечение глав.
      */
     public void downloadBookAsync(final String bookUuid, final String bookTitle, final DownloadProgressCallback callback) {

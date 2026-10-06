@@ -2,15 +2,15 @@
   <img src="docs/app_icon.png" width="120" height="120" alt="Яндекс Книги Lite Логотип" />
 </p>
 
-# 📚 Яндекс Книги Lite для Onyx Boox (v1.4.9)
+# 📚 Яндекс Книги Lite для Onyx Boox (v1.5.0)
 
-[![Release](https://img.shields.io/badge/Release-v1.4.9-black?style=for-the-badge&logo=github)](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/tag/v1.4.9)
+[![Release](https://img.shields.io/badge/Release-v1.5.0-black?style=for-the-badge&logo=github)](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/tag/v1.5.0)
 [![Android](https://img.shields.io/badge/Android-4.2%20--%204.4.4-gray?style=for-the-badge&logo=android)](https://github.com/litvaerickson-spec/onyx-yandex-books)
 [![E-Ink](https://img.shields.io/badge/Screen-E--Ink%20Carta-white?style=for-the-badge)](https://github.com/litvaerickson-spec/onyx-yandex-books)
 [![RAM Footprint](https://img.shields.io/badge/RAM_Usage-15--20_MB-brightgreen?style=for-the-badge)]()
-[![APK Size](https://img.shields.io/badge/APK%20Size-2.36_MB-lightgrey?style=for-the-badge)](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.4.9/yandex-books-lite-v1.4.9.apk)
+[![APK Size](https://img.shields.io/badge/APK%20Size-3.2_MB-lightgrey?style=for-the-badge)](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.5.0/yandex-books-lite-v1.5.0.apk)
 
-> **Автономный легковесный клиент сервиса «Яндекс Книги»** для электронных книг Onyx Boox (Darwin, Vasco da Gama, Faust, Monte Cristo, Livingstone и др.) на базе Android 4.2 / 4.4 с поддержкой современных протоколов TLS 1.3, облачной синхронизацией, **ночным режимом (E-Ink Dark Mode)**, **пакетным офлайн-скачиванием полок**, **каталогом и глобальным поиском**, **постоянным сохранением ручного распределения полок**, **сбросом прочитанного до 0%**, **полусинхронизацией прогресса с другими устройствами через закладки**, **бесшовным встроенным OTA-обновлением с GitHub**, отображением **обложек и внутренних иллюстраций**, древовидным оглавлением в стиле Onyx NeoReader, строгим E-Ink дизайном по канонам ридеров без тяжелых черных заливок и визуального шума.
+> **Автономный легковесный клиент сервиса «Яндекс Книги»** для электронных книг Onyx Boox (Darwin, Vasco da Gama, Faust, Monte Cristo, Livingstone и др.) на базе Android 4.2 / 4.4 с поддержкой современных протоколов TLS 1.3, облачной синхронизацией, **коллекцией эталонных E-Ink шрифтов (Literata, Charis SIL, PT Serif, PT Sans)**, **диалогом выбора шрифта с превью**, **точным пакетным офлайн-скачиванием полок**, **ночным режимом (E-Ink Dark Mode)**, **каталогом и глобальным поиском**, **постоянным сохранением ручного распределения полок**, **сбросом прочитанного до 0%**, **полусинхронизацией прогресса с другими устройствами через закладки**, **бесшовным встроенным OTA-обновлением с GitHub**, отображением **обложек и внутренних иллюстраций**, древовидным оглавлением в стиле Onyx NeoReader, строгим E-Ink дизайном по канонам ридеров без тяжелых черных заливок и визуального шума.
 
 > [!IMPORTANT]
 > **⚖️ Правовой статус и отказ от ответственности / Legal Disclaimer & Educational Use:**
@@ -25,8 +25,8 @@
 
 ### 📥 Быстрая загрузка и установка
 
-* 🚀 **Официальный релиз v1.4.9 на GitHub**: [**Страница релиза v1.4.9**](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/tag/v1.4.9)
-* 📦 **Прямая ссылка на APK**: [**`yandex-books-lite-v1.4.9.apk`**](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.4.9/yandex-books-lite-v1.4.9.apk) *(2.36 МБ, цифровая подпись v1/v2/v3, готов к установке поверх предыдущей версии)*
+* 🚀 **Официальный релиз v1.5.0 на GitHub**: [**Страница релиза v1.5.0**](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/tag/v1.5.0)
+* 📦 **Прямая ссылка на APK**: [**`yandex-books-lite-v1.5.0.apk`**](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.5.0/yandex-books-lite-v1.5.0.apk) *(3.2 МБ, цифровая подпись v1/v2/v3, готов к установке поверх предыдущей версии)*
 * 🔄 **Встроенное OTA-обновление**: прямо из приложения в один клик через кнопку `[ Обновить ]` в шапке или клик по версии внизу!
 * 🔨 **Скрипт сборки из исходников**: [`build_apk.sh`](build_apk.sh)
 
@@ -53,9 +53,14 @@
 
 ---
 
-## 🌟 Главные новшества последних релизов (v1.4.0 – v1.4.9)
+## 🌟 Главные новшества последних релизов (v1.4.0 – v1.5.0)
 
-1. **🌙 Инверсный ночной режим и пакетное скачивание полок (v1.4.9)**:
+1. **🖋️ Эталонные шрифты E-Ink Carta, диалог выбора и точный пакетный загрузчик (v1.5.0)**:
+   - **Коллекция лучших книжных шрифтов (100% офлайн)**: в бандл приложения встроены эталоны электронной типографики: **Literata** (фирменный шрифт Google для ридеров), **Charis SIL** (легендарный контрастный шрифт KOReader/AlReader), **PT Serif** (классический русский книжный с засечками от ПараТайп) и **PT Sans** (четкий рубленый гротеск).
+   - **Статические TrueType гарнитуры**: гарантированная совместимость с Android 4.4 KitKat без падений Dalvik VM и 100% покрытие русской кириллицы (66/66 глифов).
+   - **Модальный диалог выбора шрифта**: интерактивное меню с описанием назначения шрифта, живым образцом текста в начертании выбранного шрифта и маркером активного выбора `•`.
+   - **Точный пакетный загрузчик полок («Скачать полку»)**: синхронный воркер без подвисаний UI, честный подсчет («Всего на полке: M • В памяти: K • К загрузке: N»), возможность перекачать полку заново и каскадный синхронный fallback (`/content/v4` -> `POST /profile/library_cards` -> `/content` -> `/file`).
+2. **🌙 Инверсный ночной режим и пакетное скачивание полок (v1.4.9)**:
    - **Ночной режим (E-Ink Dark Mode)**: переключение на инверсную цветовую схему (абсолютный черный фон `#000000`, чистый белый текст `#FFFFFF`, белые заголовки и колонтитулы) в панели форматирования книги с мгновенным аппаратным EPD-сбросом.
    - **Пакетное скачивание полок («Скачать полку»)**: в главное меню добавлено сохранение всех книг активного раздела в один клик для офлайн-чтения в поездках с отображением прогресс-бара и защитой от зависаний.
    - **Юридический дисклеймер**: исчерпывающая правовая защита от претензий правообладателей, декларирующая личное некоммерческое использование по активной подписке Яндекс Плюс без распространения пиратских материалов.
@@ -124,20 +129,20 @@
 
 ```mermaid
 flowchart TD
-    App["Яндекс Книги Lite (v1.4.4)"] --> Cloud["Облако Яндекс / Bookmate API"]
+    App["Яндекс Книги Lite (v1.5.0)"] --> Cloud["Облако Яндекс / Bookmate API"]
     Cloud --> Cache["Кэш & Экспорт (/sdcard/Books/YandexBooks/)"]
-    Cache --> ModeSelect{"Режим читалки"}
+    Cache --> ModeSelect{"Режим чтения"}
     
     ModeSelect -->|По умолчанию: Onyx| OnyxReader["Системный Onyx NeoReader / AlReader<br/>• Привычные системные шрифты и словари Darwin<br/>• Жесты масштабирования и системные закладки<br/>• Интеграция с библиотекой рабочего стола"]
     
-    ModeSelect -->|Режим: Онлайн| OnlineReader["Встроенный Canvas-ридер Онлайн<br/>• Отображение обложек и иллюстраций книг<br/>• Древовидное оглавление NeoReader<br/>• Сверхбыстрый запуск (15-20 МБ RAM)<br/>• Монохромный E-Ink контраст без размытия<br/>• TeX-переносы и боковые аппаратные кнопки"]
+    ModeSelect -->|Режим: Онлайн| OnlineReader["Встроенный Canvas-ридер Онлайн<br/>• Коллекция шрифтов E-Ink Carta (Literata, Charis SIL, PT Serif, PT Sans)<br/>• Отображение обложек и иллюстраций книг<br/>• Древовидное оглавление NeoReader<br/>• Сверхбыстрый запуск (15-20 МБ RAM)<br/>• Монохромный E-Ink контраст без размытия<br/>• TeX-переносы и боковые аппаратные кнопки"]
 ```
 
 ---
 
 ## 📲 Порядок установки и обновления
 
-1. Загрузите файл **[`yandex-books-lite-v1.4.4.apk`](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.4.4/yandex-books-lite-v1.4.4.apk)**.
+1. Загрузите файл **[`yandex-books-lite-v1.5.0.apk`](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.5.0/yandex-books-lite-v1.5.0.apk)**.
 2. Скопируйте APK в память ридера (через USB или MicroSD-карту).
 3. На ридере откройте **«Диспетчер файлов»** и нажмите на файл для установки.
 4. Приложение обновится поверх существующей версии — авторизация и скачанные книги сохранятся.
@@ -149,7 +154,7 @@ flowchart TD
 
 ```text
 01_onyx_yandex_books/
-├── README.md               # Главная страница и руководство проекта (v1.4.4)
+├── README.md               # Главная страница и руководство проекта (v1.5.0)
 ├── CHANGELOG.md            # Детальная история версий (Keep a Changelog)
 ├── DEV_LOG.md              # Инженерный журнал разработки
 ├── build_apk.sh            # Скрипт сборки и подписи релизного APK

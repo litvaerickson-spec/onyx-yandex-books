@@ -383,39 +383,41 @@ public class MainActivity extends Activity {
             return;
         }
 
-        List<Book> shelfBooks = dbHelper.getBooksByShelf(currentShelf);
+        // Получаем полный актуальный список книг на текущей активной полке
+        List<Book> shelfBooks = (currentBooks != null && !currentBooks.isEmpty())
+                ? new ArrayList<>(currentBooks)
+                : dbHelper.getBooksByShelf(currentShelf);
+
         if (shelfBooks == null || shelfBooks.isEmpty()) {
-            if (currentBooks != null && !currentBooks.isEmpty()) {
-                shelfBooks = currentBooks;
-            } else {
-                Toast.makeText(MainActivity.this, "На этой полке нет книг для скачивания", Toast.LENGTH_SHORT).show();
-                return;
-            }
-        }
-
-        final List<Book> toDownload = new ArrayList<>();
-        for (Book b : shelfBooks) {
-            if (b != null && b.getUuid() != null && !cacheManager.isBookDownloaded(b.getUuid())) {
-                toDownload.add(b);
-            }
-        }
-
-        if (toDownload.isEmpty()) {
-            Toast.makeText(MainActivity.this, "Все книги на этой полке уже сохранены в памяти", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this, "На этой полке нет книг для скачивания", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        showBatchDownloadDialog(toDownload);
+        showBatchDownloadDialog(shelfBooks);
     }
 
-    private void showBatchDownloadDialog(final List<Book> booksToDownload) {
+    private void showBatchDownloadDialog(final List<Book> allShelfBooks) {
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
 
         float density = getResources().getDisplayMetrics().density;
         final DisplayMetrics dm = getResources().getDisplayMetrics();
+        final int targetW = (int) (dm.widthPixels * 0.90);
 
-        LinearLayout root = new LinearLayout(this);
+        String shelfName = "«Читаю»";
+        if ("to_read".equals(currentShelf)) shelfName = "«В планах»";
+        else if ("done".equals(currentShelf)) shelfName = "«Прочитано»";
+
+        final int totalOnShelf = allShelfBooks.size();
+        final List<Book> neededToDownload = new ArrayList<>();
+        for (Book b : allShelfBooks) {
+            if (b != null && b.getUuid() != null && !cacheManager.isBookDownloaded(b.getUuid())) {
+                neededToDownload.add(b);
+            }
+        }
+        final int inMemoryCount = totalOnShelf - neededToDownload.size();
+
+        final LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.WHITE);
         int padH = (int) (14 * density);
@@ -423,43 +425,41 @@ public class MainActivity extends Activity {
         root.setPadding(padH, padV, padH, padV);
 
         TextView titleView = new TextView(this);
-        titleView.setText("Скачивание полки в память");
+        titleView.setText("Скачивание полки " + shelfName);
         titleView.setTextSize(14);
         titleView.setTypeface(null, Typeface.BOLD);
         titleView.setTextColor(Color.BLACK);
         titleView.setGravity(Gravity.CENTER);
-        titleView.setPadding(0, 0, 0, (int) (6 * density));
+        titleView.setPadding(0, 0, 0, (int) (4 * density));
         root.addView(titleView);
+
+        TextView subtitleView = new TextView(this);
+        subtitleView.setText("Всего на полке: " + totalOnShelf + " • В памяти: " + inMemoryCount + " • К загрузке: " + neededToDownload.size());
+        subtitleView.setTextSize(11);
+        subtitleView.setTextColor(Color.BLACK);
+        subtitleView.setGravity(Gravity.CENTER);
+        subtitleView.setPadding(0, 0, 0, (int) (6 * density));
+        root.addView(subtitleView);
 
         View divider = new View(this);
         divider.setBackgroundColor(Color.BLACK);
         root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
 
-        final int total = booksToDownload.size();
-        final TextView statusSummary = new TextView(this);
-        statusSummary.setText("Книг к загрузке: " + total);
-        statusSummary.setTextSize(12);
-        statusSummary.setTextColor(Color.BLACK);
-        statusSummary.setPadding(0, (int) (8 * density), 0, (int) (4 * density));
-        root.addView(statusSummary);
-
-        final ProgressBar progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        progressBar.setMax(total);
-        progressBar.setProgress(0);
-        LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (18 * density));
-        pbLp.setMargins(0, (int) (4 * density), 0, (int) (6 * density));
-        progressBar.setLayoutParams(pbLp);
-        root.addView(progressBar);
-
         final TextView currentBookText = new TextView(this);
-        currentBookText.setText("Подготовка к загрузке...");
         currentBookText.setTextSize(11);
         currentBookText.setTextColor(Color.BLACK);
         currentBookText.setMinLines(2);
-        currentBookText.setMaxLines(2);
+        currentBookText.setMaxLines(3);
         currentBookText.setEllipsize(TextUtils.TruncateAt.END);
-        currentBookText.setPadding(0, 0, 0, (int) (8 * density));
-        root.addView(currentBookText);
+        currentBookText.setPadding(0, (int) (8 * density), 0, (int) (6 * density));
+
+        final ProgressBar progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (16 * density));
+        pbLp.setMargins(0, (int) (2 * density), 0, (int) (8 * density));
+        progressBar.setLayoutParams(pbLp);
+
+        final LinearLayout actionContainer = new LinearLayout(this);
+        actionContainer.setOrientation(LinearLayout.VERTICAL);
 
         final Button btnCancel = new Button(this);
         btnCancel.setText("Отмена");
@@ -469,13 +469,73 @@ public class MainActivity extends Activity {
         btnCancel.setBackgroundResource(R.drawable.btn_eink);
         btnCancel.setPadding(0, 0, 0, 0);
         LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (34 * density));
+        btnLp.setMargins(0, (int) (4 * density), 0, 0);
         btnCancel.setLayoutParams(btnLp);
-        root.addView(btnCancel);
+
+        final AtomicBoolean isCancelled = new AtomicBoolean(false);
+        final AtomicInteger completedCount = new AtomicInteger(0);
+        final AtomicInteger errorCount = new AtomicInteger(0);
+        final AtomicBoolean isRunning = new AtomicBoolean(false);
+
+        if (neededToDownload.isEmpty()) {
+            currentBookText.setText("Все книги с этой полки (" + totalOnShelf + ") уже сохранены в памяти устройства.");
+            root.addView(currentBookText);
+
+            Button btnRedownloadAll = createMenuButton("Перекачать все книги (" + totalOnShelf + ")", new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    startBatchExecution(dialog, root, currentBookText, progressBar, actionContainer, btnCancel,
+                            allShelfBooks, isCancelled, completedCount, errorCount, isRunning, density);
+                }
+            }, density);
+            actionContainer.addView(btnRedownloadAll);
+
+            btnCancel.setText("Закрыть");
+            btnCancel.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    dialog.dismiss();
+                }
+            });
+            actionContainer.addView(btnCancel);
+            root.addView(actionContainer);
+        } else {
+            currentBookText.setText("К загрузке доступно " + neededToDownload.size() + " новых книг (из " + totalOnShelf + " на полке).");
+            root.addView(currentBookText);
+
+            Button btnDownloadMissing = createMenuButton("Скачать недостающие (" + neededToDownload.size() + ")", new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    startBatchExecution(dialog, root, currentBookText, progressBar, actionContainer, btnCancel,
+                            neededToDownload, isCancelled, completedCount, errorCount, isRunning, density);
+                }
+            }, density);
+            actionContainer.addView(btnDownloadMissing);
+
+            if (inMemoryCount > 0) {
+                Button btnDownloadAll = createMenuButton("Скачать всю полку заново (" + totalOnShelf + ")", new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        startBatchExecution(dialog, root, currentBookText, progressBar, actionContainer, btnCancel,
+                                allShelfBooks, isCancelled, completedCount, errorCount, isRunning, density);
+                    }
+                }, density);
+                actionContainer.addView(btnDownloadAll);
+            }
+
+            btnCancel.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    dialog.dismiss();
+                }
+            });
+            actionContainer.addView(btnCancel);
+            root.addView(actionContainer);
+        }
 
         dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         dialog.setCanceledOnTouchOutside(false);
 
-        final int targetW = (int) (dm.widthPixels * 0.88);
         dialog.setOnShowListener(new DialogInterface.OnShowListener() {
             @Override
             public void onShow(DialogInterface d) {
@@ -486,28 +546,45 @@ public class MainActivity extends Activity {
             }
         });
 
-        final AtomicBoolean isCancelled = new AtomicBoolean(false);
-        final AtomicInteger completedCount = new AtomicInteger(0);
-        final AtomicInteger errorCount = new AtomicInteger(0);
-        final AtomicBoolean isDone = new AtomicBoolean(false);
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
+            dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+    }
 
+    private void startBatchExecution(final Dialog dialog, final LinearLayout root,
+                                     final TextView currentBookText, final ProgressBar progressBar,
+                                     final LinearLayout actionContainer, final Button btnCancel,
+                                     final List<Book> queue, final AtomicBoolean isCancelled,
+                                     final AtomicInteger completedCount, final AtomicInteger errorCount,
+                                     final AtomicBoolean isRunning, float density) {
+        isRunning.set(true);
+        actionContainer.removeAllViews();
+
+        progressBar.setMax(queue.size());
+        progressBar.setProgress(0);
+        if (progressBar.getParent() == null) {
+            root.addView(progressBar, root.indexOfChild(currentBookText) + 1);
+        }
+
+        btnCancel.setText("Остановить");
+        btnCancel.setEnabled(true);
         btnCancel.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (isDone.get()) {
-                    dialog.dismiss();
-                    adapter.notifyDataSetChanged();
-                    EpdController.requestFullRefresh(MainActivity.this, null);
-                } else {
+                if (isRunning.get()) {
                     isCancelled.set(true);
                     btnCancel.setEnabled(false);
                     currentBookText.setText("Остановка загрузки...");
+                } else {
                     dialog.dismiss();
                     adapter.notifyDataSetChanged();
                     EpdController.requestFullRefresh(MainActivity.this, null);
                 }
             }
         });
+        actionContainer.addView(btnCancel);
 
         dialog.setOnCancelListener(new DialogInterface.OnCancelListener() {
             @Override
@@ -516,63 +593,59 @@ public class MainActivity extends Activity {
             }
         });
 
-        dialog.show();
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
-            dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
-        }
-
         new Thread(new Runnable() {
             @Override
             public void run() {
+                final int total = queue.size();
                 for (int i = 0; i < total; i++) {
                     if (isCancelled.get() || isFinishing()) {
                         break;
                     }
-                    final Book book = booksToDownload.get(i);
+                    final Book book = queue.get(i);
                     final int idx = i + 1;
 
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            if (!isCancelled.get() && dialog.isShowing()) {
+                            if (dialog.isShowing()) {
                                 progressBar.setProgress(idx - 1);
-                                currentBookText.setText("Загрузка (" + idx + "/" + total + "):\n«" + book.getTitle() + "»");
+                                currentBookText.setText("Загрузка (" + idx + " из " + total + "):\n«" + book.getTitle() + "»");
                             }
                         }
                     });
 
-                    final CountDownLatch latch = new CountDownLatch(1);
-
-                    cacheManager.downloadBookAsync(book.getUuid(), book.getTitle(), new CacheManager.DownloadProgressCallback() {
-                        @Override
-                        public void onProgress(int downloadedCount, int totalCount) {}
-
-                        @Override
-                        public void onComplete() {
-                            completedCount.incrementAndGet();
-                            latch.countDown();
-                        }
-
-                        @Override
-                        public void onError(String message) {
-                            errorCount.incrementAndGet();
-                            Log.e("MainActivity", "Batch download error for " + book.getTitle() + ": " + message);
-                            latch.countDown();
-                        }
-                    });
-
-                    try {
-                        boolean finished = latch.await(45, TimeUnit.SECONDS);
-                        if (!finished) {
-                            errorCount.incrementAndGet();
-                        }
-                    } catch (InterruptedException e) {
-                        break;
+                    YandexBooksApiClient.DownloadResult res = cacheManager.downloadBookSync(book.getUuid(), book.getTitle());
+                    if (res != null && res.success) {
+                        completedCount.incrementAndGet();
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (dialog.isShowing()) {
+                                    progressBar.setProgress(idx);
+                                    currentBookText.setText("Сохранено (" + idx + " из " + total + "):\n«" + book.getTitle() + "»");
+                                }
+                            }
+                        });
+                    } else {
+                        errorCount.incrementAndGet();
+                        final String errMsg = (res != null && res.errorMessage != null) ? res.errorMessage : "ошибка сети";
+                        Log.e("MainActivity", "Batch download error for " + book.getTitle() + ": " + errMsg);
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (dialog.isShowing()) {
+                                    progressBar.setProgress(idx);
+                                    currentBookText.setText("Ошибка («" + book.getTitle() + "»): " + errMsg);
+                                }
+                            }
+                        });
+                        try {
+                            Thread.sleep(600);
+                        } catch (InterruptedException ignored) {}
                     }
                 }
 
-                isDone.set(true);
+                isRunning.set(false);
 
                 runOnUiThread(new Runnable() {
                     @Override
@@ -581,16 +654,14 @@ public class MainActivity extends Activity {
                         progressBar.setProgress(total);
                         btnCancel.setEnabled(true);
                         btnCancel.setText("Готово");
+                        int ok = completedCount.get();
+                        int err = errorCount.get();
                         if (isCancelled.get()) {
-                            currentBookText.setText("Скачивание остановлено.");
+                            currentBookText.setText("Загрузка остановлена.\nСкачано: " + ok + " из " + total + " (ошибок: " + err + ")");
+                        } else if (err > 0) {
+                            currentBookText.setText("Завершено! Успешно скачано: " + ok + " из " + total + " (ошибок: " + err + ")");
                         } else {
-                            int ok = completedCount.get();
-                            int err = errorCount.get();
-                            if (err > 0) {
-                                currentBookText.setText("Завершено: скачано " + ok + " из " + total + " (ошибок: " + err + ")");
-                            } else {
-                                currentBookText.setText("Успешно! Все книги (" + ok + ") сохранены в память.");
-                            }
+                            currentBookText.setText("Успешно! Все выбранные книги (" + ok + ") сохранены в память устройства.");
                         }
                         adapter.notifyDataSetChanged();
                         EpdController.requestFullRefresh(MainActivity.this, null);

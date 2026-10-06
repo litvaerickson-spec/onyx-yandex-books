@@ -626,6 +626,133 @@ public class YandexBooksApiClient {
         });
     }
 
+    public static class DownloadResult {
+        public final boolean success;
+        public final String errorMessage;
+        public final File file;
+
+        public DownloadResult(boolean success, String errorMessage, File file) {
+            this.success = success;
+            this.errorMessage = errorMessage;
+            this.file = file;
+        }
+
+        public static DownloadResult ok(File file) {
+            return new DownloadResult(true, null, file);
+        }
+
+        public static DownloadResult error(String msg) {
+            return new DownloadResult(false, msg, null);
+        }
+    }
+
+    /**
+     * Прямое синхронное скачивание книги в текущем потоке (для фонового пакетного загрузчика).
+     */
+    public DownloadResult downloadBookEpubSync(final String bookUuid, final File destFile) {
+        // 1. v4: /books/{uuid}/content/v4
+        DownloadResult res = tryDownloadSync(BASE_URL + "/books/" + bookUuid + "/content/v4", destFile);
+        if (res.success) return res;
+
+        // 2. Если ошибка (например 403 при отсутствии карточки в библиотеке), регистрируем в профиле
+        tryAddBookToLibrarySync(bookUuid);
+
+        // Повторная попытка v4
+        res = tryDownloadSync(BASE_URL + "/books/" + bookUuid + "/content/v4", destFile);
+        if (res.success) return res;
+
+        // 3. Fallback: /books/{uuid}/content
+        res = tryDownloadSync(BASE_URL + "/books/" + bookUuid + "/content", destFile);
+        if (res.success) return res;
+
+        // 4. Fallback: /books/{uuid}/file
+        res = tryDownloadSync(BASE_URL + "/books/" + bookUuid + "/file", destFile);
+        if (res.success) return res;
+
+        return DownloadResult.error(res.errorMessage != null ? res.errorMessage : "Не удалось загрузить книгу");
+    }
+
+    private DownloadResult tryDownloadSync(String url, File destFile) {
+        try {
+            Request request = createAuthRequestBuilder(url)
+                    .header("Accept", "*/*")
+                    .get()
+                    .build();
+            Response response = httpClient.newCall(request).execute();
+            if (!response.isSuccessful()) {
+                return DownloadResult.error("HTTP " + response.code());
+            }
+
+            String contentType = response.header("Content-Type", "");
+            if (contentType != null && (contentType.contains("json") || contentType.contains("html"))) {
+                String bodyStr = response.body().string();
+                try {
+                    JSONObject json = new JSONObject(bodyStr);
+                    String redirectUrl = json.optString("url", null);
+                    if (redirectUrl != null && (redirectUrl.startsWith("http://") || redirectUrl.startsWith("https://"))) {
+                        Request redirReq = new Request.Builder().url(redirectUrl).get().build();
+                        Response redirResp = httpClient.newCall(redirReq).execute();
+                        if (redirResp.isSuccessful()) {
+                            return saveSyncResponseBody(redirResp, destFile);
+                        }
+                    }
+                } catch (Exception ignored) {}
+                return DownloadResult.error("Сервер вернул текст/JSON: " + (bodyStr.length() > 60 ? bodyStr.substring(0, 60) : bodyStr));
+            }
+
+            return saveSyncResponseBody(response, destFile);
+        } catch (Exception e) {
+            return DownloadResult.error("Ошибка сети: " + e.getMessage());
+        }
+    }
+
+    private DownloadResult saveSyncResponseBody(Response response, File destFile) {
+        File parent = destFile.getParentFile();
+        if (parent != null && !parent.exists()) {
+            parent.mkdirs();
+        }
+
+        File tempFile = new File(destFile.getAbsolutePath() + ".tmp");
+        try (InputStream in = response.body().byteStream();
+             FileOutputStream out = new FileOutputStream(tempFile)) {
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+            out.flush();
+        } catch (Exception e) {
+            if (tempFile.exists()) tempFile.delete();
+            return DownloadResult.error("Ошибка записи: " + e.getMessage());
+        }
+
+        if (tempFile.exists() && tempFile.length() > 500) {
+            if (destFile.exists()) {
+                destFile.delete();
+            }
+            boolean renamed = tempFile.renameTo(destFile);
+            if (renamed && destFile.exists()) {
+                return DownloadResult.ok(destFile);
+            } else {
+                return DownloadResult.error("Не удалось сохранить файл книги");
+            }
+        } else {
+            if (tempFile.exists()) tempFile.delete();
+            return DownloadResult.error("Файл книги пуст (< 500 байт)");
+        }
+    }
+
+    private void tryAddBookToLibrarySync(String bookUuid) {
+        try {
+            String endpoint = BASE_URL + "/profile/library_cards";
+            JSONObject bodyJson = new JSONObject();
+            bodyJson.put("book_uuid", bookUuid);
+            RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString());
+            Request request = createAuthRequestBuilder(endpoint).post(body).build();
+            httpClient.newCall(request).execute();
+        } catch (Exception ignored) {}
+    }
+
     /**
      * Скачивание файла книги в формате EPUB с автоматической привязкой к библиотеке и каскадным fallback.
      */

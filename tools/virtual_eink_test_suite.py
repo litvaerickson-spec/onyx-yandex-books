@@ -1094,12 +1094,12 @@ def render_screen_24_reader_night_mode():
     img.save(os.path.join(OUTPUT_DIR, "screen_24_reader_night_mode.png"))
 
 def render_screen_25_dialog_batch_download():
-    """Экран 25: MainActivity — Диалог пакетного скачивания полки в память"""
+    """Экран 25: MainActivity — Диалог пакетного скачивания полки в память с точным учетом книг"""
     img = Image.open(os.path.join(OUTPUT_DIR, "screen_03_main_shelf_reading.png"))
     d = ImageDraw.Draw(img)
 
-    dw = int(SCREEN_WIDTH * 0.88)
-    dh = int(240 * DENSITY)
+    dw = int(SCREEN_WIDTH * 0.90)
+    dh = int(260 * DENSITY)
     dx1 = (SCREEN_WIDTH - dw) // 2
     dx2 = dx1 + dw
     dy1 = (SCREEN_HEIGHT - dh) // 2
@@ -1108,28 +1108,69 @@ def render_screen_25_dialog_batch_download():
     d.rectangle([(dx1, dy1), (dx2, dy2)], fill=COLOR_WHITE, outline=COLOR_BLACK, width=4)
 
     # Заголовок
-    d.text((dx1 + 20, dy1 + 18), "Скачивание полки в память", font=get_font(14, bold=True), fill=COLOR_BLACK)
-    d.line([(dx1 + 20, dy1 + 44), (dx2 - 20, dy1 + 44)], fill=COLOR_BLACK, width=2)
+    d.text((dx1 + 20, dy1 + 16), "Скачивание полки «Читаю»", font=get_font(14, bold=True), fill=COLOR_BLACK)
+    d.text((dx1 + 20, dy1 + 38), "Всего на полке: 5 • В памяти: 3 • К загрузке: 2", font=get_font(11), fill=COLOR_BLACK)
+    d.line([(dx1 + 20, dy1 + 58), (dx2 - 20, dy1 + 58)], fill=COLOR_BLACK, width=2)
 
-    # Сводка
-    d.text((dx1 + 20, dy1 + 56), "Книг к загрузке: 4", font=get_font(12), fill=COLOR_BLACK)
+    # Текущий статус загрузки
+    d.text((dx1 + 20, dy1 + 68), "Загрузка (1 из 2):\n«Мастер и Маргарита»", font=get_font(11), fill=COLOR_BLACK)
 
-    # Прогресс-бар (горизонтальный 50% = 2 из 4)
-    pb_y1 = dy1 + 84
-    pb_y2 = pb_y1 + int(18 * DENSITY)
+    # Прогресс-бар (горизонтальный 50% = 1 из 2)
+    pb_y1 = dy1 + 116
+    pb_y2 = pb_y1 + int(16 * DENSITY)
     d.rectangle([(dx1 + 20, pb_y1), (dx2 - 20, pb_y2)], fill=COLOR_WHITE, outline=COLOR_BLACK, width=2)
     pb_mid = dx1 + 20 + int((dw - 40) * 0.5)
     d.rectangle([(dx1 + 22, pb_y1 + 2), (pb_mid, pb_y2 - 2)], fill=COLOR_BLACK)
 
-    # Текущий статус книги
-    d.text((dx1 + 20, pb_y2 + 10), "Загрузка (2/4):\n«Мастер и Маргарита»", font=get_font(11), fill=COLOR_BLACK)
-
-    # Кнопка 'Отмена'
+    # Кнопка 'Остановить'
     f_btn = get_font(12, bold=True)
     btn_y = dy2 - int(44 * DENSITY)
-    draw_eink_button(d, "BatchDownload", (dx1 + 20, btn_y, dx2 - 20, btn_y + int(34 * DENSITY)), "Отмена", f_btn)
+    draw_eink_button(d, "BatchStop", (dx1 + 20, btn_y, dx2 - 20, btn_y + int(34 * DENSITY)), "Остановить", f_btn)
 
     img.save(os.path.join(OUTPUT_DIR, "screen_25_dialog_batch_download.png"))
+
+def render_screen_26_dialog_font_selection():
+    """Экран 26: ReaderActivity — Диалог выбора шрифта для чтения (Literata, Charis SIL, PT Serif, PT Sans)"""
+    img = Image.open(os.path.join(OUTPUT_DIR, "screen_15_reader_canvas_text.png"))
+    d = ImageDraw.Draw(img)
+
+    dw = int(SCREEN_WIDTH * 0.90)
+    dh = int(460 * DENSITY)
+    dx1 = (SCREEN_WIDTH - dw) // 2
+    dx2 = dx1 + dw
+    dy1 = (SCREEN_HEIGHT - dh) // 2
+    dy2 = dy1 + dh
+
+    d.rectangle([(dx1, dy1), (dx2, dy2)], fill=COLOR_WHITE, outline=COLOR_BLACK, width=4)
+
+    # Заголовок
+    d.text((dx1 + 20, dy1 + 16), "Выбор шрифта для чтения", font=get_font(14, bold=True), fill=COLOR_BLACK)
+    d.text((dx1 + 20, dy1 + 38), "Шрифты с высокой четкостью и хинтингом для E-Ink Carta", font=get_font(11), fill=COLOR_BLACK)
+    d.line([(dx1 + 20, dy1 + 58), (dx2 - 20, dy1 + 58)], fill=COLOR_BLACK, width=2)
+
+    fonts_to_show = [
+        ("• Literata", "Специальный книжный шрифт от Google для E-Ink", "В чащах юга жил-был цитрус? Да! 12345", True),
+        ("○ Charis SIL", "Эталонный шрифт ридеров KOReader и AlReader", "В чащах юга жил-был цитрус? Да! 12345", False),
+        ("○ PT Serif", "Классический русский книжный с засечками (ПараТайп)", "В чащах юга жил-был цитрус? Да! 12345", False),
+        ("○ PT Sans", "Чистый рубленый шрифт без засечек (ПараТайп)", "В чащах юга жил-был цитрус? Да! 12345", False),
+        ("○ Системный Serif", "Встроенный системный Android-шрифт с засечками", "В чащах юга жил-был цитрус? Да! 12345", False),
+    ]
+
+    cur_y = dy1 + 68
+    item_h = int(64 * DENSITY)
+    for title, desc, sample, is_active in fonts_to_show:
+        d.rectangle([(dx1 + 16, cur_y), (dx2 - 16, cur_y + item_h)], fill=COLOR_WHITE, outline=COLOR_BLACK, width=2 if is_active else 1)
+        d.text((dx1 + 24, cur_y + 6), title, font=get_font(13, bold=is_active), fill=COLOR_BLACK)
+        d.text((dx1 + 36, cur_y + 26), desc, font=get_font(10), fill=COLOR_BLACK)
+        d.text((dx1 + 36, cur_y + 44), sample, font=get_font(11), fill=COLOR_BLACK)
+        cur_y += item_h + 8
+
+    # Кнопка 'Закрыть'
+    f_btn = get_font(12, bold=True)
+    btn_y = dy2 - int(44 * DENSITY)
+    draw_eink_button(d, "FontClose", (dx1 + 20, btn_y, dx2 - 20, btn_y + int(34 * DENSITY)), "Закрыть", f_btn)
+
+    img.save(os.path.join(OUTPUT_DIR, "screen_26_dialog_font_selection.png"))
 
 # ==============================================================================
 # 5. ТОЧКА ВХОДА И ВЕРИФИКАЦИОННЫЙ ОТЧЕТ
@@ -1137,84 +1178,87 @@ def render_screen_25_dialog_batch_download():
 
 def main():
     print("=" * 70)
-    print("🚀 ЗАПУСК ТОТАЛЬНОГО АУДИТА И ВИРТУАЛИЗАЦИИ ИНТЕРФЕЙСА v1.4.9")
+    print("🚀 ЗАПУСК ТОТАЛЬНОГО АУДИТА И ВИРТУАЛИЗАЦИИ ИНТЕРФЕЙСА v1.5.0")
     print(f"📱 Устройство: Onyx Boox Darwin (758x1024, E-Ink Carta, density={DENSITY})")
     print("=" * 70)
 
     render_screen_01_auth_main()
-    print("  [01/25] AuthActivity: Главный экран авторизации -> OK")
+    print("  [01/26] AuthActivity: Главный экран авторизации -> OK")
 
     render_screen_02_auth_webview()
-    print("  [02/25] AuthWebViewActivity: Встроенный веб-вход -> OK")
+    print("  [02/26] AuthWebViewActivity: Встроенный веб-вход -> OK")
 
     render_screen_03_shelf_reading()
-    print("  [03/25] MainActivity: Полка «Читаю» -> OK")
+    print("  [03/26] MainActivity: Полка «Читаю» -> OK")
 
     render_screen_04_shelf_to_read()
-    print("  [04/25] MainActivity: Полка «В планах» -> OK")
+    print("  [04/26] MainActivity: Полка «В планах» -> OK")
 
     render_screen_05_shelf_catalog()
-    print("  [05/25] MainActivity: Каталог рекомендаций -> OK")
+    print("  [05/26] MainActivity: Каталог рекомендаций -> OK")
 
     render_screen_06_shelf_search()
-    print("  [06/25] MainActivity: Полнотекстовый поиск -> OK")
+    print("  [06/26] MainActivity: Полнотекстовый поиск -> OK")
 
     render_screen_07_main_menu_dialog()
-    print("  [07/25] MainActivity: Главное меню приложения («Скачать полку») -> OK")
+    print("  [07/26] MainActivity: Главное меню приложения («Скачать полку») -> OK")
 
     render_screen_08_shelf_done()
-    print("  [08/25] MainActivity: Полка «Прочитано» -> OK")
+    print("  [08/26] MainActivity: Полка «Прочитано» -> OK")
 
     render_screen_09_book_details_dialog()
-    print("  [09/25] MainActivity: Карточка книги (4 строки действий) -> OK")
+    print("  [09/26] MainActivity: Карточка книги (4 строки действий) -> OK")
 
     render_screen_10_dialog_reset_confirm()
-    print("  [10/25] MainActivity: Подтверждение «Сбросить чтение» -> OK")
+    print("  [10/26] MainActivity: Подтверждение «Сбросить чтение» -> OK")
 
     render_screen_11_dialog_remove_shelf_confirm()
-    print("  [11/25] MainActivity: Подтверждение «Убрать с полки» -> OK")
+    print("  [11/26] MainActivity: Подтверждение «Убрать с полки» -> OK")
 
     render_screen_12_dialog_delete_file_confirm()
-    print("  [12/25] MainActivity: Подтверждение «Удалить файл» -> OK")
+    print("  [12/26] MainActivity: Подтверждение «Удалить файл» -> OK")
 
     render_screen_13_dialog_app_update()
-    print("  [13/25] MainActivity: Диалог обновления ПО (Черная кнопка «Обновить») -> OK")
+    print("  [13/26] MainActivity: Диалог обновления ПО (Черная кнопка «Обновить») -> OK")
 
     render_screen_14_dialog_logout_confirm()
-    print("  [14/25] MainActivity: Подтверждение «Выйти из аккаунта» -> OK")
+    print("  [14/26] MainActivity: Подтверждение «Выйти из аккаунта» -> OK")
 
     render_screen_15_reader_canvas_text()
-    print("  [15/25] ReaderActivity: Холст чтения текста с переносами -> OK")
+    print("  [15/26] ReaderActivity: Холст чтения текста с переносами -> OK")
 
     render_screen_16_reader_canvas_image()
-    print("  [16/25] ReaderActivity: Холст чтения с графической схемой -> OK")
+    print("  [16/26] ReaderActivity: Холст чтения с графической схемой -> OK")
 
     render_screen_17_reader_overlay_menu()
-    print("  [17/25] ReaderActivity: Оверлейное меню управления чтением -> OK")
+    print("  [17/26] ReaderActivity: Оверлейное меню управления чтением -> OK")
 
     render_screen_18_reader_toc_chapters()
-    print("  [18/25] ReaderActivity: Оглавление (Древовидная иерархия глав) -> OK")
+    print("  [18/26] ReaderActivity: Оглавление (Древовидная иерархия глав) -> OK")
 
     render_screen_19_reader_toc_bookmarks()
-    print("  [19/25] ReaderActivity: Закладки (Облачная полусинхронизация) -> OK")
+    print("  [19/26] ReaderActivity: Закладки (Облачная полусинхронизация) -> OK")
 
     render_screen_20_reader_progress_dialog()
-    print("  [20/25] ReaderActivity: Диалог прогресса чтения («Синхронизировать») -> OK")
+    print("  [20/26] ReaderActivity: Диалог прогресса чтения («Синхронизировать») -> OK")
 
     render_screen_21_reader_format_tab_view()
-    print("  [21/25] ReaderActivity: Форматирование — Вкладка «Вид» -> OK")
+    print("  [21/26] ReaderActivity: Форматирование — Вкладка «Вид» -> OK")
 
     render_screen_22_reader_format_tab_format()
-    print("  [22/25] ReaderActivity: Форматирование — Вкладка «Формат» (Ночной режим) -> OK")
+    print("  [22/26] ReaderActivity: Форматирование — Вкладка «Формат» (Ночной режим) -> OK")
 
     render_screen_23_reader_format_tab_spacing()
-    print("  [23/25] ReaderActivity: Форматирование — Вкладка «Между строк» -> OK")
+    print("  [23/26] ReaderActivity: Форматирование — Вкладка «Между строк» -> OK")
 
     render_screen_24_reader_night_mode()
-    print("  [24/25] ReaderActivity: Инверсный ночной режим (Pitch Black / Pure White) -> OK")
+    print("  [24/26] ReaderActivity: Инверсный ночной режим (Pitch Black / Pure White) -> OK")
 
     render_screen_25_dialog_batch_download()
-    print("  [25/25] MainActivity: Диалог пакетного скачивания полки в память -> OK")
+    print("  [25/26] MainActivity: Диалог пакетного скачивания полки в память -> OK")
+
+    render_screen_26_dialog_font_selection()
+    print("  [26/26] ReaderActivity: Диалог выбора шрифта для чтения -> OK")
 
     print("\n" + "=" * 70)
     print("📊 ИТОГОВЫЙ ОТЧЕТ ИНСПЕКЦИИ ИНТЕРФЕЙСА E-INK")
@@ -1237,8 +1281,8 @@ def main():
     else:
         print("✅ Обрезание текста и кнопок: ПОЛНОСТЬЮ ОТСУТСТВУЕТ (0 дефектов). Все 100% надписей идеально помещаются.")
         print("✅ Контрастность: Чистый черный текст #000000 на белом фоне #FFFFFF, отсутствие серых градиентов.")
-        print(f"📁 Все 25 скриншотов успешно сохранены в: {OUTPUT_DIR}/")
-        print("=" * 70)
+        print(f"📁 Все 26 скриншотов успешно сохранены в: {OUTPUT_DIR}/")
+    print("=" * 70)
 
 if __name__ == "__main__":
     main()

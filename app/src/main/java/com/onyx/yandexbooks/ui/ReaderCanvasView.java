@@ -12,6 +12,7 @@ import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
 
+import com.onyx.yandexbooks.core.typography.FontHelper;
 import com.onyx.yandexbooks.core.typography.TextPaginator;
 import com.onyx.yandexbooks.core.typography.TypographyConfig;
 
@@ -123,12 +124,7 @@ public class ReaderCanvasView extends View {
         textPaint.setTextSize(spToPx(config.getFontSizeSp()));
         textPaint.setFakeBoldText(config.isBoldText());
 
-        Typeface baseTf = Typeface.SERIF;
-        if ("sans-serif".equalsIgnoreCase(config.getFontFamily())) {
-            baseTf = Typeface.SANS_SERIF;
-        } else if ("monospace".equalsIgnoreCase(config.getFontFamily())) {
-            baseTf = Typeface.MONOSPACE;
-        }
+        Typeface baseTf = FontHelper.getTypeface(getContext(), config.getFontFamily());
         textPaint.setTypeface(baseTf);
 
         if ("high".equalsIgnoreCase(config.getContrastMode())) {

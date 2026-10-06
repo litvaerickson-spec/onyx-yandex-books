@@ -45,6 +45,7 @@ echo "[4/6] Упаковка ресурсов и манифеста в APK..."
 "$BUILD_TOOLS/aapt" package -f \
   -M app/src/main/AndroidManifest.xml \
   -S app/src/main/res \
+  -A app/src/main/assets \
   -I "$PLATFORM" \
   -F build/unaligned.apk
 

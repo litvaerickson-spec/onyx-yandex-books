@@ -43,6 +43,8 @@ import com.onyx.yandexbooks.core.epub.EpubParser;
 import com.onyx.yandexbooks.core.storage.CacheManager;
 import com.onyx.yandexbooks.core.storage.DatabaseHelper;
 import com.onyx.yandexbooks.core.sync.SyncManager;
+import android.widget.ScrollView;
+import com.onyx.yandexbooks.core.typography.FontHelper;
 import com.onyx.yandexbooks.core.typography.TextPaginator;
 import com.onyx.yandexbooks.core.typography.TypographyConfig;
 
@@ -652,7 +654,7 @@ public class ReaderActivity extends Activity {
             btnToggleFontFamily.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    cycleFontFamily();
+                    showFontSelectionDialog();
                 }
             });
         }
@@ -800,31 +802,149 @@ public class ReaderActivity extends Activity {
 
     private void updateFontFamilyButtonText() {
         if (btnToggleFontFamily == null) return;
-        String f = typographyConfig.getFontFamily();
-        if ("sans-serif".equalsIgnoreCase(f)) {
-            btnToggleFontFamily.setText("Sans-Serif");
-        } else if ("monospace".equalsIgnoreCase(f)) {
-            btnToggleFontFamily.setText("Monospace");
-        } else {
-            btnToggleFontFamily.setText("Serif");
-        }
+        String name = FontHelper.getFontDisplayName(typographyConfig.getFontFamily());
+        btnToggleFontFamily.setText(name);
     }
 
-    private void cycleFontFamily() {
-        String f = typographyConfig.getFontFamily();
-        String next;
-        if ("serif".equalsIgnoreCase(f)) {
-            next = "sans-serif";
-        } else if ("sans-serif".equalsIgnoreCase(f)) {
-            next = "monospace";
-        } else {
-            next = "serif";
+    private void showFontSelectionDialog() {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        float density = getResources().getDisplayMetrics().density;
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        int targetW = (int) (dm.widthPixels * 0.90);
+        int maxH = (int) (dm.heightPixels * 0.85);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.WHITE);
+        int padH = (int) (14 * density);
+        int padV = (int) (12 * density);
+        root.setPadding(padH, padV, padH, padV);
+
+        TextView titleView = new TextView(this);
+        titleView.setText("Выбор шрифта для чтения");
+        titleView.setTextSize(14);
+        titleView.setTypeface(null, Typeface.BOLD);
+        titleView.setTextColor(Color.BLACK);
+        titleView.setGravity(Gravity.CENTER);
+        titleView.setPadding(0, 0, 0, (int) (4 * density));
+        root.addView(titleView);
+
+        TextView hintView = new TextView(this);
+        hintView.setText("Шрифты с высокой четкостью и хинтингом для E-Ink Carta");
+        hintView.setTextSize(11);
+        hintView.setTextColor(Color.BLACK);
+        hintView.setGravity(Gravity.CENTER);
+        hintView.setPadding(0, 0, 0, (int) (6 * density));
+        root.addView(hintView);
+
+        View divider = new View(this);
+        divider.setBackgroundColor(Color.BLACK);
+        root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
+
+        ScrollView scrollView = new ScrollView(this);
+        LinearLayout fontListLayout = new LinearLayout(this);
+        fontListLayout.setOrientation(LinearLayout.VERTICAL);
+        fontListLayout.setPadding(0, (int) (6 * density), 0, (int) (6 * density));
+
+        final String currentFontId = typographyConfig.getFontFamily();
+        List<FontHelper.FontItem> fonts = FontHelper.getAvailableFonts();
+
+        for (final FontHelper.FontItem fontItem : fonts) {
+            final boolean isSelected = fontItem.id.equalsIgnoreCase(currentFontId);
+            Typeface tf = FontHelper.getTypeface(this, fontItem.id);
+
+            LinearLayout itemLayout = new LinearLayout(this);
+            itemLayout.setOrientation(LinearLayout.VERTICAL);
+            itemLayout.setBackgroundResource(isSelected ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
+            int itemPad = (int) (8 * density);
+            itemLayout.setPadding(itemPad, itemPad, itemPad, itemPad);
+            LinearLayout.LayoutParams itemLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            itemLp.setMargins(0, 0, 0, (int) (6 * density));
+            itemLayout.setLayoutParams(itemLp);
+
+            TextView fontNameView = new TextView(this);
+            String bullet = isSelected ? "• " : "○ ";
+            fontNameView.setText(bullet + fontItem.name);
+            fontNameView.setTextSize(14);
+            fontNameView.setTypeface(tf, isSelected ? Typeface.BOLD : Typeface.NORMAL);
+            fontNameView.setTextColor(Color.BLACK);
+            itemLayout.addView(fontNameView);
+
+            TextView fontDescView = new TextView(this);
+            fontDescView.setText(fontItem.subtitle);
+            fontDescView.setTextSize(10);
+            fontDescView.setTextColor(Color.BLACK);
+            fontDescView.setPadding((int) (14 * density), (int) (2 * density), 0, (int) (2 * density));
+            itemLayout.addView(fontDescView);
+
+            TextView sampleView = new TextView(this);
+            sampleView.setText(fontItem.sample);
+            sampleView.setTextSize(12);
+            sampleView.setTypeface(tf, Typeface.NORMAL);
+            sampleView.setTextColor(Color.BLACK);
+            sampleView.setPadding((int) (14 * density), (int) (2 * density), 0, 0);
+            itemLayout.addView(sampleView);
+
+            itemLayout.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    dialog.dismiss();
+                    typographyConfig.setFontFamily(fontItem.id);
+                    appSettings.setFontFamily(fontItem.id);
+                    updateFontFamilyButtonText();
+                    if (readerCanvas != null) {
+                        readerCanvas.setTypographyConfig(typographyConfig);
+                    }
+                    repaginateCurrentChapter();
+                    EpdController.requestFullRefresh(ReaderActivity.this, null);
+                }
+            });
+
+            fontListLayout.addView(itemLayout);
         }
-        typographyConfig.setFontFamily(next);
-        appSettings.setFontFamily(next);
-        updateFontFamilyButtonText();
-        if (readerCanvas != null) readerCanvas.setTypographyConfig(typographyConfig);
-        repaginateCurrentChapter();
+
+        scrollView.addView(fontListLayout);
+        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
+        scrollLp.setMargins(0, (int) (4 * density), 0, (int) (8 * density));
+        root.addView(scrollView, scrollLp);
+
+        Button btnClose = new Button(this);
+        btnClose.setText("Закрыть");
+        btnClose.setTextSize(12);
+        btnClose.setTypeface(null, Typeface.BOLD);
+        btnClose.setTextColor(Color.BLACK);
+        btnClose.setBackgroundResource(R.drawable.btn_eink);
+        btnClose.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams btnCloseLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (34 * density));
+        btnClose.setLayoutParams(btnCloseLp);
+        btnClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        root.addView(btnClose);
+
+        dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        dialog.setCanceledOnTouchOutside(true);
+
+        dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override
+            public void onShow(DialogInterface d) {
+                if (dialog.getWindow() != null) {
+                    dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
+                    dialog.getWindow().setLayout(targetW, maxH);
+                }
+            }
+        });
+
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
+            dialog.getWindow().setLayout(targetW, maxH);
+        }
     }
 
     private void updateIndentButtonText() {

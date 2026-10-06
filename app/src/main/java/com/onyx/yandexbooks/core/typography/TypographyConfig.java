@@ -29,7 +29,7 @@ public class TypographyConfig implements Serializable {
     private boolean isHyphenationEnabled = true;
     private boolean isJustifyEnabled = true;
     private boolean isBoldText = true; // Высокий контраст для E-Ink Carta
-    private String fontFamily = "serif"; // serif, sans-serif, monospace
+    private String fontFamily = "literata"; // literata, charis_sil, pt_serif, pt_sans, serif, sans-serif, monospace
     private String contrastMode = "high"; // high, normal
     private String verticalMarginMode = "normal"; // small, normal, large
     private String customFontPath = null;
@@ -74,7 +74,7 @@ public class TypographyConfig implements Serializable {
     public boolean isBoldText() { return isBoldText; }
     public void setBoldText(boolean boldText) { isBoldText = boldText; }
 
-    public String getFontFamily() { return fontFamily != null ? fontFamily : "serif"; }
+    public String getFontFamily() { return fontFamily != null ? fontFamily : "literata"; }
     public void setFontFamily(String fontFamily) { this.fontFamily = fontFamily; }
 
     public String getContrastMode() { return contrastMode != null ? contrastMode : "high"; }

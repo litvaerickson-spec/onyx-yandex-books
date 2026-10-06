@@ -73,7 +73,7 @@ public class AppSettings {
     public int getFontSizeSp() { return prefs.getInt(KEY_FONT_SIZE, 18); }
     public void setFontSizeSp(int size) { prefs.edit().putInt(KEY_FONT_SIZE, size).apply(); }
 
-    public String getFontFamily() { return prefs.getString(KEY_FONT_FAMILY, "serif"); }
+    public String getFontFamily() { return prefs.getString(KEY_FONT_FAMILY, "literata"); }
     public void setFontFamily(String family) { prefs.edit().putString(KEY_FONT_FAMILY, family).apply(); }
 
     public float getLineSpacingMultiplier() { return prefs.getFloat(KEY_LINE_SPACING, 1.25f); }
