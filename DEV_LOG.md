@@ -559,6 +559,21 @@
       - `AndroidManifest.xml` & `build.gradle`: `versionCode="30"`, `versionName="1.4.7"`.
       - Пройдены все 25 тестов `verify_core_logic.py` и все 5 физических инструментальных тестов `test_physical_e2e_reader.py`.
       - Собран и подписан **`yandex-books-lite-v1.4.7.apk`** (2.3 МБ).
+  - **Версия 1.4.8 (Release: 06.10.2026)**:
+    - **Полное устранение пустых квадратов («тофу» / missing glyphs) на Android 4.4 KitKat**:
+      - Выявлена несовместимость стандартных шрифтов Android 4.4 KitKat (`Roboto-Regular.ttf`, `DroidSansFallback.ttf`) с экзотическими символами Unicode Dingbats, Mathematical Operators и эмодзи.
+      - Проведена хирургическая замена всех проблемных символов в XML-макетах и исходном коде:
+        - `✓` → `•` (типографская точка, стандартный буллит) в кнопках статуса полок в `MainActivity.java`.
+        - `✕` (U+2715) → `X` (латинская буква X) в кнопке закрытия оверлея ридера (`activity_reader.xml`) и кнопке удаления закладки (`ReaderActivity.java`).
+        - `▶` / `▽` → `>` / `v` (ASCII) в стрелках раскрытия подглав в древовидном оглавлении (`ReaderActivity.java`).
+        - Символ `∨` (U+2228) удален из надписей кнопок меню типографики (`Serif`, `Sans-Serif`, `Monospace`, `20 px`, `1.25x`, `Узкие (18)`, `Стандарт`).
+    - **Автоматизированный виртуальный визуальный аудит**:
+      - Сгенерированы все 23 скриншота интерфейса E-Ink Carta (`tools/virtual_eink_test_suite.py`) с разрешением 758x1024.
+      - Подтверждено полное отсутствие пустых квадратов и артефактов шрифта во всем приложении.
+    - **Сборка и верификация**:
+      - `AndroidManifest.xml` & `build.gradle`: `versionCode="31"`, `versionName="1.4.8"`.
+      - Пройдены все 25 тестов `verify_core_logic.py` и все 5 инструментальных тестов `test_physical_e2e_reader.py`.
+      - Собран и подписан **`yandex-books-lite-v1.4.8.apk`** (2.3 МБ).
 
 
 

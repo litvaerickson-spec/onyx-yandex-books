@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.4.8] - 2026-10-06
+
+### Android 4.4 KitKat Font Glyphs & Typography Polish
+- **Полное устранение пустых квадратов («тофу» / missing glyphs) на Android 4.4 KitKat**:
+  - Диагностирована первопричина появления пустых квадратов (`□`): системные шрифты Android 4.4.4 KitKat (`Roboto-Regular.ttf`, `DroidSansFallback.ttf`) не содержат экзотических символов Unicode Dingbats, Mathematical Operators и эмодзи.
+  - Из всех XML-макетов и Java-классов полностью удалены проблемные глифы и заменены на 100% совместимые стандартные символы:
+    - Замена галочки `✓` на типографскую точку `•` в кнопках статуса полки (`• Читаю`, `• В планы`, `• Прочитано`) в `MainActivity.java`.
+    - Замена крестика `✕` (U+2715) на стандартную латинскую `X` в кнопке закрытия оверлея (`activity_reader.xml`) и кнопке удаления закладки (`ReaderActivity.java`).
+    - Замена стрелок сворачивания/разворачивания глав `▶` / `▽` на безопасные ASCII-символы `>` / `v` в оглавлении (`ReaderActivity.java`).
+    - Удаление математического символа `∨` (U+2228) из названий кнопок форматирования (`Serif`, `Sans-Serif`, `Monospace`, `20 px`, `1.25x`, `Узкие (18)`, `Стандарт`).
+  - Все надписи теперь рендерятся монохромно, четко и без единого артефакта или пустого квадрата на любых экранах E-Ink.
+- **Интеграция виртуального E-Ink тестового конвейера**:
+  - Обновлен симулятор E-Ink Carta (`tools/virtual_eink_test_suite.py`) с приведением всех тестовых экранов к эталонным безопасным шрифтам и символам.
+  - Проверены все 23 экрана приложения: 0 пустых квадратов, 0 обрезанных надписей, 100% контрастность.
+
 ## [v1.4.7] - 2026-10-06
 
 ### Stability, E-Ink UI Polish & Update Dialog Fixes

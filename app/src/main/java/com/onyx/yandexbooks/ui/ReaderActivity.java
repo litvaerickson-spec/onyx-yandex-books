@@ -781,11 +781,11 @@ public class ReaderActivity extends Activity {
         if (btnToggleFontFamily == null) return;
         String f = typographyConfig.getFontFamily();
         if ("sans-serif".equalsIgnoreCase(f)) {
-            btnToggleFontFamily.setText("Sans-Serif ∨");
+            btnToggleFontFamily.setText("Sans-Serif");
         } else if ("monospace".equalsIgnoreCase(f)) {
-            btnToggleFontFamily.setText("Monospace ∨");
+            btnToggleFontFamily.setText("Monospace");
         } else {
-            btnToggleFontFamily.setText("Serif ∨");
+            btnToggleFontFamily.setText("Serif");
         }
     }
 
@@ -808,7 +808,7 @@ public class ReaderActivity extends Activity {
 
     private void updateIndentButtonText() {
         if (btnToggleIndent == null) return;
-        btnToggleIndent.setText(typographyConfig.getParagraphIndentPx() + " px ∨");
+        btnToggleIndent.setText(typographyConfig.getParagraphIndentPx() + " px");
     }
 
     private void cycleIndent() {
@@ -841,7 +841,7 @@ public class ReaderActivity extends Activity {
 
     private void updateLineSpacingButtonText() {
         if (btnToggleLineSpacing == null) return;
-        btnToggleLineSpacing.setText(String.format(Locale.US, "%.2fx ∨", typographyConfig.getLineSpacingMultiplier()));
+        btnToggleLineSpacing.setText(String.format(Locale.US, "%.2fx", typographyConfig.getLineSpacingMultiplier()));
     }
 
     private void cycleLineSpacing() {
@@ -866,11 +866,11 @@ public class ReaderActivity extends Activity {
     private String getMarginButtonText() {
         String mode = appSettings.getMarginMode();
         if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_MEDIUM.equalsIgnoreCase(mode)) {
-            return "Средние (32) ∨";
+            return "Средние (32)";
         } else if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_WIDE.equalsIgnoreCase(mode)) {
-            return "Широкие (48) ∨";
+            return "Широкие (48)";
         } else {
-            return "Узкие (18) ∨";
+            return "Узкие (18)";
         }
     }
 
@@ -897,11 +897,11 @@ public class ReaderActivity extends Activity {
         if (btnToggleVertMargins == null) return;
         String mode = typographyConfig.getVerticalMarginMode();
         if ("small".equalsIgnoreCase(mode)) {
-            btnToggleVertMargins.setText("Малые ∨");
+            btnToggleVertMargins.setText("Малые");
         } else if ("large".equalsIgnoreCase(mode)) {
-            btnToggleVertMargins.setText("Большие ∨");
+            btnToggleVertMargins.setText("Большие");
         } else {
-            btnToggleVertMargins.setText("Стандарт ∨");
+            btnToggleVertMargins.setText("Стандарт");
         }
     }
 
@@ -1132,7 +1132,7 @@ public class ReaderActivity extends Activity {
                 rowLayout.setPadding(indentLeft, (int) (8 * density), (int) (6 * density), (int) (8 * density));
 
                 if (node.hasChildren) {
-                    tvArrow.setText(node.isExpanded ? "▽ " : "▶ ");
+                    tvArrow.setText(node.isExpanded ? "v " : "> ");
                     tvArrow.setVisibility(View.VISIBLE);
                     tvArrow.setOnClickListener(new View.OnClickListener() {
                         @Override
@@ -1264,7 +1264,7 @@ public class ReaderActivity extends Activity {
 
                     Button btnDel = new Button(ReaderActivity.this);
                     btnDel.setTag("delete");
-                    btnDel.setText("✕");
+                    btnDel.setText("X");
                     btnDel.setTextSize(13);
                     btnDel.setTypeface(null, Typeface.BOLD);
                     btnDel.setTextColor(Color.BLACK);

@@ -1110,21 +1110,21 @@ public class MainActivity extends Activity {
         btnReading.setBackgroundResource(isReading ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
         btnReading.setTextColor(Color.BLACK);
         btnReading.setTypeface(null, isReading ? Typeface.BOLD : Typeface.NORMAL);
-        btnReading.setText(isReading ? "✓ Читаю" : "Читаю");
+        btnReading.setText(isReading ? "• Читаю" : "Читаю");
         btnReading.setPadding(0, 0, 0, 0);
         btnReading.setSingleLine(true);
 
         btnToRead.setBackgroundResource(isToRead ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
         btnToRead.setTextColor(Color.BLACK);
         btnToRead.setTypeface(null, isToRead ? Typeface.BOLD : Typeface.NORMAL);
-        btnToRead.setText(isToRead ? "✓ В планы" : "В планы");
+        btnToRead.setText(isToRead ? "• В планы" : "В планы");
         btnToRead.setPadding(0, 0, 0, 0);
         btnToRead.setSingleLine(true);
 
         btnDone.setBackgroundResource(isDone ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
         btnDone.setTextColor(Color.BLACK);
         btnDone.setTypeface(null, isDone ? Typeface.BOLD : Typeface.NORMAL);
-        btnDone.setText(isDone ? "✓ Прочитано" : "Прочитано");
+        btnDone.setText(isDone ? "• Прочитано" : "Прочитано");
         btnDone.setPadding(0, 0, 0, 0);
         btnDone.setSingleLine(true);
     }
