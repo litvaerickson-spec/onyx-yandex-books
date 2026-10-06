@@ -2,13 +2,13 @@
   <img src="docs/app_icon.png" width="120" height="120" alt="Яндекс Книги Lite Логотип" />
 </p>
 
-# 📚 Яндекс Книги Lite для Onyx Boox (v1.4.6)
+# 📚 Яндекс Книги Lite для Onyx Boox (v1.4.8)
 
-[![Release](https://img.shields.io/badge/Release-v1.4.6-black?style=for-the-badge&logo=github)](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/tag/v1.4.6)
+[![Release](https://img.shields.io/badge/Release-v1.4.8-black?style=for-the-badge&logo=github)](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/tag/v1.4.8)
 [![Android](https://img.shields.io/badge/Android-4.2%20--%204.4.4-gray?style=for-the-badge&logo=android)](https://github.com/litvaerickson-spec/onyx-yandex-books)
 [![E-Ink](https://img.shields.io/badge/Screen-E--Ink%20Carta-white?style=for-the-badge)](https://github.com/litvaerickson-spec/onyx-yandex-books)
 [![RAM Footprint](https://img.shields.io/badge/RAM_Usage-15--20_MB-brightgreen?style=for-the-badge)]()
-[![APK Size](https://img.shields.io/badge/APK%20Size-2.26_MB-lightgrey?style=for-the-badge)](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.4.6/yandex-books-lite-v1.4.6.apk)
+[![APK Size](https://img.shields.io/badge/APK%20Size-2.36_MB-lightgrey?style=for-the-badge)](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.4.8/yandex-books-lite-v1.4.8.apk)
 
 > **Автономный легковесный клиент сервиса «Яндекс Книги»** для электронных книг Onyx Boox (Darwin, Vasco da Gama, Faust, Monte Cristo, Livingstone и др.) на базе Android 4.2 / 4.4 с поддержкой современных протоколов TLS 1.3, облачной синхронизацией, **каталогом и глобальным поиском**, **постоянным сохранением ручного распределения полок**, **сбросом прочитанного до 0%**, **полусинхронизацией прогресса с другими устройствами через закладки**, **бесшовным встроенным OTA-обновлением с GitHub**, отображением **обложек и внутренних иллюстраций**, древовидным оглавлением в стиле Onyx NeoReader, строгим E-Ink дизайном по канонам ридеров без тяжелых черных заливок и визуального шума.
 
@@ -16,8 +16,8 @@
 
 ### 📥 Быстрая загрузка и установка
 
-* 🚀 **Официальный релиз v1.4.6 на GitHub**: [**Страница релиза v1.4.6**](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/tag/v1.4.6)
-* 📦 **Прямая ссылка на APK**: [**`yandex-books-lite-v1.4.6.apk`**](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.4.6/yandex-books-lite-v1.4.6.apk) *(2.26 МБ, цифровая подпись v1/v2/v3, готов к установке поверх предыдущей версии)*
+* 🚀 **Официальный релиз v1.4.8 на GitHub**: [**Страница релиза v1.4.8**](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/tag/v1.4.8)
+* 📦 **Прямая ссылка на APK**: [**`yandex-books-lite-v1.4.8.apk`**](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.4.8/yandex-books-lite-v1.4.8.apk) *(2.36 МБ, цифровая подпись v1/v2/v3, готов к установке поверх предыдущей версии)*
 * 🔄 **Встроенное OTA-обновление**: прямо из приложения в один клик через кнопку `[ Обновить ]` в шапке или клик по версии внизу!
 * 🔨 **Скрипт сборки из исходников**: [`build_apk.sh`](build_apk.sh)
 
@@ -44,9 +44,16 @@
 
 ---
 
-## 🌟 Главные новшества последних релизов (v1.4.0 – v1.4.6)
+## 🌟 Главные новшества последних релизов (v1.4.0 – v1.4.8)
 
-1. **⚡ Сохранение ручных полок, сброс прогресса и сетка 2×2 (v1.4.6)**:
+1. **🖋️ Ликвидация пустых квадратов («тофу») на Android 4.4 KitKat (v1.4.8)**:
+   - Полное устранение отсутствующих Unicode-глифов (`□`) в системных шрифтах KitKat: экзотические символы заменены на 100% безопасные стандартные знаки (`•`, `X`, `>`, `v`).
+   - Все 23 экрана приложения проверены виртуальным E-Ink симулятором: 0 пустых квадратов, 100% четкость шрифтов.
+2. **🛠️ Стабильность полок, E-Ink надписи и фикс OTA-диалога (v1.4.7)**:
+   - Ликвидирован NPE вылет при перемещении книг и сбросе прогресса (`synchronized (currentBooks)`, безопасные колбэки).
+   - Исправлена читаемость кнопки «Обновить» в OTA-окне (черный текст), а само окно занимает 90% ширины и 85% высоты с поддержкой прокрутки.
+   - Надписи кнопок сокращены до 1 слова/емких терминов без обрезки на узких экранах.
+3. **⚡ Сохранение ручных полок, сброс прогресса и сетка 2×2 (v1.4.6)**:
    - **Постоянное сохранение полок**: ручной выбор полки «В планах» (`to_read`) больше никогда не перезаписывается в «Читаю» при фоновом синке, даже если у книги есть старый процент чтения.
    - **Защита от воскрешения удаленных книг**: таблица `hidden_books` гарантирует, что удаленные с полки книги не возвращаются автоматически при синхронизации.
    - **Действие «Сбросить чтение»**: возможность обнулить прогресс книги до 0%, удалить временные облачные закладки и переместить книгу в «В планах».
