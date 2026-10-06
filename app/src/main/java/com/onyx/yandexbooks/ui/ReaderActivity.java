@@ -1419,12 +1419,19 @@ public class ReaderActivity extends Activity {
         root.addView(btnClose);
 
         dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.WHITE));
-            int w = (int) (dm.widthPixels * 0.92);
-            int h = (int) (dm.heightPixels * 0.88);
-            dialog.getWindow().setLayout(w, h);
-        }
+
+        final int targetW = (int) (dm.widthPixels * 0.92);
+        final int targetH = (int) (dm.heightPixels * 0.88);
+
+        dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override
+            public void onShow(DialogInterface d) {
+                if (dialog.getWindow() != null) {
+                    dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.WHITE));
+                    dialog.getWindow().setLayout(targetW, targetH);
+                }
+            }
+        });
         dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
             @Override
             public void onDismiss(DialogInterface d) {
@@ -1432,6 +1439,11 @@ public class ReaderActivity extends Activity {
             }
         });
         dialog.show();
+
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.WHITE));
+            dialog.getWindow().setLayout(targetW, targetH);
+        }
         forceEpdRefresh();
         } catch (Throwable t) {
             Log.e(TAG, "Error displaying TOC dialog", t);
@@ -1482,12 +1494,14 @@ public class ReaderActivity extends Activity {
         root.addView(infoView);
 
         final Button btnSyncNow = new Button(this);
-        btnSyncNow.setText("Синхронизировать сейчас");
+        btnSyncNow.setText("Синхронизировать");
         btnSyncNow.setTextSize(12);
         btnSyncNow.setTypeface(null, Typeface.BOLD);
         btnSyncNow.setTextColor(Color.BLACK);
         btnSyncNow.setBackgroundResource(R.drawable.btn_eink_primary);
-        btnSyncNow.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (38 * density)));
+        btnSyncNow.setPadding(0, 0, 0, 0);
+        btnSyncNow.setSingleLine(true);
+        btnSyncNow.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (36 * density)));
         btnSyncNow.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -1498,7 +1512,7 @@ public class ReaderActivity extends Activity {
                 new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
                     @Override
                     public void run() {
-                        btnSyncNow.setText("Синхронизировано!");
+                        btnSyncNow.setText("Синхронизировано");
                         Toast.makeText(ReaderActivity.this, "Прогресс отправлен в облако Яндекс Книг", Toast.LENGTH_SHORT).show();
                     }
                 }, 1000);
@@ -1512,8 +1526,10 @@ public class ReaderActivity extends Activity {
         btnClose.setTypeface(null, Typeface.BOLD);
         btnClose.setTextColor(Color.BLACK);
         btnClose.setBackgroundResource(R.drawable.btn_eink);
-        LinearLayout.LayoutParams lpClose = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (36 * density));
-        lpClose.setMargins(0, (int) (8 * density), 0, 0);
+        btnClose.setPadding(0, 0, 0, 0);
+        btnClose.setSingleLine(true);
+        LinearLayout.LayoutParams lpClose = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (34 * density));
+        lpClose.setMargins(0, (int) (6 * density), 0, 0);
         btnClose.setLayoutParams(lpClose);
         btnClose.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -1524,18 +1540,30 @@ public class ReaderActivity extends Activity {
         root.addView(btnClose);
 
         dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.WHITE));
-            int w = (int) (dm.widthPixels * 0.85);
-            dialog.getWindow().setLayout(w, ViewGroup.LayoutParams.WRAP_CONTENT);
-        }
+
+        final int targetW = (int) (dm.widthPixels * 0.85);
+        dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override
+            public void onShow(DialogInterface d) {
+                if (dialog.getWindow() != null) {
+                    dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.WHITE));
+                    dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
+                }
+            }
+        });
         dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
             @Override
             public void onDismiss(DialogInterface d) {
                 forceEpdRefresh();
             }
         });
+
         dialog.show();
+
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.WHITE));
+            dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
         forceEpdRefresh();
     }
 

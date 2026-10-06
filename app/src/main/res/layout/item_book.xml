@@ -117,6 +117,9 @@
             android:textColor="@color/eink_black"
             android:background="@drawable/btn_eink_primary"
             android:includeFontPadding="false"
+            android:singleLine="true"
+            android:paddingLeft="2dp"
+            android:paddingRight="2dp"
             android:paddingTop="2dp"
             android:paddingBottom="2dp"
             android:layout_marginBottom="4dp" />
@@ -133,6 +136,9 @@
             android:textColor="@color/eink_black"
             android:background="@drawable/btn_eink"
             android:includeFontPadding="false"
+            android:singleLine="true"
+            android:paddingLeft="2dp"
+            android:paddingRight="2dp"
             android:paddingTop="2dp"
             android:paddingBottom="2dp" />
     </LinearLayout>

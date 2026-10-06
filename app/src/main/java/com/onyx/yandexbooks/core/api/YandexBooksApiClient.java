@@ -150,18 +150,19 @@ public class YandexBooksApiClient {
         getAllUserBooks(new ApiCallback<List<Book>>() {
             @Override
             public void onSuccess(List<Book> allBooks) {
+                if (callback == null) return;
                 List<Book> filtered = new ArrayList<>();
                 for (Book b : allBooks) {
                     if (shelfType.equals(b.getShelfType())) {
                         filtered.add(b);
                     }
                 }
-                callback.onSuccess(filtered);
+                postSuccess(callback, filtered);
             }
 
             @Override
             public void onError(String errorMessage) {
-                callback.onError(errorMessage);
+                postError(callback, errorMessage);
             }
         });
     }
@@ -1365,19 +1366,33 @@ public class YandexBooksApiClient {
     }
 
     private <T> void postSuccess(final ApiCallback<T> callback, final T result) {
+        if (callback == null) {
+            return;
+        }
         mainHandler.post(new Runnable() {
             @Override
             public void run() {
-                callback.onSuccess(result);
+                try {
+                    callback.onSuccess(result);
+                } catch (Throwable t) {
+                    Log.e(TAG, "Unhandled exception in ApiCallback.onSuccess", t);
+                }
             }
         });
     }
 
     private <T> void postError(final ApiCallback<T> callback, final String message) {
+        if (callback == null) {
+            return;
+        }
         mainHandler.post(new Runnable() {
             @Override
             public void run() {
-                callback.onError(message);
+                try {
+                    callback.onError(message);
+                } catch (Throwable t) {
+                    Log.e(TAG, "Unhandled exception in ApiCallback.onError", t);
+                }
             }
         });
     }

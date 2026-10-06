@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.4.7] - 2026-10-06
+
+### Stability, E-Ink UI Polish & Update Dialog Fixes
+- **Ликвидация критического вылета (NPE) при сбросе чтения и перемещении книг**:
+  - Устранена первопричина вылета приложения при нажатии «Сбросить» или переключении полок: добавлена строгая проверка `if (callback == null) return;` и блок `try-catch (Throwable t)` в `postSuccess` и `postError` клиента `YandexBooksApiClient.java`. Исключен сбой главного UI-потока при доставке сетевых ответов.
+  - Все операции мутации локального списка книг в `MainActivity.java` (`moveBookToShelf`, `removeBookFromLibraryAndDevice`, `resetBookProgressAndMoveToPlans`) защищены синхронизацией `synchronized (currentBooks)`.
+  - Гарантировано предварительное сохранение карточки книги в SQLite до вызова сброса прогресса.
+- **Исправление невидимого текста кнопки «Обновить»**:
+  - В `AppUpdateManager.java` цвет текста кнопки установки обновления изменен на чистый черный (`btnInstall.setTextColor(Color.BLACK)`), устраняя белый текст на белом фоне.
+  - Обнулены горизонтальные внутренние отступы (`setPadding(0, 0, 0, 0)`) и зафиксирован `setSingleLine(true)`.
+- **Исправление геометрии и переполнения окна обновления ПО**:
+  - Подключен слушатель `dialog.setOnShowListener` с вызовом `setLayout(targetW, targetH)` на показе окна, устраняющий баг Android с перезаписью размеров диалога после `dialog.show()`.
+  - Описание релиза обернуто в прокручиваемый `ScrollView` с отступами, заголовки компактно сжаты, окно занимает 90% ширины и 85% высоты экрана.
+- **Сокращение и адаптация надписей кнопок для E-Ink экранов**:
+  - Все надписи кнопок в меню и диалогах сокращены до 1 слова либо емких формулировок без переносов:
+    - `Встроенный ридер` → `Ридер Lite`, `Onyx Reader` → `NeoReader`.
+    - `Сбросить чтение` → `Сбросить`, `Скачать EPUB` → `Скачать`, `Удалить файл` → `Удалить`, `Убрать с полки` → `Убрать`.
+    - `Полка «Прочитано» (X)` → `Прочитано (X)`, `Синхронизировать полки` → `Синхронизация`, `Проверить обновление ПО` → `Обновление ПО`, `Очистить экран (E-Ink)` → `Очистить экран`.
+    - `Синхронизировать сейчас` → `Синхронизировать`.
+  - Установлены `setSingleLine(true)`, `setPadding(0, 0, 0, 0)` и устранены системные отступы Android, благодаря чему текст кнопок гарантированно помещается без обрезки на любых экранах E-Ink.
+
 ## [v1.4.6] - 2026-10-06
 
 ### Manual Shelf Persistence, Reading Progress Reset & Terminology Polish

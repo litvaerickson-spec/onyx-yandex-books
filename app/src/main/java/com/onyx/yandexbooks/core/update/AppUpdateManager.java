@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.Dialog;
 import android.app.ProgressDialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.graphics.Color;
@@ -231,26 +232,29 @@ public class AppUpdateManager {
         LinearLayout root = new LinearLayout(activity);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.WHITE);
-        int padH = (int) (16 * density);
-        int padV = (int) (14 * density);
+        int padH = (int) (14 * density);
+        int padV = (int) (12 * density);
         root.setPadding(padH, padV, padH, padV);
 
         // Заголовок
         TextView titleView = new TextView(activity);
-        titleView.setText("Доступно обновление " + release.tagName);
-        titleView.setTextSize(15);
+        titleView.setText("Обновление " + release.tagName);
+        titleView.setTextSize(14);
         titleView.setTypeface(null, Typeface.BOLD);
         titleView.setTextColor(Color.BLACK);
+        titleView.setSingleLine(true);
+        titleView.setEllipsize(android.text.TextUtils.TruncateAt.END);
         root.addView(titleView);
 
         // Инфо: размер и версия
         String currentVer = getCurrentVersionName(activity);
-        String sizeMb = String.format("%.1f МБ", release.apkSize / (1024.0 * 1024.0));
+        String sizeMb = String.format(java.util.Locale.US, "%.1f МБ", release.apkSize / (1024.0 * 1024.0));
         TextView infoView = new TextView(activity);
-        infoView.setText("Текущая версия: v" + currentVer + "  ->  Новая: " + release.tagName + "\nРазмер обновления: " + sizeMb);
-        infoView.setTextSize(12);
+        infoView.setText("Текущая: v" + currentVer + "  •  Новая: " + release.tagName + " (" + sizeMb + ")");
+        infoView.setTextSize(11);
         infoView.setTextColor(Color.BLACK);
-        infoView.setPadding(0, (int) (4 * density), 0, (int) (6 * density));
+        infoView.setSingleLine(true);
+        infoView.setPadding(0, (int) (2 * density), 0, (int) (4 * density));
         root.addView(infoView);
 
         // Разделитель
@@ -261,7 +265,7 @@ public class AppUpdateManager {
         // Описание изменений (Scrollable)
         ScrollView scrollView = new ScrollView(activity);
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
-        scrollLp.setMargins(0, (int) (6 * density), 0, (int) (6 * density));
+        scrollLp.setMargins(0, (int) (4 * density), 0, (int) (4 * density));
         scrollView.setLayoutParams(scrollLp);
 
         TextView notesView = new TextView(activity);
@@ -280,15 +284,17 @@ public class AppUpdateManager {
         // Кнопки действий
         LinearLayout btnRow = new LinearLayout(activity);
         btnRow.setOrientation(LinearLayout.HORIZONTAL);
-        btnRow.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (38 * density)));
-        btnRow.setPadding(0, (int) (6 * density), 0, 0);
+        btnRow.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (36 * density)));
+        btnRow.setPadding(0, (int) (4 * density), 0, 0);
 
         Button btnInstall = new Button(activity);
         btnInstall.setText("Обновить");
         btnInstall.setTextSize(11);
         btnInstall.setTypeface(null, Typeface.BOLD);
-        btnInstall.setTextColor(Color.WHITE);
+        btnInstall.setTextColor(Color.BLACK);
         btnInstall.setBackgroundResource(R.drawable.btn_eink_primary);
+        btnInstall.setPadding(0, 0, 0, 0);
+        btnInstall.setSingleLine(true);
         LinearLayout.LayoutParams lpInst = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
         lpInst.setMargins(0, 0, (int) (4 * density), 0);
         btnInstall.setLayoutParams(lpInst);
@@ -307,6 +313,8 @@ public class AppUpdateManager {
         btnCancel.setTypeface(null, Typeface.BOLD);
         btnCancel.setTextColor(Color.BLACK);
         btnCancel.setBackgroundResource(R.drawable.btn_eink);
+        btnCancel.setPadding(0, 0, 0, 0);
+        btnCancel.setSingleLine(true);
         LinearLayout.LayoutParams lpCancel = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.8f);
         lpCancel.setMargins((int) (4 * density), 0, 0, 0);
         btnCancel.setLayoutParams(lpCancel);
@@ -322,14 +330,25 @@ public class AppUpdateManager {
 
         dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
-            int w = (int) (dm.widthPixels * 0.92);
-            int h = (int) (dm.heightPixels * 0.82);
-            dialog.getWindow().setLayout(w, h);
-        }
+        final int targetW = (int) (dm.widthPixels * 0.90);
+        final int targetH = (int) (dm.heightPixels * 0.82);
+
+        dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override
+            public void onShow(DialogInterface d) {
+                if (dialog.getWindow() != null) {
+                    dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
+                    dialog.getWindow().setLayout(targetW, targetH);
+                }
+            }
+        });
 
         dialog.show();
+
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
+            dialog.getWindow().setLayout(targetW, targetH);
+        }
     }
 
     /**
