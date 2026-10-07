@@ -292,44 +292,24 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             }
         }
 
-        // Защита и приоритизация полок (Читаю / В планах / Прочитано):
+        // Определение актуальной полки (Читаю / В планах / Прочитано):
         String targetShelf;
         if (overrideShelfType != null) {
             targetShelf = overrideShelfType;
-        } else if (localShelfType != null) {
-            if ("done".equals(localShelfType)) {
-                // Книга локально отмечена как "Прочитано" — облачная карточка со статусом "to_read" не должна откатывать ее в планы
-                targetShelf = "done";
-            } else if ("reading".equals(localShelfType)) {
-                // Книга локально читается — облако не должно понижать ее в "to_read"
-                if ("done".equals(book.getShelfType()) || (effectivePercent >= 99.0 && effectiveChapter > 0)) {
-                    targetShelf = "done";
-                } else {
-                    targetShelf = "reading";
-                }
-            } else if ("to_read".equals(localShelfType)) {
-                // ВНИМАНИЕ: Пользователь явно перенес книгу в "В планах" (to_read)!
-                // Локальный выбор пользователя ПРЕВЫШЕ ВСЕГО: книга ДОЛЖНА ОСТАВАТЬСЯ в to_read,
-                // даже если у неё есть ненулевой процент прочитанного (effectivePercent > 0)!
-                if ("done".equals(book.getShelfType()) || (effectivePercent >= 99.0 && effectiveChapter > 0)) {
-                    targetShelf = "done";
-                } else {
-                    targetShelf = "to_read";
-                }
-            } else {
-                targetShelf = localShelfType;
-            }
-        } else {
-            // Новая книга из облака (еще нет локальной записи в БД):
-            if ("done".equals(book.getShelfType()) || (effectivePercent >= 99.0 && effectiveChapter > 0)) {
-                targetShelf = "done";
-            } else if ("reading".equals(book.getShelfType())) {
+        } else if (book.getShelfType() != null && ("reading".equals(book.getShelfType()) || "to_read".equals(book.getShelfType()) || "done".equals(book.getShelfType()))) {
+            // Облачная карточка содержит актуальный статус полки
+            if ("to_read".equals(book.getShelfType()) && "reading".equals(localShelfType) && hasLocalProgress && bestLocalTs > effectiveTimestamp) {
+                // Если локально пользователь только что читал книгу на ридере, сохраняем "Читаю"
                 targetShelf = "reading";
-            } else if (book.getShelfType() != null && !"catalog".equals(book.getShelfType()) && !"search".equals(book.getShelfType())) {
-                targetShelf = book.getShelfType();
+            } else if ("done".equals(book.getShelfType()) || (effectivePercent >= 99.0 && effectiveChapter > 0)) {
+                targetShelf = "done";
             } else {
-                targetShelf = "to_read";
+                targetShelf = book.getShelfType();
             }
+        } else if (localShelfType != null) {
+            targetShelf = localShelfType;
+        } else {
+            targetShelf = "to_read";
         }
 
         ContentValues cv = new ContentValues();

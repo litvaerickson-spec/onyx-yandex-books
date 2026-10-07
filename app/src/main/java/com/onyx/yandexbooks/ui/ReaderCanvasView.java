@@ -94,20 +94,25 @@ public class ReaderCanvasView extends View {
         textPaint.setColor(Color.BLACK);
         textPaint.setTextSize(spToPx(config.getFontSizeSp()));
         textPaint.setTypeface(Typeface.create(Typeface.SERIF, Typeface.NORMAL));
+        textPaint.setHinting(Paint.HINTING_ON);
         textPaint.setSubpixelText(false);
         textPaint.setDither(false);
+        textPaint.setStyle(Paint.Style.FILL);
+        textPaint.setStrokeWidth(0f);
         textPaint.setFakeBoldText(config.isBoldText());
 
         headerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         headerPaint.setColor(Color.BLACK);
         headerPaint.setTextSize(spToPx(11));
         headerPaint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL));
+        headerPaint.setHinting(Paint.HINTING_ON);
         headerPaint.setSubpixelText(false);
 
         footerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         footerPaint.setColor(Color.BLACK); // Насыщенный черный цвет для E-Ink
         footerPaint.setTextSize(spToPx(11));
         footerPaint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
+        footerPaint.setHinting(Paint.HINTING_ON);
         footerPaint.setSubpixelText(false);
     }
 
@@ -122,15 +127,19 @@ public class ReaderCanvasView extends View {
     public void setTypographyConfig(TypographyConfig config) {
         this.config = config;
         textPaint.setTextSize(spToPx(config.getFontSizeSp()));
+        textPaint.setHinting(Paint.HINTING_ON);
+        textPaint.setSubpixelText(false);
+        textPaint.setDither(false);
         textPaint.setFakeBoldText(config.isBoldText());
 
         Typeface baseTf = FontHelper.getTypeface(getContext(), config.getFontFamily());
         textPaint.setTypeface(baseTf);
 
         if ("high".equalsIgnoreCase(config.getContrastMode())) {
-            textPaint.setStrokeWidth(0.5f);
+            textPaint.setStrokeWidth(0.2f);
             textPaint.setStyle(Paint.Style.FILL_AND_STROKE);
         } else {
+            textPaint.setStrokeWidth(0f);
             textPaint.setStyle(Paint.Style.FILL);
         }
 
@@ -205,7 +214,7 @@ public class ReaderCanvasView extends View {
             if (titleText.length() < chapterTitle.trim().length()) {
                 titleText += "…";
             }
-            canvas.drawText(titleText, config.getPaddingLeftPx(), headerY, headerPaint);
+            canvas.drawText(titleText, Math.round(config.getPaddingLeftPx()), Math.round(headerY), headerPaint);
         }
 
         boolean isImagePage = false;
@@ -298,8 +307,10 @@ public class ReaderCanvasView extends View {
                     // Отрисовка с выравниванием по ширине (Justify)
                     String[] words = drawText.split(" ");
                     float wordX = lineX;
+                    int drawY = Math.round(currentY);
                     for (int i = 0; i < words.length; i++) {
-                        canvas.drawText(words[i], wordX, currentY, textPaint);
+                        int drawX = Math.round(wordX);
+                        canvas.drawText(words[i], drawX, drawY, textPaint);
                         wordX += textPaint.measureText(words[i]) + textPaint.measureText(" ") + line.wordSpacing;
                         if (wordX > maxAllowedX) {
                             break;
@@ -307,7 +318,9 @@ public class ReaderCanvasView extends View {
                     }
                 } else {
                     // Стандартная отрисовка влево с соблюдением правого поля
-                    canvas.drawText(drawText, lineX, currentY, textPaint);
+                    int drawX = Math.round(lineX);
+                    int drawY = Math.round(currentY);
+                    canvas.drawText(drawText, drawX, drawY, textPaint);
                 }
 
                 currentY += lineHeight;
@@ -319,8 +332,10 @@ public class ReaderCanvasView extends View {
         String pageInfo = "Стр. " + globalPageIndex + " из " + totalBookPages + String.format(java.util.Locale.getDefault(), " (%.0f%%)", globalPercent);
         float pageInfoWidth = footerPaint.measureText(pageInfo);
 
-        // Страница и процент справа
-        canvas.drawText(pageInfo, getWidth() - config.getPaddingRightPx() - pageInfoWidth, footerY, footerPaint);
+        // Страница и процент справа с привязкой к физической сетке пикселей
+        int drawFooterX = Math.round(getWidth() - config.getPaddingRightPx() - pageInfoWidth);
+        int drawFooterY = Math.round(footerY);
+        canvas.drawText(pageInfo, drawFooterX, drawFooterY, footerPaint);
     }
 
     @Override

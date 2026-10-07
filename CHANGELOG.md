@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.1] - 2026-10-07
+
+### High-Precision E-Ink Font Hinting, Download Connection Leak Prevention & Universal Documentation
+- **Ликвидация зависаний при скачивании книг (Socket & Connection Pool Leak Prevention)**:
+  - Устранена утечка сетевых сокетов в OkHttp 3 при нештатных или редиректных ответах API: добавлено обязательное закрытие `response.close()` во всех блоках `finally` и обработчиках ошибок, исключающее исчерпание пула соединений (`ConnectionPool`).
+  - Оптимизированы сетевые таймауты (`HttpClientFactory`): увеличено время ожидания чтения (`readTimeout`) до 60 секунд и соединения до 20 секунд с активным пулом `ConnectionPool(10, 2, TimeUnit.MINUTES)`.
+  - Включено автоматическое следование HTTP/HTTPS редиректам (`followRedirects(true)`, `followSslRedirects(true)`) и добавлена поддержка извлечения прямых URL на скачивание из JSON-ответов API.
+  - В запросы добавления книги в библиотеку (`/profile/library_cards`) передается обязательное состояние `"state": "reading"`.
+- **Идеальная четкость шрифтов на экранах E-Ink Carta (устранение размытия)**:
+  - Включен аппаратный хинтинг FreeType (`Paint.HINTING_ON`) для основного текста, заголовков и колонтитулов, согласующий контуры глифов TrueType со структурой физических микрокапсул электронных чернил.
+  - Устранено субпиксельное размытие: все координаты вывода строк и слов (`wordX`, `lineX`, `currentY`, `headerY`, `footerY`) принудительно округляются до целых физических пикселей экрана (`Math.round`), исключая межпиксельное сглаживание Skia.
+  - Убран эффект размытого ореола (`stroke halo`): режим рисования зафиксирован на чистом заполнении (`Paint.Style.FILL`, `strokeWidth = 0f`), а базовые настройки контрастности и жирности приведены к естественным параметрам монохромной типографики (`contrastMode = "normal"`, `isBoldText = false`).
+- **Корректный расчет и отображение книг на полках**:
+  - Метод `isBookDownloaded` в `CacheManager` теперь проверяет фактическое наличие сохраненного файла книги на носителе (`length() > 500`), исключая ложные статусы нескачанной книги до момента парсинга глав в БД.
+  - Пакетное скачивание полки (`startBatchDownloadCurrentShelf`) теперь напрямую опрашивает базу данных по текущей полке (`getBooksByShelf`), не обрезаясь поисковым фильтром или экранной пагинацией.
+  - Добавлено немедленное отображение статуса подготовки и принудительное обновление интерфейса прогресс-бара (`postInvalidate()` и аппаратное обновление E-Ink).
+- **Универсализация репозитория и документации**:
+  - `README.md` приведен к универсальному виду: удалены устаревшие пономерные списки изменений, ссылки на релизы заменены на постоянные универсальные адреса (`releases/latest`), терминология синхронизирована на «ридер».
+
 ## [v1.5.0] - 2026-10-06
 
 ### Top E-Ink Carta Fonts, Interactive Selection Dialog & Shelf Downloader Overhaul

@@ -9,6 +9,7 @@ import android.util.Log;
 import android.util.LruCache;
 
 import com.onyx.yandexbooks.core.api.YandexBooksApiClient;
+import com.onyx.yandexbooks.core.api.models.Book;
 import com.onyx.yandexbooks.core.api.models.Chapter;
 import com.onyx.yandexbooks.core.epub.EpubParser;
 
@@ -207,10 +208,14 @@ public class CacheManager {
     }
 
     public boolean isBookDownloaded(String bookUuid) {
+        if (bookUuid == null || bookUuid.trim().isEmpty()) return false;
         File epub = getEpubFile(bookUuid);
-        if (epub.exists() && epub.length() > 0) {
-            List<Chapter> chs = dbHelper.getChapters(bookUuid);
-            return chs != null && !chs.isEmpty();
+        if (epub.exists() && epub.length() > 500) {
+            return true;
+        }
+        Book b = dbHelper.getBookByUuid(bookUuid);
+        if (b != null && b.isDownloaded()) {
+            return true;
         }
         return false;
     }

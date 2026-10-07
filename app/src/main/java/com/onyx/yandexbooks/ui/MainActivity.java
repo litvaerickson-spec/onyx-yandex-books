@@ -383,10 +383,8 @@ public class MainActivity extends Activity {
             return;
         }
 
-        // Получаем полный актуальный список книг на текущей активной полке
-        List<Book> shelfBooks = (currentBooks != null && !currentBooks.isEmpty())
-                ? new ArrayList<>(currentBooks)
-                : dbHelper.getBooksByShelf(currentShelf);
+        // Получаем полный актуальный список всех книг текущей полки из базы данных
+        List<Book> shelfBooks = dbHelper.getBooksByShelf(currentShelf);
 
         if (shelfBooks == null || shelfBooks.isEmpty()) {
             Toast.makeText(MainActivity.this, "На этой полке нет книг для скачивания", Toast.LENGTH_SHORT).show();
@@ -415,7 +413,7 @@ public class MainActivity extends Activity {
                 neededToDownload.add(b);
             }
         }
-        final int inMemoryCount = totalOnShelf - neededToDownload.size();
+        final int inMemoryCount = Math.max(0, totalOnShelf - neededToDownload.size());
 
         final LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -448,14 +446,17 @@ public class MainActivity extends Activity {
         final TextView currentBookText = new TextView(this);
         currentBookText.setTextSize(11);
         currentBookText.setTextColor(Color.BLACK);
-        currentBookText.setMinLines(2);
-        currentBookText.setMaxLines(3);
+        currentBookText.setMinLines(3);
+        currentBookText.setMaxLines(5);
         currentBookText.setEllipsize(TextUtils.TruncateAt.END);
         currentBookText.setPadding(0, (int) (8 * density), 0, (int) (6 * density));
 
         final ProgressBar progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (16 * density));
-        pbLp.setMargins(0, (int) (2 * density), 0, (int) (8 * density));
+        try {
+            progressBar.setProgressDrawable(getResources().getDrawable(R.drawable.progress_eink_bar));
+        } catch (Throwable ignored) {}
+        LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (18 * density));
+        pbLp.setMargins(0, (int) (4 * density), 0, (int) (8 * density));
         progressBar.setLayoutParams(pbLp);
 
         final LinearLayout actionContainer = new LinearLayout(this);
@@ -568,6 +569,11 @@ public class MainActivity extends Activity {
             root.addView(progressBar, root.indexOfChild(currentBookText) + 1);
         }
 
+        currentBookText.setText("Подготовка к скачиванию: 0 из " + queue.size() + "...");
+        progressBar.postInvalidate();
+        currentBookText.postInvalidate();
+        EpdController.requestFullRefresh(MainActivity.this, null);
+
         btnCancel.setText("Остановить");
         btnCancel.setEnabled(true);
         btnCancel.setOnClickListener(new View.OnClickListener() {
@@ -577,9 +583,12 @@ public class MainActivity extends Activity {
                     isCancelled.set(true);
                     btnCancel.setEnabled(false);
                     currentBookText.setText("Остановка загрузки...");
+                    currentBookText.postInvalidate();
+                    EpdController.requestFullRefresh(MainActivity.this, null);
                 } else {
                     dialog.dismiss();
                     adapter.notifyDataSetChanged();
+                    updateShelfFooter();
                     EpdController.requestFullRefresh(MainActivity.this, null);
                 }
             }
@@ -610,6 +619,9 @@ public class MainActivity extends Activity {
                             if (dialog.isShowing()) {
                                 progressBar.setProgress(idx - 1);
                                 currentBookText.setText("Загрузка (" + idx + " из " + total + "):\n«" + book.getTitle() + "»");
+                                progressBar.postInvalidate();
+                                currentBookText.postInvalidate();
+                                EpdController.requestFullRefresh(MainActivity.this, null);
                             }
                         }
                     });
@@ -623,6 +635,9 @@ public class MainActivity extends Activity {
                                 if (dialog.isShowing()) {
                                     progressBar.setProgress(idx);
                                     currentBookText.setText("Сохранено (" + idx + " из " + total + "):\n«" + book.getTitle() + "»");
+                                    progressBar.postInvalidate();
+                                    currentBookText.postInvalidate();
+                                    EpdController.requestFullRefresh(MainActivity.this, null);
                                 }
                             }
                         });
@@ -636,6 +651,9 @@ public class MainActivity extends Activity {
                                 if (dialog.isShowing()) {
                                     progressBar.setProgress(idx);
                                     currentBookText.setText("Ошибка («" + book.getTitle() + "»): " + errMsg);
+                                    progressBar.postInvalidate();
+                                    currentBookText.postInvalidate();
+                                    EpdController.requestFullRefresh(MainActivity.this, null);
                                 }
                             }
                         });
@@ -663,7 +681,10 @@ public class MainActivity extends Activity {
                         } else {
                             currentBookText.setText("Успешно! Все выбранные книги (" + ok + ") сохранены в память устройства.");
                         }
+                        progressBar.postInvalidate();
+                        currentBookText.postInvalidate();
                         adapter.notifyDataSetChanged();
+                        updateShelfFooter();
                         EpdController.requestFullRefresh(MainActivity.this, null);
                     }
                 });

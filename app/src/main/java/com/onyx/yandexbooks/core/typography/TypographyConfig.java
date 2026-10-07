@@ -28,9 +28,9 @@ public class TypographyConfig implements Serializable {
 
     private boolean isHyphenationEnabled = true;
     private boolean isJustifyEnabled = true;
-    private boolean isBoldText = true; // Высокий контраст для E-Ink Carta
+    private boolean isBoldText = false; // Натуральная четкая отрисовка без искусственного утолщения
     private String fontFamily = "literata"; // literata, charis_sil, pt_serif, pt_sans, serif, sans-serif, monospace
-    private String contrastMode = "high"; // high, normal
+    private String contrastMode = "normal"; // normal, high
     private String verticalMarginMode = "normal"; // small, normal, large
     private String customFontPath = null;
     private boolean isNightMode = false;
@@ -77,7 +77,7 @@ public class TypographyConfig implements Serializable {
     public String getFontFamily() { return fontFamily != null ? fontFamily : "literata"; }
     public void setFontFamily(String fontFamily) { this.fontFamily = fontFamily; }
 
-    public String getContrastMode() { return contrastMode != null ? contrastMode : "high"; }
+    public String getContrastMode() { return contrastMode != null ? contrastMode : "normal"; }
     public void setContrastMode(String contrastMode) { this.contrastMode = contrastMode; }
 
     public String getVerticalMarginMode() { return verticalMarginMode != null ? verticalMarginMode : "normal"; }

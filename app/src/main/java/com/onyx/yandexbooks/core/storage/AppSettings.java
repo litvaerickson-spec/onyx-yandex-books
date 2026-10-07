@@ -85,10 +85,10 @@ public class AppSettings {
     public boolean isHyphenationEnabled() { return prefs.getBoolean(KEY_HYPHENATION, true); }
     public void setHyphenationEnabled(boolean enabled) { prefs.edit().putBoolean(KEY_HYPHENATION, enabled).apply(); }
 
-    public boolean isBoldText() { return prefs.getBoolean(KEY_BOLD_TEXT, true); }
+    public boolean isBoldText() { return prefs.getBoolean(KEY_BOLD_TEXT, false); }
     public void setBoldText(boolean bold) { prefs.edit().putBoolean(KEY_BOLD_TEXT, bold).apply(); }
 
-    public String getContrastMode() { return prefs.getString(KEY_CONTRAST_MODE, "high"); }
+    public String getContrastMode() { return prefs.getString(KEY_CONTRAST_MODE, "normal"); }
     public void setContrastMode(String mode) { prefs.edit().putString(KEY_CONTRAST_MODE, mode).apply(); }
 
     public String getVerticalMarginMode() { return prefs.getString(KEY_VERTICAL_MARGIN, "normal"); }
