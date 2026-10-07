@@ -123,7 +123,7 @@ flowchart TD
 
 ```text
 01_onyx_yandex_books/
-├── README.md               # Главная страница и руководство проекта (v1.5.0)
+├── README.md               # Главная страница и руководство проекта
 ├── CHANGELOG.md            # Детальная история версий (Keep a Changelog)
 ├── DEV_LOG.md              # Инженерный журнал разработки
 ├── build_apk.sh            # Скрипт сборки и подписи релизного APK
