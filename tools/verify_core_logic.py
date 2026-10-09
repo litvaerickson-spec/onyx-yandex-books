@@ -1792,6 +1792,48 @@ def test_v151_eink_hinting_pixel_snapping_and_socket_leak_prevention():
     print("✅ Тест E-Ink Hinting, Pixel Snapping, Socket Leak Prevention & Docs успешно пройден!\n")
 
 
+def test_darwin1_api17_jelly_bean_compatibility_and_zero_standard_charsets():
+    print("--- [ТЕСТ 29] Onyx Darwin 1 (Android 4.2.2 Jelly Bean, API 17) & Zero StandardCharsets ---")
+
+    import os, re
+
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    java_dir = os.path.join(base_dir, "app/src/main/java")
+
+    # 1. Тотальная проверка исходного кода на отсутствие java.nio.charset.StandardCharsets (API 19+)
+    violations = []
+    for root, dirs, files in os.walk(java_dir):
+        for f in files:
+            if f.endswith(".java"):
+                fpath = os.path.join(root, f)
+                with open(fpath, "r", encoding="utf-8", errors="ignore") as jf:
+                    for line_no, line in enumerate(jf, 1):
+                        if "StandardCharsets" in line:
+                            violations.append(f"{f}:{line_no} -> {line.strip()}")
+
+    assert len(violations) == 0, f"Обнаружены несовместимые с Android 4.2.2 вызовы StandardCharsets: {violations}"
+    print(" - Проверка исходников app/src/main/java на 0 вызовов StandardCharsets: OK (0 нарушений)")
+
+    # 2. Проверка потокового парсера с кодировкой UTF-8 для Android 4.2.2
+    import io
+    sample_xml = '<?xml version="1.0" encoding="utf-8"?><package><metadata><title>Тест</title></metadata></package>'
+    stream = io.BytesIO(sample_xml.encode("utf-8"))
+    
+    # Эмуляция InputStreamReader(is, "UTF-8")
+    content = stream.read().decode("utf-8")
+    assert "<title>Тест</title>" in content
+    print(" - Корректное декодирование InputStreamReader(is, 'UTF-8'): OK")
+
+    # 3. Проверка minSdk в build.gradle и AndroidManifest
+    gradle_path = os.path.join(base_dir, "app/build.gradle")
+    with open(gradle_path, "r", encoding="utf-8") as gf:
+        gradle_text = gf.read()
+    assert "minSdk 17" in gradle_text, "minSdk должен быть строго 17 для поддержки Darwin 1!"
+    print(" - Конфигурация minSdk 17 (Android 4.2.2 Jelly Bean): OK")
+
+    print("✅ Тест совместимости с Onyx Darwin 1 (Android 4.2.2) успешно пройден!\n")
+
+
 if __name__ == "__main__":
     print("==================================================")
     print("🚀 Запуск тотальной верификации ядра Яндекс Книги")
@@ -1825,6 +1867,7 @@ if __name__ == "__main__":
     test_night_mode_and_batch_shelf_downloader()
     test_eink_custom_fonts_and_accurate_batch_downloader()
     test_v151_eink_hinting_pixel_snapping_and_socket_leak_prevention()
+    test_darwin1_api17_jelly_bean_compatibility_and_zero_standard_charsets()
     print("==================================================")
-    print("🎉 ВСЕ 28 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 29 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

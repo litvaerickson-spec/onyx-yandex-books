@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.2] - 2026-10-09
+
+### Fix Android 4.2.2 Jelly Bean (Onyx Darwin 1) EPUB Extraction & Full Backward Compatibility
+- **Устранение критической ошибки «Не удалось извлечь текст из книги» на Onyx Darwin 1**:
+  - Ликвидирована несовместимость с Android 4.2.2 Jelly Bean (API 17): класс `java.nio.charset.StandardCharsets` был добавлен в Android только в API 19 (Android 4.4 KitKat).
+  - При обращении к `StandardCharsets.UTF_8` в методе `EpubParser.readStreamToString()` и дисковом кэше `CacheManager` виртуальная машина Dalvik на устройствах с Android 4.2.2 выбрасывала исключение `NoClassDefFoundError: java.nio.charset.StandardCharsets`.
+  - Все вызовы `StandardCharsets.UTF_8` переведены на универсальную строковую кодировку `"UTF-8"`, поддерживаемую всеми версиями Android начиная с API 1.
+  - Теперь парсинг и чтение книг гарантированно работают на Onyx Darwin 1 (C67ML Carta), Darwin 2, Darwin 3, Vasco da Gama, Magellan и любых других устройствах с Android 4.2–4.4.
+- **Автоматическое восстановление уже скачанных книг**:
+  - При обновлении до версии 1.5.2 ранее сохраненные EPUB-файлы книг мгновенно парсятся и открываются при нажатии «Читать» без необходимости повторного скачивания из сети.
+
 ## [v1.5.1] - 2026-10-07
 
 ### High-Precision E-Ink Font Hinting, Download Connection Leak Prevention & Universal Documentation

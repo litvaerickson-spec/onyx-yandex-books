@@ -24,7 +24,6 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.List;
@@ -113,7 +112,7 @@ public class CacheManager {
             }
             File file = getTocFile(bookUuid);
             try (FileOutputStream fos = new FileOutputStream(file);
-                 OutputStreamWriter writer = new OutputStreamWriter(fos, StandardCharsets.UTF_8)) {
+                 OutputStreamWriter writer = new OutputStreamWriter(fos, "UTF-8")) {
                 writer.write(arr.toString());
             }
         } catch (Exception e) {
@@ -125,7 +124,7 @@ public class CacheManager {
         File file = getTocFile(bookUuid);
         if (!file.exists()) return null;
         try (FileInputStream fis = new FileInputStream(file);
-             BufferedReader reader = new BufferedReader(new InputStreamReader(fis, StandardCharsets.UTF_8))) {
+             BufferedReader reader = new BufferedReader(new InputStreamReader(fis, "UTF-8"))) {
             StringBuilder sb = new StringBuilder();
             String line;
             while ((line = reader.readLine()) != null) {
@@ -252,7 +251,7 @@ public class CacheManager {
         try {
             File file = getChapterFile(bookUuid, chapterId);
             try (FileOutputStream fos = new FileOutputStream(file);
-                 OutputStreamWriter writer = new OutputStreamWriter(fos, StandardCharsets.UTF_8)) {
+                 OutputStreamWriter writer = new OutputStreamWriter(fos, "UTF-8")) {
                 writer.write(content);
             }
         } catch (Exception e) {
@@ -285,7 +284,7 @@ public class CacheManager {
 
         StringBuilder sb = new StringBuilder();
         try (FileInputStream fis = new FileInputStream(file);
-             BufferedReader reader = new BufferedReader(new InputStreamReader(fis, StandardCharsets.UTF_8))) {
+             BufferedReader reader = new BufferedReader(new InputStreamReader(fis, "UTF-8"))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 sb.append(line).append("\n");
