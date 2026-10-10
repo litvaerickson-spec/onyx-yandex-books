@@ -27,7 +27,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ProgressBar;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -37,6 +36,7 @@ import com.onyx.yandexbooks.core.api.models.Book;
 import com.onyx.yandexbooks.core.api.models.Chapter;
 import com.onyx.yandexbooks.core.api.models.ReadingProgress;
 import com.onyx.yandexbooks.core.auth.TokenStorage;
+import com.onyx.yandexbooks.core.eink.EinkScrollView;
 import com.onyx.yandexbooks.core.eink.EpdController;
 import com.onyx.yandexbooks.core.storage.CacheManager;
 import com.onyx.yandexbooks.core.storage.DatabaseHelper;
@@ -106,6 +106,7 @@ public class MainActivity extends Activity {
         coverLoader = CoverLoader.getInstance(this);
 
         booksListView = (ListView) findViewById(R.id.books_list_view);
+        EpdController.configureEinkListView(this, booksListView);
         tabReadingBtn = (Button) findViewById(R.id.tab_reading_btn);
         tabToReadBtn = (Button) findViewById(R.id.tab_to_read_btn);
         tabCatalogBtn = (Button) findViewById(R.id.tab_catalog_btn);
@@ -1636,7 +1637,7 @@ public class MainActivity extends Activity {
         int screenWidth = getResources().getDisplayMetrics().widthPixels;
         int screenHeight = getResources().getDisplayMetrics().heightPixels;
 
-        LinearLayout root = new LinearLayout(this);
+        final LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.WHITE);
         int padH = (int) (14 * density);
@@ -1679,7 +1680,7 @@ public class MainActivity extends Activity {
         root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
 
         // 4. Аннотация книги (ГЛАВНАЯ ЧАСТЬ - занимает более 60% высоты окна!)
-        ScrollView scrollView = new ScrollView(this);
+        final EinkScrollView scrollView = new EinkScrollView(this);
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
         scrollLp.setMargins(0, (int) (6 * density), 0, (int) (6 * density));
         scrollView.setLayoutParams(scrollLp);
@@ -2069,6 +2070,20 @@ public class MainActivity extends Activity {
         final int targetW = (int) (screenWidth * 0.92);
         final int targetH = (int) (screenHeight * 0.85);
 
+        dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
+            @Override
+            public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                        return scrollView.pageScrollEink(true);
+                    } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+                        return scrollView.pageScrollEink(false);
+                    }
+                }
+                return false;
+            }
+        });
+
         dialog.setOnShowListener(new DialogInterface.OnShowListener() {
             @Override
             public void onShow(DialogInterface d) {
@@ -2076,6 +2091,7 @@ public class MainActivity extends Activity {
                     dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
                     dialog.getWindow().setLayout(targetW, targetH);
                 }
+                EpdController.requestFullRefresh(MainActivity.this, root);
             }
         });
 

@@ -754,8 +754,11 @@ public class YandexBooksApiClient {
             }
 
             File tempFile = new File(destFile.getAbsolutePath() + ".tmp");
-            try (InputStream in = response.body().byteStream();
-                 FileOutputStream out = new FileOutputStream(tempFile)) {
+            InputStream in = null;
+            FileOutputStream out = null;
+            try {
+                in = response.body().byteStream();
+                out = new FileOutputStream(tempFile);
                 byte[] buffer = new byte[8192];
                 int read;
                 while ((read = in.read(buffer)) != -1) {
@@ -765,6 +768,13 @@ public class YandexBooksApiClient {
             } catch (Exception e) {
                 if (tempFile.exists()) tempFile.delete();
                 return DownloadResult.error("Ошибка записи: " + e.getMessage());
+            } finally {
+                if (out != null) {
+                    try { out.close(); } catch (Exception ignored) {}
+                }
+                if (in != null) {
+                    try { in.close(); } catch (Exception ignored) {}
+                }
             }
 
             if (tempFile.exists() && tempFile.length() > 500) {
@@ -992,14 +1002,24 @@ public class YandexBooksApiClient {
             }
 
             File tempFile = new File(destFile.getAbsolutePath() + ".tmp");
-            try (InputStream in = response.body().byteStream();
-                 FileOutputStream out = new FileOutputStream(tempFile)) {
+            InputStream in = null;
+            FileOutputStream out = null;
+            try {
+                in = response.body().byteStream();
+                out = new FileOutputStream(tempFile);
                 byte[] buffer = new byte[8192];
                 int read;
                 while ((read = in.read(buffer)) != -1) {
                     out.write(buffer, 0, read);
                 }
                 out.flush();
+            } finally {
+                if (out != null) {
+                    try { out.close(); } catch (Exception ignored) {}
+                }
+                if (in != null) {
+                    try { in.close(); } catch (Exception ignored) {}
+                }
             }
 
             if (tempFile.exists() && tempFile.length() > 500) {

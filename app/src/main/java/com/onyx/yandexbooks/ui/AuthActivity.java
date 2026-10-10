@@ -8,6 +8,7 @@ import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.KeyEvent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -21,6 +22,7 @@ import com.google.zxing.qrcode.QRCodeWriter;
 import com.onyx.yandexbooks.R;
 import com.onyx.yandexbooks.core.auth.LocalAuthServer;
 import com.onyx.yandexbooks.core.auth.TokenStorage;
+import com.onyx.yandexbooks.core.eink.EinkScrollView;
 import com.onyx.yandexbooks.core.eink.EpdController;
 import com.onyx.yandexbooks.core.network.HttpClientFactory;
 
@@ -50,6 +52,7 @@ public class AuthActivity extends Activity {
     private static final int REQUEST_WEBVIEW = 1002;
     private static final Pattern TOKEN_REGEX = Pattern.compile("y0_[A-Za-z0-9_-]{15,}");
 
+    private EinkScrollView authScrollView;
     private ImageView qrImageView;
     private TextView localUrlTextView;
     private TextView statusTextView;
@@ -73,6 +76,7 @@ public class AuthActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_auth);
 
+        authScrollView = (EinkScrollView) findViewById(R.id.auth_scroll_view);
         qrImageView = (ImageView) findViewById(R.id.qr_image);
         localUrlTextView = (TextView) findViewById(R.id.local_url_text);
         statusTextView = (TextView) findViewById(R.id.status_text);
@@ -118,6 +122,23 @@ public class AuthActivity extends Activity {
         });
 
         startAuthorizationFlow();
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getAction() == KeyEvent.ACTION_DOWN && authScrollView != null) {
+            int keyCode = event.getKeyCode();
+            if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                if (authScrollView.pageScrollEink(true)) {
+                    return true;
+                }
+            } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+                if (authScrollView.pageScrollEink(false)) {
+                    return true;
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     private void setupLocalServer() {

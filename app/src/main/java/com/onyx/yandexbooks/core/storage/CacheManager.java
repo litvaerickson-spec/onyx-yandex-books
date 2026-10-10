@@ -105,26 +105,37 @@ public class CacheManager {
 
     public void saveTocTree(String bookUuid, List<EpubParser.TocNode> tocTree) {
         if (tocTree == null) return;
+        FileOutputStream fos = null;
+        OutputStreamWriter writer = null;
         try {
             JSONArray arr = new JSONArray();
             for (EpubParser.TocNode node : tocTree) {
                 arr.put(tocNodeToJson(node));
             }
             File file = getTocFile(bookUuid);
-            try (FileOutputStream fos = new FileOutputStream(file);
-                 OutputStreamWriter writer = new OutputStreamWriter(fos, "UTF-8")) {
-                writer.write(arr.toString());
-            }
+            fos = new FileOutputStream(file);
+            writer = new OutputStreamWriter(fos, "UTF-8");
+            writer.write(arr.toString());
         } catch (Exception e) {
             Log.e(TAG, "Error saving TOC tree", e);
+        } finally {
+            if (writer != null) {
+                try { writer.close(); } catch (Throwable ignored) {}
+            }
+            if (fos != null) {
+                try { fos.close(); } catch (Throwable ignored) {}
+            }
         }
     }
 
     public List<EpubParser.TocNode> loadTocTree(String bookUuid) {
         File file = getTocFile(bookUuid);
         if (!file.exists()) return null;
-        try (FileInputStream fis = new FileInputStream(file);
-             BufferedReader reader = new BufferedReader(new InputStreamReader(fis, "UTF-8"))) {
+        FileInputStream fis = null;
+        BufferedReader reader = null;
+        try {
+            fis = new FileInputStream(file);
+            reader = new BufferedReader(new InputStreamReader(fis, "UTF-8"));
             StringBuilder sb = new StringBuilder();
             String line;
             while ((line = reader.readLine()) != null) {
@@ -142,6 +153,13 @@ public class CacheManager {
         } catch (Exception e) {
             Log.e(TAG, "Error loading TOC tree", e);
             return null;
+        } finally {
+            if (reader != null) {
+                try { reader.close(); } catch (Throwable ignored) {}
+            }
+            if (fis != null) {
+                try { fis.close(); } catch (Throwable ignored) {}
+            }
         }
     }
 
@@ -248,14 +266,22 @@ public class CacheManager {
     }
 
     public void saveChapter(String bookUuid, String chapterId, String content) {
+        FileOutputStream fos = null;
+        OutputStreamWriter writer = null;
         try {
             File file = getChapterFile(bookUuid, chapterId);
-            try (FileOutputStream fos = new FileOutputStream(file);
-                 OutputStreamWriter writer = new OutputStreamWriter(fos, "UTF-8")) {
-                writer.write(content);
-            }
+            fos = new FileOutputStream(file);
+            writer = new OutputStreamWriter(fos, "UTF-8");
+            writer.write(content);
         } catch (Exception e) {
             Log.e(TAG, "Error saving chapter " + chapterId, e);
+        } finally {
+            if (writer != null) {
+                try { writer.close(); } catch (Throwable ignored) {}
+            }
+            if (fos != null) {
+                try { fos.close(); } catch (Throwable ignored) {}
+            }
         }
     }
 
@@ -283,8 +309,11 @@ public class CacheManager {
         }
 
         StringBuilder sb = new StringBuilder();
-        try (FileInputStream fis = new FileInputStream(file);
-             BufferedReader reader = new BufferedReader(new InputStreamReader(fis, "UTF-8"))) {
+        FileInputStream fis = null;
+        BufferedReader reader = null;
+        try {
+            fis = new FileInputStream(file);
+            reader = new BufferedReader(new InputStreamReader(fis, "UTF-8"));
             String line;
             while ((line = reader.readLine()) != null) {
                 sb.append(line).append("\n");
@@ -293,6 +322,13 @@ public class CacheManager {
         } catch (Exception e) {
             Log.e(TAG, "Error reading chapter " + chapterId, e);
             return "";
+        } finally {
+            if (reader != null) {
+                try { reader.close(); } catch (Throwable ignored) {}
+            }
+            if (fis != null) {
+                try { fis.close(); } catch (Throwable ignored) {}
+            }
         }
     }
 
@@ -718,7 +754,9 @@ public class CacheManager {
             return null;
         }
 
-        try (ZipFile zip = new ZipFile(epubFile)) {
+        ZipFile zip = null;
+        try {
+            zip = new ZipFile(epubFile);
             ZipEntry entry = zip.getEntry(zipPath.trim());
             if (entry == null) {
                 // Fallback: регистронезависимый поиск или поиск по имени файла
@@ -740,8 +778,14 @@ public class CacheManager {
             // 1. Быстрый замер размеров изображения без аллокации пикселей
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
-            try (InputStream is = zip.getInputStream(entry)) {
+            InputStream is = null;
+            try {
+                is = zip.getInputStream(entry);
                 BitmapFactory.decodeStream(is, null, opts);
+            } finally {
+                if (is != null) {
+                    try { is.close(); } catch (Throwable ignored) {}
+                }
             }
             if (opts.outWidth <= 0 || opts.outHeight <= 0) {
                 return null;
@@ -753,8 +797,14 @@ public class CacheManager {
             opts.inPreferredConfig = Bitmap.Config.RGB_565;
 
             Bitmap bmp;
-            try (InputStream is2 = zip.getInputStream(entry)) {
+            InputStream is2 = null;
+            try {
+                is2 = zip.getInputStream(entry);
                 bmp = BitmapFactory.decodeStream(is2, null, opts);
+            } finally {
+                if (is2 != null) {
+                    try { is2.close(); } catch (Throwable ignored) {}
+                }
             }
 
             if (bmp != null) {
@@ -764,6 +814,10 @@ public class CacheManager {
         } catch (Throwable t) {
             Log.w(TAG, "Error loading image from epub: " + zipPath, t);
             return null;
+        } finally {
+            if (zip != null) {
+                try { zip.close(); } catch (Throwable ignored) {}
+            }
         }
     }
 
@@ -798,7 +852,9 @@ public class CacheManager {
         // 2. Проверяем наличие обложки в самом EPUB файле
         File epubFile = getEpubFile(bookUuid);
         if (epubFile.exists() && epubFile.length() > 0) {
-            try (ZipFile zip = new ZipFile(epubFile)) {
+            ZipFile zip = null;
+            try {
+                zip = new ZipFile(epubFile);
                 Enumeration<? extends ZipEntry> en = zip.entries();
                 while (en.hasMoreElements()) {
                     ZipEntry ze = en.nextElement();
@@ -811,7 +867,12 @@ public class CacheManager {
                         }
                     }
                 }
-            } catch (Throwable ignored) {}
+            } catch (Throwable ignored) {
+            } finally {
+                if (zip != null) {
+                    try { zip.close(); } catch (Throwable ignored) {}
+                }
+            }
         }
 
         return null;
@@ -833,14 +894,24 @@ public class CacheManager {
     }
 
     private void copyFile(File src, File dst) throws Exception {
-        try (InputStream in = new FileInputStream(src);
-             OutputStream out = new FileOutputStream(dst)) {
+        InputStream in = null;
+        OutputStream out = null;
+        try {
+            in = new FileInputStream(src);
+            out = new FileOutputStream(dst);
             byte[] buf = new byte[8192];
             int len;
             while ((len = in.read(buf)) > 0) {
                 out.write(buf, 0, len);
             }
             out.flush();
+        } finally {
+            if (out != null) {
+                try { out.close(); } catch (Throwable ignored) {}
+            }
+            if (in != null) {
+                try { in.close(); } catch (Throwable ignored) {}
+            }
         }
     }
 }

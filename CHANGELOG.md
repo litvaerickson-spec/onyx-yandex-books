@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.3] - 2026-10-11
+
+### Fix Android 4.2.2 Jelly Bean (Onyx Darwin 1) Scroll Dirty-Rect Tearing, WebView Barcode Screen & Full API 17 Audit
+- **Устранение бага частичной перерисовки только верхнего левого угла при прокрутке на Onyx Darwin 1 (Android 4.2.2, API 17)**:
+  - Выявлена и устранена фундаментальная ошибка графической подсистемы Android 4.1/4.2 (`API 16/17`) при отключенном аппаратном ускорении (`android:hardwareAccelerated="false"`): стандартный метод `View.invalidate()` вычисляет грязный прямоугольник со смещением `(-mScrollX, -mScrollY, width - mScrollX, height - mScrollY)`, который при пересечении в `ViewGroup.invalidateChildInParent` обрезается до верхнего левого угла `[0, 0, width - mScrollX, height - mScrollY]`, оставляя остальную часть экрана неперерисованной («мешанина» из старых и новых кадров).
+  - Разработаны специализированные E-Ink контейнеры [`EinkScrollView`](app/src/main/java/com/onyx/yandexbooks/core/eink/EinkScrollView.java) и [`EinkWebView`](app/src/main/java/com/onyx/yandexbooks/core/eink/EinkWebView.java), переопределяющие все перегрузки `invalidate()`, `onScrollChanged()`, `computeScroll()`, `onOverScrolled()` и `onTouchEvent()` с передачей компенсированных координат `(scrollX, scrollY, scrollX + width, scrollY + height)` и принудительным расширением `ViewRootImpl.mDirty` на весь корневой `DecorView`.
+  - В [`EpdController`](app/src/main/java/com/onyx/yandexbooks/core/eink/EpdController.java) добавлены рекурсивная инвалидация дерева `invalidateViewTree()`, конфигуратор `configureEinkListView()` (отключение `scrollingCache`, `drawingCache`, `EdgeEffect` overscroll и градиентов затухания) и прямая рефлексивная поддержка драйвера контроллера экрана Rockchip RK3026 (`android.view.View$EINK_MODE.EPD_FULL` → `View.requestEpdMode`) для Onyx Boox Darwin 1.
+- **Исправление экрана авторизации и считывания QR/штрих-кода (`AuthWebViewActivity` & `AuthActivity`)**:
+  - Устранен конфликт промежуточного буфера `LAYER_TYPE_SOFTWARE` в `WebView` при прокрутке на Android 4.2.2 (переведен в `LAYER_TYPE_NONE` при глобальном софтверном рендеринге окна).
+  - Исправлен циклический вызов `qr.scrollIntoView(...)` каждые 1.5 секунды, который на движке `AppleWebKit/534.30` (Android 4.2.2) сбрасывал пользовательскую прокрутку и вызывал частичную инвалидацию тайлов; центрирование QR-кода теперь выполняется строго однократно при загрузке (`data-eink-centered`).
+  - Добавлена поддержка дискретного полистового перелистывания (`pageScrollEink`) боковыми аппаратными кнопками ридера во всех прокручиваемых окнах и диалогах (выбор шрифта, окно QR/браузера авторизации, оглавление и закладки, карточка книги, окно обновления).
+- **Компактная компоновка диалога выбора шрифта и 100% чистота байткода `classes.dex` под API 17**:
+  - Карточки 7 встроенных E-Ink шрифтов в `showFontSelectionDialog()` переведены на компактный двухстрочный макет, благодаря чему все 7 гарнитур полностью помещаются на один экран (758×1024 и 1072×1448) даже без необходимости прокрутки.
+  - Ликвидированы все оставшиеся ссылки на методы API 19 в `classes.dex` (`WebView.evaluateJavascript`, `Throwable.addSuppressed` / `AutoCloseable` на `ZipFile`): теперь в байткоде APK ровно 0 вызовов методов выше API 17.
+
 ## [v1.5.2] - 2026-10-09
 
 ### Fix Android 4.2.2 Jelly Bean (Onyx Darwin 1) EPUB Extraction & Full Backward Compatibility

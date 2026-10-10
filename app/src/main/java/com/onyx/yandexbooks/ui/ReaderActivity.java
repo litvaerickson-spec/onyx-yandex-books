@@ -37,13 +37,13 @@ import com.onyx.yandexbooks.core.api.models.Book;
 import com.onyx.yandexbooks.core.api.models.Chapter;
 import com.onyx.yandexbooks.core.api.models.ReadingProgress;
 import com.onyx.yandexbooks.core.auth.TokenStorage;
+import com.onyx.yandexbooks.core.eink.EinkScrollView;
 import com.onyx.yandexbooks.core.eink.EpdController;
 import com.onyx.yandexbooks.core.eink.HardwareKeyHandler;
 import com.onyx.yandexbooks.core.epub.EpubParser;
 import com.onyx.yandexbooks.core.storage.CacheManager;
 import com.onyx.yandexbooks.core.storage.DatabaseHelper;
 import com.onyx.yandexbooks.core.sync.SyncManager;
-import android.widget.ScrollView;
 import com.onyx.yandexbooks.core.typography.FontHelper;
 import com.onyx.yandexbooks.core.typography.TextPaginator;
 import com.onyx.yandexbooks.core.typography.TypographyConfig;
@@ -812,14 +812,14 @@ public class ReaderActivity extends Activity {
 
         float density = getResources().getDisplayMetrics().density;
         DisplayMetrics dm = getResources().getDisplayMetrics();
-        int targetW = (int) (dm.widthPixels * 0.90);
-        int maxH = (int) (dm.heightPixels * 0.85);
+        final int targetW = (int) (dm.widthPixels * 0.92);
+        final int maxH = (int) (dm.heightPixels * 0.92);
 
-        LinearLayout root = new LinearLayout(this);
+        final LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.WHITE);
-        int padH = (int) (14 * density);
-        int padV = (int) (12 * density);
+        int padH = (int) (12 * density);
+        int padV = (int) (8 * density);
         root.setPadding(padH, padV, padH, padV);
 
         TextView titleView = new TextView(this);
@@ -828,25 +828,25 @@ public class ReaderActivity extends Activity {
         titleView.setTypeface(null, Typeface.BOLD);
         titleView.setTextColor(Color.BLACK);
         titleView.setGravity(Gravity.CENTER);
-        titleView.setPadding(0, 0, 0, (int) (4 * density));
+        titleView.setPadding(0, 0, 0, (int) (2 * density));
         root.addView(titleView);
 
         TextView hintView = new TextView(this);
-        hintView.setText("Шрифты с высокой четкостью и хинтингом для E-Ink Carta");
-        hintView.setTextSize(11);
+        hintView.setText("Шрифты с высокой четкостью и хинтингом для E-Ink");
+        hintView.setTextSize(10);
         hintView.setTextColor(Color.BLACK);
         hintView.setGravity(Gravity.CENTER);
-        hintView.setPadding(0, 0, 0, (int) (6 * density));
+        hintView.setPadding(0, 0, 0, (int) (4 * density));
         root.addView(hintView);
 
         View divider = new View(this);
         divider.setBackgroundColor(Color.BLACK);
         root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
 
-        ScrollView scrollView = new ScrollView(this);
+        final EinkScrollView scrollView = new EinkScrollView(this);
         LinearLayout fontListLayout = new LinearLayout(this);
         fontListLayout.setOrientation(LinearLayout.VERTICAL);
-        fontListLayout.setPadding(0, (int) (6 * density), 0, (int) (6 * density));
+        fontListLayout.setPadding(0, (int) (4 * density), 0, (int) (4 * density));
 
         final String currentFontId = typographyConfig.getFontFamily();
         List<FontHelper.FontItem> fonts = FontHelper.getAvailableFonts();
@@ -858,33 +858,31 @@ public class ReaderActivity extends Activity {
             LinearLayout itemLayout = new LinearLayout(this);
             itemLayout.setOrientation(LinearLayout.VERTICAL);
             itemLayout.setBackgroundResource(isSelected ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
-            int itemPad = (int) (8 * density);
-            itemLayout.setPadding(itemPad, itemPad, itemPad, itemPad);
+            int itemPadH = (int) (8 * density);
+            int itemPadV = (int) (5 * density);
+            itemLayout.setPadding(itemPadH, itemPadV, itemPadH, itemPadV);
             LinearLayout.LayoutParams itemLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            itemLp.setMargins(0, 0, 0, (int) (6 * density));
+            itemLp.setMargins(0, 0, 0, (int) (4 * density));
             itemLayout.setLayoutParams(itemLp);
 
             TextView fontNameView = new TextView(this);
             String bullet = isSelected ? "• " : "○ ";
-            fontNameView.setText(bullet + fontItem.name);
-            fontNameView.setTextSize(14);
+            fontNameView.setText(bullet + fontItem.name + " — " + fontItem.subtitle);
+            fontNameView.setTextSize(12);
             fontNameView.setTypeface(tf, isSelected ? Typeface.BOLD : Typeface.NORMAL);
             fontNameView.setTextColor(Color.BLACK);
+            fontNameView.setSingleLine(true);
+            fontNameView.setEllipsize(TextUtils.TruncateAt.END);
             itemLayout.addView(fontNameView);
-
-            TextView fontDescView = new TextView(this);
-            fontDescView.setText(fontItem.subtitle);
-            fontDescView.setTextSize(10);
-            fontDescView.setTextColor(Color.BLACK);
-            fontDescView.setPadding((int) (14 * density), (int) (2 * density), 0, (int) (2 * density));
-            itemLayout.addView(fontDescView);
 
             TextView sampleView = new TextView(this);
             sampleView.setText(fontItem.sample);
-            sampleView.setTextSize(12);
+            sampleView.setTextSize(11);
             sampleView.setTypeface(tf, Typeface.NORMAL);
             sampleView.setTextColor(Color.BLACK);
-            sampleView.setPadding((int) (14 * density), (int) (2 * density), 0, 0);
+            sampleView.setSingleLine(true);
+            sampleView.setEllipsize(TextUtils.TruncateAt.END);
+            sampleView.setPadding((int) (12 * density), (int) (1 * density), 0, 0);
             itemLayout.addView(sampleView);
 
             itemLayout.setOnClickListener(new View.OnClickListener() {
@@ -907,7 +905,7 @@ public class ReaderActivity extends Activity {
 
         scrollView.addView(fontListLayout);
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
-        scrollLp.setMargins(0, (int) (4 * density), 0, (int) (8 * density));
+        scrollLp.setMargins(0, (int) (2 * density), 0, (int) (6 * density));
         root.addView(scrollView, scrollLp);
 
         Button btnClose = new Button(this);
@@ -917,7 +915,7 @@ public class ReaderActivity extends Activity {
         btnClose.setTextColor(Color.BLACK);
         btnClose.setBackgroundResource(R.drawable.btn_eink);
         btnClose.setPadding(0, 0, 0, 0);
-        LinearLayout.LayoutParams btnCloseLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (34 * density));
+        LinearLayout.LayoutParams btnCloseLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (32 * density));
         btnClose.setLayoutParams(btnCloseLp);
         btnClose.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -930,6 +928,20 @@ public class ReaderActivity extends Activity {
         dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         dialog.setCanceledOnTouchOutside(true);
 
+        dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
+            @Override
+            public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                        return scrollView.pageScrollEink(true);
+                    } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+                        return scrollView.pageScrollEink(false);
+                    }
+                }
+                return false;
+            }
+        });
+
         dialog.setOnShowListener(new DialogInterface.OnShowListener() {
             @Override
             public void onShow(DialogInterface d) {
@@ -937,6 +949,7 @@ public class ReaderActivity extends Activity {
                     dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
                     dialog.getWindow().setLayout(targetW, maxH);
                 }
+                EpdController.requestFullRefresh(ReaderActivity.this, root);
             }
         });
 
@@ -1145,7 +1158,7 @@ public class ReaderActivity extends Activity {
         final float density = getResources().getDisplayMetrics().density;
         DisplayMetrics dm = getResources().getDisplayMetrics();
 
-        LinearLayout root = new LinearLayout(this);
+        final LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.WHITE);
         int pad = (int) (12 * density);
@@ -1218,6 +1231,7 @@ public class ReaderActivity extends Activity {
         final ListView listChaptersView = new ListView(this);
         listChaptersView.setDivider(new ColorDrawable(Color.LTGRAY));
         listChaptersView.setDividerHeight((int) Math.max(1, density));
+        EpdController.configureEinkListView(this, listChaptersView);
         LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
         listChaptersView.setLayoutParams(listLp);
 
@@ -1288,6 +1302,7 @@ public class ReaderActivity extends Activity {
                             flattenVisibleNodes(tocTree, visibleTocNodes);
                             btnTabChapters.setText("Оглавление (" + visibleTocNodes.size() + ")");
                             notifyDataSetChanged();
+                            EpdController.requestFullRefresh(ReaderActivity.this, root);
                         }
                     });
                 } else {
@@ -1343,6 +1358,7 @@ public class ReaderActivity extends Activity {
         final ListView listBookmarksView = new ListView(this);
         listBookmarksView.setDivider(new ColorDrawable(Color.LTGRAY));
         listBookmarksView.setDividerHeight((int) Math.max(1, density));
+        EpdController.configureEinkListView(this, listBookmarksView);
         LinearLayout.LayoutParams bmListLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
         bmListLp.setMargins(0, (int) (6 * density), 0, 0);
         listBookmarksView.setLayoutParams(bmListLp);
@@ -1442,6 +1458,7 @@ public class ReaderActivity extends Activity {
                             listBookmarksView.setVisibility(View.GONE);
                             emptyBookmarksView.setVisibility(View.VISIBLE);
                         }
+                        EpdController.requestFullRefresh(ReaderActivity.this, root);
                         Toast.makeText(ReaderActivity.this, "Закладка удалена", Toast.LENGTH_SHORT).show();
                     }
                 });
@@ -1518,6 +1535,7 @@ public class ReaderActivity extends Activity {
                 bookmarksAdapter.notifyDataSetChanged();
                 btnTabBookmarks.setText("Закладки (" + bookmarksList.size() + ")");
                 updateBookmarksVisibility.run();
+                EpdController.requestFullRefresh(ReaderActivity.this, root);
                 Toast.makeText(ReaderActivity.this, "Закладка сохранена: " + title, Toast.LENGTH_SHORT).show();
             }
         });
@@ -1532,6 +1550,7 @@ public class ReaderActivity extends Activity {
                 btnTabBookmarks.setTextColor(Color.BLACK);
                 listChaptersView.setVisibility(View.VISIBLE);
                 bookmarksContainer.setVisibility(View.GONE);
+                EpdController.requestFullRefresh(ReaderActivity.this, root);
             }
         });
 
@@ -1544,6 +1563,7 @@ public class ReaderActivity extends Activity {
                 btnTabChapters.setTextColor(Color.BLACK);
                 listChaptersView.setVisibility(View.GONE);
                 bookmarksContainer.setVisibility(View.VISIBLE);
+                EpdController.requestFullRefresh(ReaderActivity.this, root);
             }
         });
 
@@ -1569,6 +1589,31 @@ public class ReaderActivity extends Activity {
         final int targetW = (int) (dm.widthPixels * 0.92);
         final int targetH = (int) (dm.heightPixels * 0.88);
 
+        dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
+            @Override
+            public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    ListView activeList = (listChaptersView.getVisibility() == View.VISIBLE) ? listChaptersView : listBookmarksView;
+                    if (activeList != null && activeList.getVisibility() == View.VISIBLE && activeList.getCount() > 0) {
+                        int first = activeList.getFirstVisiblePosition();
+                        int visibleCount = Math.max(1, activeList.getLastVisiblePosition() - first);
+                        if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                            int nextPos = Math.min(activeList.getCount() - 1, first + visibleCount);
+                            activeList.setSelection(nextPos);
+                            EpdController.requestFullRefresh(ReaderActivity.this, root);
+                            return true;
+                        } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+                            int prevPos = Math.max(0, first - visibleCount);
+                            activeList.setSelection(prevPos);
+                            EpdController.requestFullRefresh(ReaderActivity.this, root);
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+        });
+
         dialog.setOnShowListener(new DialogInterface.OnShowListener() {
             @Override
             public void onShow(DialogInterface d) {
@@ -1576,6 +1621,7 @@ public class ReaderActivity extends Activity {
                     dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.WHITE));
                     dialog.getWindow().setLayout(targetW, targetH);
                 }
+                EpdController.requestFullRefresh(ReaderActivity.this, root);
             }
         });
         dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {

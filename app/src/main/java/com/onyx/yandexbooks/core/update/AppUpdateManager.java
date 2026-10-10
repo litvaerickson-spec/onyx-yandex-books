@@ -17,16 +17,18 @@ import android.text.TextUtils;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.widget.Button;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import com.onyx.yandexbooks.R;
+import com.onyx.yandexbooks.core.eink.EinkScrollView;
+import com.onyx.yandexbooks.core.eink.EpdController;
 import com.onyx.yandexbooks.core.network.HttpClientFactory;
 
 import org.json.JSONArray;
@@ -229,7 +231,7 @@ public class AppUpdateManager {
         DisplayMetrics dm = activity.getResources().getDisplayMetrics();
         float density = dm.density;
 
-        LinearLayout root = new LinearLayout(activity);
+        final LinearLayout root = new LinearLayout(activity);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.WHITE);
         int padH = (int) (14 * density);
@@ -263,7 +265,7 @@ public class AppUpdateManager {
         root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
 
         // Описание изменений (Scrollable)
-        ScrollView scrollView = new ScrollView(activity);
+        final EinkScrollView scrollView = new EinkScrollView(activity);
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
         scrollLp.setMargins(0, (int) (4 * density), 0, (int) (4 * density));
         scrollView.setLayoutParams(scrollLp);
@@ -333,6 +335,20 @@ public class AppUpdateManager {
         final int targetW = (int) (dm.widthPixels * 0.90);
         final int targetH = (int) (dm.heightPixels * 0.82);
 
+        dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
+            @Override
+            public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                        return scrollView.pageScrollEink(true);
+                    } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+                        return scrollView.pageScrollEink(false);
+                    }
+                }
+                return false;
+            }
+        });
+
         dialog.setOnShowListener(new DialogInterface.OnShowListener() {
             @Override
             public void onShow(DialogInterface d) {
@@ -340,6 +356,7 @@ public class AppUpdateManager {
                     dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
                     dialog.getWindow().setLayout(targetW, targetH);
                 }
+                EpdController.requestFullRefresh(activity, root);
             }
         });
 

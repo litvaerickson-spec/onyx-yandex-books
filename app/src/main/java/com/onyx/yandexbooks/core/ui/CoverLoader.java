@@ -125,22 +125,35 @@ public class CoverLoader {
     }
 
     private Bitmap downloadBitmap(String url, File destFile) {
+        Response response = null;
+        InputStream in = null;
+        FileOutputStream out = null;
         try {
             Request request = new Request.Builder().url(url).build();
-            Response response = httpClient.newCall(request).execute();
+            response = httpClient.newCall(request).execute();
             if (response.isSuccessful() && response.body() != null) {
-                try (InputStream in = response.body().byteStream();
-                     FileOutputStream out = new FileOutputStream(destFile)) {
-                    byte[] buffer = new byte[4096];
-                    int read;
-                    while ((read = in.read(buffer)) != -1) {
-                        out.write(buffer, 0, read);
-                    }
-                    out.flush();
+                in = response.body().byteStream();
+                out = new FileOutputStream(destFile);
+                byte[] buffer = new byte[4096];
+                int read;
+                while ((read = in.read(buffer)) != -1) {
+                    out.write(buffer, 0, read);
                 }
+                out.flush();
                 return decodeSampledBitmap(destFile.getAbsolutePath(), 140, 200);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        } finally {
+            if (out != null) {
+                try { out.close(); } catch (Throwable ignored) {}
+            }
+            if (in != null) {
+                try { in.close(); } catch (Throwable ignored) {}
+            }
+            if (response != null) {
+                try { response.close(); } catch (Throwable ignored) {}
+            }
+        }
         return null;
     }
 

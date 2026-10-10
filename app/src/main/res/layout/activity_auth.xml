@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<com.onyx.yandexbooks.core.eink.EinkScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/auth_scroll_view"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:fillViewport="true"
@@ -135,4 +136,4 @@
         </LinearLayout>
 
     </LinearLayout>
-</ScrollView>
+</com.onyx.yandexbooks.core.eink.EinkScrollView>

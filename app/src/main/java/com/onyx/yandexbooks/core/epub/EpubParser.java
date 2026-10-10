@@ -468,10 +468,16 @@ public class EpubParser {
     private static String readEntryRawHtml(ZipFile zip, String href) {
         ZipEntry entry = findZipEntry(zip, href);
         if (entry == null) return null;
-        try (InputStream is = zip.getInputStream(entry)) {
+        InputStream is = null;
+        try {
+            is = zip.getInputStream(entry);
             return readStreamToString(is);
         } catch (Exception e) {
             return null;
+        } finally {
+            if (is != null) {
+                try { is.close(); } catch (Exception ignored) {}
+            }
         }
     }
 
@@ -509,14 +515,21 @@ public class EpubParser {
             containerEntry = zip.getEntry("meta-inf/container.xml");
         }
         if (containerEntry != null) {
-            try (InputStream is = zip.getInputStream(containerEntry)) {
+            InputStream is = null;
+            try {
+                is = zip.getInputStream(containerEntry);
                 String xml = readStreamToString(is);
                 Pattern pattern = Pattern.compile("full-path\\s*=\\s*[\"']([^\"']+\\.opf)[\"']", Pattern.CASE_INSENSITIVE);
                 Matcher matcher = pattern.matcher(xml);
                 if (matcher.find()) {
                     return matcher.group(1);
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            } finally {
+                if (is != null) {
+                    try { is.close(); } catch (Exception ignored) {}
+                }
+            }
         }
 
         return findAnyEntryByExtension(zip, ".opf");
@@ -527,7 +540,9 @@ public class EpubParser {
         ZipEntry opfEntry = zip.getEntry(opfPath);
         if (opfEntry == null) return result;
 
-        try (InputStream is = zip.getInputStream(opfEntry)) {
+        InputStream is = null;
+        try {
+            is = zip.getInputStream(opfEntry);
             String opfXml = readStreamToString(is);
 
             // Сопоставление id -> href из <manifest>
@@ -560,6 +575,10 @@ public class EpubParser {
             }
         } catch (Exception e) {
             Log.w(TAG, "Error reading OPF spine", e);
+        } finally {
+            if (is != null) {
+                try { is.close(); } catch (Exception ignored) {}
+            }
         }
         return result;
     }
@@ -567,7 +586,9 @@ public class EpubParser {
     private static String findNcxPathFromOpf(ZipFile zip, String opfPath, String baseDir) {
         ZipEntry opfEntry = zip.getEntry(opfPath);
         if (opfEntry == null) return null;
-        try (InputStream is = zip.getInputStream(opfEntry)) {
+        InputStream is = null;
+        try {
+            is = zip.getInputStream(opfEntry);
             String opfXml = readStreamToString(is);
             Pattern p = Pattern.compile("<item\\s+[^>]*?href\\s*=\\s*[\"']([^\"']+\\.ncx)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
             Matcher m = p.matcher(opfXml);
@@ -581,14 +602,21 @@ public class EpubParser {
                 String href = m2.group(1);
                 return baseDir.isEmpty() ? href : (baseDir + href);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        } finally {
+            if (is != null) {
+                try { is.close(); } catch (Exception ignored) {}
+            }
+        }
         return null;
     }
 
     private static String findNavPathFromOpf(ZipFile zip, String opfPath, String baseDir) {
         ZipEntry opfEntry = zip.getEntry(opfPath);
         if (opfEntry == null) return null;
-        try (InputStream is = zip.getInputStream(opfEntry)) {
+        InputStream is = null;
+        try {
+            is = zip.getInputStream(opfEntry);
             String opfXml = readStreamToString(is);
             Pattern p = Pattern.compile("<item\\s+[^>]*?properties\\s*=\\s*[\"'][^\"']*?\\bnav\\b[^\"']*?[\"'][^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
             Matcher m = p.matcher(opfXml);
@@ -596,14 +624,21 @@ public class EpubParser {
                 String href = m.group(1);
                 return baseDir.isEmpty() ? href : (baseDir + href);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        } finally {
+            if (is != null) {
+                try { is.close(); } catch (Exception ignored) {}
+            }
+        }
         return null;
     }
 
     public static String findCoverImageFromOpf(ZipFile zip, String opfPath, String baseDir) {
         ZipEntry opfEntry = zip.getEntry(opfPath);
         if (opfEntry == null) return null;
-        try (InputStream is = zip.getInputStream(opfEntry)) {
+        InputStream is = null;
+        try {
+            is = zip.getInputStream(opfEntry);
             String opfXml = readStreamToString(is);
             // 1. EPUB 2: <meta name="cover" content="id"/>
             Pattern metaPattern = Pattern.compile("<meta\\s+[^>]*?name\\s*=\\s*[\"']cover[\"'][^>]*?content\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
@@ -634,7 +669,12 @@ public class EpubParser {
             if (idM.find()) {
                 return resolveZipPath(baseDir, idM.group(1));
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        } finally {
+            if (is != null) {
+                try { is.close(); } catch (Exception ignored) {}
+            }
+        }
         return null;
     }
 
@@ -651,7 +691,9 @@ public class EpubParser {
             ncxBaseDir = ncxPath.substring(0, ncxPath.lastIndexOf('/') + 1);
         }
 
-        try (InputStream is = zip.getInputStream(entry)) {
+        InputStream is = null;
+        try {
+            is = zip.getInputStream(entry);
             XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
             factory.setNamespaceAware(false);
             XmlPullParser parser = factory.newPullParser();
@@ -728,6 +770,10 @@ public class EpubParser {
             }
         } catch (Throwable e) {
             Log.w(TAG, "Failed to parse NCX tree", e);
+        } finally {
+            if (is != null) {
+                try { is.close(); } catch (Exception ignored) {}
+            }
         }
         return roots;
     }
@@ -745,7 +791,9 @@ public class EpubParser {
             navBaseDir = navPath.substring(0, navPath.lastIndexOf('/') + 1);
         }
 
-        try (InputStream is = zip.getInputStream(entry)) {
+        InputStream is = null;
+        try {
+            is = zip.getInputStream(entry);
             XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
             factory.setNamespaceAware(false);
             XmlPullParser parser = factory.newPullParser();
@@ -817,6 +865,10 @@ public class EpubParser {
             }
         } catch (Throwable e) {
             Log.w(TAG, "Failed to parse NAV tree", e);
+        } finally {
+            if (is != null) {
+                try { is.close(); } catch (Exception ignored) {}
+            }
         }
         return roots;
     }

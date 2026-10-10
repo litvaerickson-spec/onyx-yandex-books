@@ -9,6 +9,7 @@ import android.net.http.SslError;
 import android.os.Bundle;
 import android.os.Handler;
 import android.util.Log;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
@@ -23,6 +24,7 @@ import android.widget.Toast;
 
 import com.onyx.yandexbooks.R;
 import com.onyx.yandexbooks.core.auth.TokenStorage;
+import com.onyx.yandexbooks.core.eink.EinkWebView;
 import com.onyx.yandexbooks.core.eink.EpdController;
 
 import java.net.URLDecoder;
@@ -32,7 +34,7 @@ import java.util.regex.Pattern;
 /**
  * Встроенный браузер для прямой авторизации в Яндекс ID на экране ридера.
  * Поддерживает ввод телефона/логина с вызовом экранной клавиатуры и нативным диалогом ввода.
- * Оснащен обходом устаревших SSL-сертификатов Android KitKat и перехватом OAuth-токенов.
+ * Оснащен обходом устаревших SSL-сертификатов Android Jelly Bean / KitKat и перехватом OAuth-токенов.
  */
 public class AuthWebViewActivity extends Activity {
 
@@ -41,7 +43,7 @@ public class AuthWebViewActivity extends Activity {
     private static final String AUTH_URL = "https://oauth.yandex.ru/authorize?response_type=token&client_id=" + BOOKMATE_CLIENT_ID + "&lang=ru";
     private static final Pattern TOKEN_PATTERN = Pattern.compile("y0_[A-Za-z0-9_-]{15,}");
 
-    private WebView webView;
+    private EinkWebView webView;
     private TextView webviewHint;
     private Button btnClose;
     private Button btnReload;
@@ -57,7 +59,7 @@ public class AuthWebViewActivity extends Activity {
 
         tokenStorage = new TokenStorage(this);
 
-        webView = (WebView) findViewById(R.id.auth_webview);
+        webView = (EinkWebView) findViewById(R.id.auth_webview);
         webviewHint = (TextView) findViewById(R.id.auth_webview_tip);
         btnClose = (Button) findViewById(R.id.btn_close_webview);
         btnReload = (Button) findViewById(R.id.btn_reload_webview);
@@ -75,6 +77,7 @@ public class AuthWebViewActivity extends Activity {
             @Override
             public void onClick(View v) {
                 webView.reload();
+                EpdController.requestFullRefresh(AuthWebViewActivity.this, webView);
             }
         });
 
@@ -94,6 +97,23 @@ public class AuthWebViewActivity extends Activity {
 
         setupWebView();
         webView.loadUrl(AUTH_URL);
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getAction() == KeyEvent.ACTION_DOWN && webView != null) {
+            int keyCode = event.getKeyCode();
+            if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                if (webView.pageScrollEink(true)) {
+                    return true;
+                }
+            } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+                if (webView.pageScrollEink(false)) {
+                    return true;
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     private void showKeyboard() {
@@ -136,6 +156,13 @@ public class AuthWebViewActivity extends Activity {
         }
     }
 
+    private void executeJavascript(WebView view, String js) {
+        if (view == null || js == null) return;
+        try {
+            view.loadUrl("javascript:" + js);
+        } catch (Throwable ignored) {}
+    }
+
     private void injectInputValue(String value) {
         String escaped = value.replace("\\", "\\\\").replace("'", "\\'");
         String js = "(function() {" +
@@ -166,22 +193,26 @@ public class AuthWebViewActivity extends Activity {
                 "    } catch(e) {" +
                 "      input.value = val;" +
                 "    }" +
-                "    input.dispatchEvent(new Event('input', {bubbles: true}));" +
-                "    input.dispatchEvent(new Event('change', {bubbles: true}));" +
+                "    try {" +
+                "      var evInput = document.createEvent('HTMLEvents');" +
+                "      evInput.initEvent('input', true, true);" +
+                "      input.dispatchEvent(evInput);" +
+                "      var evChange = document.createEvent('HTMLEvents');" +
+                "      evChange.initEvent('change', true, true);" +
+                "      input.dispatchEvent(evChange);" +
+                "    } catch(e2) {}" +
                 "  }" +
                 "})();";
 
-        if (android.os.Build.VERSION.SDK_INT >= 19) {
-            webView.evaluateJavascript(js, null);
-        } else {
-            webView.loadUrl("javascript:" + js);
-        }
+        executeJavascript(webView, js);
+        EpdController.requestFullRefresh(this, webView);
         Toast.makeText(this, "Значение вставлено в форму Яндекса", Toast.LENGTH_SHORT).show();
     }
 
     private void setupWebView() {
-        // Программный рендеринг для устранения артефактов E-Ink
-        webView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        // Используем LAYER_TYPE_NONE: в AndroidManifest.xml уже включен android:hardwareAccelerated="false",
+        // а промежуточный LAYER_TYPE_SOFTWARE в Android 4.2.2 (API 17) обрезает буфер при mScrollY > 0
+        webView.setLayerType(View.LAYER_TYPE_NONE, null);
 
         // Обеспечиваем гарантированный фокус для экранной клавиатуры Onyx
         webView.setFocusable(true);
@@ -248,7 +279,7 @@ public class AuthWebViewActivity extends Activity {
 
             @Override
             public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-                // Игнорируем проверку устаревших корневых сертификатов KitKat для яндексовских доменов
+                // Игнорируем проверку устаревших корневых сертификатов Jelly Bean / KitKat для яндексовских доменов
                 Log.w(TAG, "SSL Certificate Notice in WebView: " + error.toString());
                 handler.proceed();
             }
@@ -285,26 +316,24 @@ public class AuthWebViewActivity extends Activity {
 
     private void injectEinkStyles(WebView view) {
         if (view == null) return;
-        String css = "var st = document.getElementById('eink_auth_override');" +
+        String css = "(function() {" +
+                "var st = document.getElementById('eink_auth_override');" +
                 "if (!st) { st = document.createElement('style'); st.id = 'eink_auth_override'; (document.head || document.documentElement).appendChild(st); }" +
-                "st.innerHTML = '* { box-sizing: border-box !important; } " +
-                "html, body { margin: 0 !important; padding: 2px !important; width: 100% !important; overflow-x: hidden !important; } " +
+                "st.innerHTML = '* { box-sizing: border-box !important; -webkit-transition: none !important; transition: none !important; -webkit-animation: none !important; animation: none !important; } " +
+                "html, body { margin: 0 !important; padding: 2px !important; width: 100% !important; overflow-x: hidden !important; background: #FFFFFF !important; color: #000000 !important; } " +
                 "header, .Header, .passp-auth-header, [class*=\"header\"], [class*=\"Header\"] { padding: 1px 0 !important; margin: 0 !important; } " +
-                "h1, h2, h3, [class*=\"title\"], [class*=\"Title\"], .passp-title { font-size: 13px !important; line-height: 1.15 !important; margin: 2px 0 !important; } " +
-                "p, [class*=\"subtitle\"], [class*=\"description\"], .passp-auth-content__description { font-size: 10px !important; margin: 1px 0 !important; line-height: 1.15 !important; } " +
+                "h1, h2, h3, [class*=\"title\"], [class*=\"Title\"], .passp-title { font-size: 13px !important; line-height: 1.15 !important; margin: 2px 0 !important; color: #000000 !important; } " +
+                "p, [class*=\"subtitle\"], [class*=\"description\"], .passp-auth-content__description { font-size: 10px !important; margin: 1px 0 !important; line-height: 1.15 !important; color: #000000 !important; } " +
                 "ol, ul { margin: 2px 0 !important; padding-left: 18px !important; } " +
-                "li { font-size: 10px !important; margin: 1px 0 !important; line-height: 1.15 !important; } " +
+                "li { font-size: 10px !important; margin: 1px 0 !important; line-height: 1.15 !important; color: #000000 !important; } " +
                 "footer, .passp-footer, [class*=\"footer\"], [class*=\"Footer\"], .passp-auth-footer { display: none !important; } " +
-                ".passp-auth-content { padding: 1px !important; margin: 0 auto !important; max-width: 100% !important; } " +
+                ".passp-auth-content { padding: 1px !important; margin: 0 auto !important; max-width: 100% !important; background: #FFFFFF !important; } " +
                 "[data-testid*=\"qr\"], [class*=\"qr\"], [class*=\"Qr\"], .MagicField-qr, canvas, svg, .passp-auth-content img { max-width: 52vw !important; max-height: 38vh !important; margin: 4px auto !important; display: block !important; }';" +
                 "var qr = document.querySelector('[data-testid*=\"qr\"]') || document.querySelector('canvas') || document.querySelector('.MagicField') || document.querySelector('img[src*=\"data:image\"]');" +
-                "if (qr) { qr.scrollIntoView({block: 'center', inline: 'center'}); }";
+                "if (qr && !qr.getAttribute('data-eink-centered')) { qr.setAttribute('data-eink-centered', '1'); qr.scrollIntoView(true); }" +
+                "})();";
 
-        if (android.os.Build.VERSION.SDK_INT >= 19) {
-            view.evaluateJavascript(css, null);
-        } else {
-            view.loadUrl("javascript:" + css);
-        }
+        executeJavascript(view, css);
     }
 
     private final Handler styleHandler = new Handler();

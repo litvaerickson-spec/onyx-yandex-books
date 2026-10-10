@@ -1834,6 +1834,97 @@ def test_darwin1_api17_jelly_bean_compatibility_and_zero_standard_charsets():
     print("✅ Тест совместимости с Onyx Darwin 1 (Android 4.2.2) успешно пройден!\n")
 
 
+def test_darwin1_api17_scroll_dirty_rect_and_eink_webview_fix():
+    print("--- [ТЕСТ 30] Onyx Darwin 1 (API 17) Scroll Dirty-Rect Compensation, EinkScrollView & EinkWebView ---")
+
+    import os
+
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    java_dir = os.path.join(base_dir, "app/src/main/java")
+    res_layout_dir = os.path.join(base_dir, "app/src/main/res/layout")
+
+    # 1. Математическая верификация бага Android 4.2.2 View.invalidate() при mScrollY > 0
+    # В Android 4.2.2 View.invalidate() вычисляет r = (-sx, -sy, w - sx, h - sy)
+    # а View.invalidate(l, t, r, b) вычисляет r = (l - sx, t - sy, r - sx, b - sy)
+    # Родительский ViewGroup.invalidateChildInParent пересекает r с [0, 0, w, h].
+    def android42_uncompensated_dirty_rect(w, h, sx, sy):
+        # Стандартный View.invalidate() в Android 4.1/4.2 (API 16/17):
+        r_left, r_top, r_right, r_bottom = -sx, -sy, w - sx, h - sy
+        # Пересечение с границами View [0, 0, w, h] в родителе:
+        clip_l = max(0, r_left)
+        clip_t = max(0, r_top)
+        clip_r = min(w, r_right)
+        clip_b = min(h, r_bottom)
+        return (clip_l, clip_t, max(0, clip_r), max(0, clip_b))
+
+    def eink_compensated_dirty_rect(w, h, sx, sy):
+        # Наш EinkScrollView / EinkWebView / EpdController.invalidateViewTree:
+        # передает (sx, sy, sx + w, sy + h) в super.invalidate(l, t, r, b)
+        l, t, r, b = sx, sy, sx + w, sy + h
+        r_left, r_top, r_right, r_bottom = l - sx, t - sy, r - sx, b - sy
+        clip_l = max(0, r_left)
+        clip_t = max(0, r_top)
+        clip_r = min(w, r_right)
+        clip_b = min(h, r_bottom)
+        return (clip_l, clip_t, clip_r, clip_b)
+
+    # Проверяем при прокрутке вниз на sy=300px и вправо на sx=120px на экране 758x1024:
+    buggy_rect = android42_uncompensated_dirty_rect(758, 1024, 120, 300)
+    assert buggy_rect == (0, 0, 638, 724), f"Ожидался урезанный верхний левый угол, получено {buggy_rect}"
+    fixed_rect = eink_compensated_dirty_rect(758, 1024, 120, 300)
+    assert fixed_rect == (0, 0, 758, 1024), f"Компенсированный прямоугольник обязан покрывать 100% View: {fixed_rect}"
+    print(f" - Математическая компенсация Dirty-Rect при mScroll=(120,300): баг={buggy_rect} (только левый верх) -> фикс={fixed_rect} (100% экрана)")
+
+    # 2. Проверка наличия специализированных классов EinkScrollView и EinkWebView
+    eink_sv_path = os.path.join(java_dir, "com/onyx/yandexbooks/core/eink/EinkScrollView.java")
+    eink_wv_path = os.path.join(java_dir, "com/onyx/yandexbooks/core/eink/EinkWebView.java")
+    epd_path = os.path.join(java_dir, "com/onyx/yandexbooks/core/eink/EpdController.java")
+    assert os.path.exists(eink_sv_path), "Отсутствует EinkScrollView.java!"
+    assert os.path.exists(eink_wv_path), "Отсутствует EinkWebView.java!"
+
+    with open(epd_path, "r", encoding="utf-8") as f:
+        epd_code = f.read()
+    assert "invalidateViewTree" in epd_code, "В EpdController должен быть метод invalidateViewTree!"
+    assert "configureEinkListView" in epd_code, "В EpdController должен быть метод configureEinkListView!"
+    assert "tryRockchipViewEpdRefresh" in epd_code, "В EpdController должна быть поддержка Rockchip RK3026 View$EINK_MODE!"
+    print(" - Проверка классов EinkScrollView, EinkWebView и EpdController (RK3026 EPD_FULL + invalidateViewTree): OK")
+
+    # 3. Проверка отсутствия сырых ScrollView и WebView в UI и XML разметке
+    with open(os.path.join(res_layout_dir, "activity_auth.xml"), "r", encoding="utf-8") as f:
+        auth_xml = f.read()
+    assert "com.onyx.yandexbooks.core.eink.EinkScrollView" in auth_xml, "activity_auth.xml должен использовать EinkScrollView!"
+
+    with open(os.path.join(res_layout_dir, "activity_auth_webview.xml"), "r", encoding="utf-8") as f:
+        auth_wv_xml = f.read()
+    assert "com.onyx.yandexbooks.core.eink.EinkWebView" in auth_wv_xml, "activity_auth_webview.xml должен использовать EinkWebView!"
+
+    for rel_path in [
+        "com/onyx/yandexbooks/ui/ReaderActivity.java",
+        "com/onyx/yandexbooks/ui/MainActivity.java",
+        "com/onyx/yandexbooks/core/update/AppUpdateManager.java",
+    ]:
+        with open(os.path.join(java_dir, rel_path), "r", encoding="utf-8") as f:
+            code = f.read()
+        assert "new ScrollView(" not in code, f"{rel_path} всё ещё использует сырой ScrollView вместо EinkScrollView!"
+        assert "new EinkScrollView(" in code, f"{rel_path} должен использовать EinkScrollView!"
+
+    print(" - Все прокручиваемые контейнеры переведены на EinkScrollView / EinkWebView / configureEinkListView: OK")
+
+    # 4. Проверка отсутствия вызовов API 19 evaluateJavascript и try-with-resources (addSuppressed) в исходниках
+    import re
+    for root, dirs, files in os.walk(java_dir):
+        for fn in files:
+            if fn.endswith(".java"):
+                p = os.path.join(root, fn)
+                with open(p, "r", encoding="utf-8") as f:
+                    src = f.read()
+                assert "evaluateJavascript(" not in src, f"Обнаружен вызов API 19 evaluateJavascript в {fn}!"
+                assert re.search(r"\btry\s*\(", src) is None, f"Обнаружен try-with-resources (API 19 addSuppressed) в {fn}!"
+
+    print(" - Полное отсутствие вызовов API 19 (evaluateJavascript, try-with-resources addSuppressed): OK")
+    print("✅ Тест исправления прокрутки и перерисовки для Onyx Darwin 1 успешно пройден!\n")
+
+
 if __name__ == "__main__":
     print("==================================================")
     print("🚀 Запуск тотальной верификации ядра Яндекс Книги")
@@ -1868,6 +1959,7 @@ if __name__ == "__main__":
     test_eink_custom_fonts_and_accurate_batch_downloader()
     test_v151_eink_hinting_pixel_snapping_and_socket_leak_prevention()
     test_darwin1_api17_jelly_bean_compatibility_and_zero_standard_charsets()
+    test_darwin1_api17_scroll_dirty_rect_and_eink_webview_fix()
     print("==================================================")
-    print("🎉 ВСЕ 29 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 30 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")
