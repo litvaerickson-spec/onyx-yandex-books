@@ -54,12 +54,9 @@ public class EinkWebView extends WebView {
 
     @Override
     public void invalidate() {
-        int w = getWidth();
-        int h = getHeight();
-        if (w > 0 && h > 0) {
-            int sx = getScrollX();
-            int sy = getScrollY();
-            super.invalidate(sx, sy, sx + w, sy + h);
+        View root = getRootView();
+        if (root != null && root.getWidth() > 0 && root.getHeight() > 0) {
+            root.invalidate(0, 0, root.getWidth(), root.getHeight());
         } else {
             super.invalidate();
         }
@@ -67,12 +64,9 @@ public class EinkWebView extends WebView {
 
     @Override
     public void invalidate(Rect dirty) {
-        int w = getWidth();
-        int h = getHeight();
-        if (w > 0 && h > 0) {
-            int sx = getScrollX();
-            int sy = getScrollY();
-            super.invalidate(sx, sy, sx + w, sy + h);
+        View root = getRootView();
+        if (root != null && root.getWidth() > 0 && root.getHeight() > 0) {
+            root.invalidate(0, 0, root.getWidth(), root.getHeight());
         } else {
             super.invalidate(dirty);
         }
@@ -80,12 +74,9 @@ public class EinkWebView extends WebView {
 
     @Override
     public void invalidate(int l, int t, int r, int b) {
-        int w = getWidth();
-        int h = getHeight();
-        if (w > 0 && h > 0) {
-            int sx = getScrollX();
-            int sy = getScrollY();
-            super.invalidate(sx, sy, sx + w, sy + h);
+        View root = getRootView();
+        if (root != null && root.getWidth() > 0 && root.getHeight() > 0) {
+            root.invalidate(0, 0, root.getWidth(), root.getHeight());
         } else {
             super.invalidate(l, t, r, b);
         }
@@ -133,6 +124,10 @@ public class EinkWebView extends WebView {
         int currentY = getScrollY();
         int targetY = down ? currentY + step : Math.max(0, currentY - step);
         scrollTo(getScrollX(), targetY);
+        View root = getRootView();
+        if (root != null && root.getWidth() > 0 && root.getHeight() > 0) {
+            root.invalidate(0, 0, root.getWidth(), root.getHeight());
+        }
         EpdController.requestFullRefresh(getContext(), this);
         return true;
     }

@@ -810,10 +810,9 @@ public class ReaderActivity extends Activity {
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
 
-        float density = getResources().getDisplayMetrics().density;
+        final float density = getResources().getDisplayMetrics().density;
         DisplayMetrics dm = getResources().getDisplayMetrics();
         final int targetW = (int) (dm.widthPixels * 0.92);
-        final int maxH = (int) (dm.heightPixels * 0.92);
 
         final LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -832,7 +831,7 @@ public class ReaderActivity extends Activity {
         root.addView(titleView);
 
         TextView hintView = new TextView(this);
-        hintView.setText("Шрифты с высокой четкостью и хинтингом для E-Ink");
+        hintView.setText("7 оптимизированных шрифтов для экранов E-Ink");
         hintView.setTextSize(10);
         hintView.setTextColor(Color.BLACK);
         hintView.setGravity(Gravity.CENTER);
@@ -843,47 +842,67 @@ public class ReaderActivity extends Activity {
         divider.setBackgroundColor(Color.BLACK);
         root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
 
-        final EinkScrollView scrollView = new EinkScrollView(this);
-        LinearLayout fontListLayout = new LinearLayout(this);
+        final LinearLayout fontListLayout = new LinearLayout(this);
         fontListLayout.setOrientation(LinearLayout.VERTICAL);
         fontListLayout.setPadding(0, (int) (4 * density), 0, (int) (4 * density));
 
         final String currentFontId = typographyConfig.getFontFamily();
-        List<FontHelper.FontItem> fonts = FontHelper.getAvailableFonts();
+        final List<FontHelper.FontItem> fonts = FontHelper.getAvailableFonts();
+        final List<LinearLayout> fontItemViews = new ArrayList<LinearLayout>();
 
-        for (final FontHelper.FontItem fontItem : fonts) {
+        final int[] focusedIndex = new int[] { 0 };
+        for (int i = 0; i < fonts.size(); i++) {
+            if (fonts.get(i).id.equalsIgnoreCase(currentFontId)) {
+                focusedIndex[0] = i;
+                break;
+            }
+        }
+
+        for (int i = 0; i < fonts.size(); i++) {
+            final int index = i;
+            final FontHelper.FontItem fontItem = fonts.get(i);
             final boolean isSelected = fontItem.id.equalsIgnoreCase(currentFontId);
             Typeface tf = FontHelper.getTypeface(this, fontItem.id);
 
             LinearLayout itemLayout = new LinearLayout(this);
-            itemLayout.setOrientation(LinearLayout.VERTICAL);
+            itemLayout.setOrientation(LinearLayout.HORIZONTAL);
+            itemLayout.setGravity(Gravity.CENTER_VERTICAL);
             itemLayout.setBackgroundResource(isSelected ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
             int itemPadH = (int) (8 * density);
-            int itemPadV = (int) (5 * density);
+            int itemPadV = (int) (4 * density);
             itemLayout.setPadding(itemPadH, itemPadV, itemPadH, itemPadV);
-            LinearLayout.LayoutParams itemLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            itemLp.setMargins(0, 0, 0, (int) (4 * density));
+            LinearLayout.LayoutParams itemLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (36 * density));
+            itemLp.setMargins(0, (int) (1.5 * density), 0, (int) (1.5 * density));
             itemLayout.setLayoutParams(itemLp);
 
+            TextView bulletView = new TextView(this);
+            bulletView.setText(isSelected ? "● " : "○ ");
+            bulletView.setTextSize(13);
+            bulletView.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+            bulletView.setTextColor(Color.BLACK);
+            itemLayout.addView(bulletView);
+
             TextView fontNameView = new TextView(this);
-            String bullet = isSelected ? "• " : "○ ";
-            fontNameView.setText(bullet + fontItem.name + " — " + fontItem.subtitle);
-            fontNameView.setTextSize(12);
+            fontNameView.setText(fontItem.name);
+            fontNameView.setTextSize(13);
             fontNameView.setTypeface(tf, isSelected ? Typeface.BOLD : Typeface.NORMAL);
             fontNameView.setTextColor(Color.BLACK);
             fontNameView.setSingleLine(true);
             fontNameView.setEllipsize(TextUtils.TruncateAt.END);
             itemLayout.addView(fontNameView);
 
-            TextView sampleView = new TextView(this);
-            sampleView.setText(fontItem.sample);
-            sampleView.setTextSize(11);
-            sampleView.setTypeface(tf, Typeface.NORMAL);
-            sampleView.setTextColor(Color.BLACK);
-            sampleView.setSingleLine(true);
-            sampleView.setEllipsize(TextUtils.TruncateAt.END);
-            sampleView.setPadding((int) (12 * density), (int) (1 * density), 0, 0);
-            itemLayout.addView(sampleView);
+            View spacer = new View(this);
+            LinearLayout.LayoutParams spacerLp = new LinearLayout.LayoutParams(0, 1, 1.0f);
+            itemLayout.addView(spacer, spacerLp);
+
+            TextView badgeView = new TextView(this);
+            badgeView.setText(fontItem.subtitle);
+            badgeView.setTextSize(10);
+            badgeView.setTextColor(Color.BLACK);
+            badgeView.setSingleLine(true);
+            badgeView.setEllipsize(TextUtils.TruncateAt.END);
+            badgeView.setPadding((int) (4 * density), 0, 0, 0);
+            itemLayout.addView(badgeView);
 
             itemLayout.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -900,13 +919,15 @@ public class ReaderActivity extends Activity {
                 }
             });
 
+            fontItemViews.add(itemLayout);
             fontListLayout.addView(itemLayout);
         }
 
-        scrollView.addView(fontListLayout);
-        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
-        scrollLp.setMargins(0, (int) (2 * density), 0, (int) (6 * density));
-        root.addView(scrollView, scrollLp);
+        root.addView(fontListLayout);
+
+        View bottomDivider = new View(this);
+        bottomDivider.setBackgroundColor(Color.BLACK);
+        root.addView(bottomDivider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
 
         Button btnClose = new Button(this);
         btnClose.setText("Закрыть");
@@ -916,6 +937,7 @@ public class ReaderActivity extends Activity {
         btnClose.setBackgroundResource(R.drawable.btn_eink);
         btnClose.setPadding(0, 0, 0, 0);
         LinearLayout.LayoutParams btnCloseLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (32 * density));
+        btnCloseLp.setMargins(0, (int) (6 * density), 0, 0);
         btnClose.setLayoutParams(btnCloseLp);
         btnClose.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -931,12 +953,28 @@ public class ReaderActivity extends Activity {
         dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
             @Override
             public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
-                if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                    if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-                        return scrollView.pageScrollEink(true);
-                    } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-                        return scrollView.pageScrollEink(false);
+                if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+                        || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP
+                        || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_UP
+                        || keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
+
+                    if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                        int count = fonts.size();
+                        if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                            focusedIndex[0] = (focusedIndex[0] + 1) % count;
+                            updateFontDialogVisuals(fontItemViews, focusedIndex[0], fonts, currentFontId);
+                            EpdController.requestFullRefresh(ReaderActivity.this, root);
+                        } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                            focusedIndex[0] = (focusedIndex[0] - 1 + count) % count;
+                            updateFontDialogVisuals(fontItemViews, focusedIndex[0], fonts, currentFontId);
+                            EpdController.requestFullRefresh(ReaderActivity.this, root);
+                        } else if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
+                            if (focusedIndex[0] >= 0 && focusedIndex[0] < count) {
+                                fontItemViews.get(focusedIndex[0]).performClick();
+                            }
+                        }
                     }
+                    return true;
                 }
                 return false;
             }
@@ -947,16 +985,36 @@ public class ReaderActivity extends Activity {
             public void onShow(DialogInterface d) {
                 if (dialog.getWindow() != null) {
                     dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
-                    dialog.getWindow().setLayout(targetW, maxH);
+                    dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
                 }
                 EpdController.requestFullRefresh(ReaderActivity.this, root);
+            }
+        });
+
+        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface d) {
+                EpdController.requestFullRefresh(ReaderActivity.this, null);
             }
         });
 
         dialog.show();
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
-            dialog.getWindow().setLayout(targetW, maxH);
+            dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
+    private void updateFontDialogVisuals(List<LinearLayout> itemViews, int focusedIdx, List<FontHelper.FontItem> fonts, String currentFontId) {
+        for (int i = 0; i < itemViews.size(); i++) {
+            LinearLayout item = itemViews.get(i);
+            boolean isFocused = (i == focusedIdx);
+            boolean isCurrentActive = fonts.get(i).id.equalsIgnoreCase(currentFontId);
+            item.setBackgroundResource((isFocused || isCurrentActive) ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
+            TextView bullet = (TextView) item.getChildAt(0);
+            if (bullet != null) {
+                bullet.setText(isCurrentActive ? "● " : (isFocused ? "▶ " : "○ "));
+            }
         }
     }
 
@@ -1592,23 +1650,26 @@ public class ReaderActivity extends Activity {
         dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
             @Override
             public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
-                if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                    ListView activeList = (listChaptersView.getVisibility() == View.VISIBLE) ? listChaptersView : listBookmarksView;
-                    if (activeList != null && activeList.getVisibility() == View.VISIBLE && activeList.getCount() > 0) {
-                        int first = activeList.getFirstVisiblePosition();
-                        int visibleCount = Math.max(1, activeList.getLastVisiblePosition() - first);
-                        if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-                            int nextPos = Math.min(activeList.getCount() - 1, first + visibleCount);
-                            activeList.setSelection(nextPos);
-                            EpdController.requestFullRefresh(ReaderActivity.this, root);
-                            return true;
-                        } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-                            int prevPos = Math.max(0, first - visibleCount);
-                            activeList.setSelection(prevPos);
-                            EpdController.requestFullRefresh(ReaderActivity.this, root);
-                            return true;
+                if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+                        || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP
+                        || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                        ListView activeList = (listChaptersView.getVisibility() == View.VISIBLE) ? listChaptersView : listBookmarksView;
+                        if (activeList != null && activeList.getVisibility() == View.VISIBLE && activeList.getCount() > 0) {
+                            int first = activeList.getFirstVisiblePosition();
+                            int visibleCount = Math.max(1, activeList.getLastVisiblePosition() - first);
+                            if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                                int nextPos = Math.min(activeList.getCount() - 1, first + visibleCount);
+                                activeList.setSelection(nextPos);
+                                EpdController.requestFullRefresh(ReaderActivity.this, root);
+                            } else {
+                                int prevPos = Math.max(0, first - visibleCount);
+                                activeList.setSelection(prevPos);
+                                EpdController.requestFullRefresh(ReaderActivity.this, root);
+                            }
                         }
                     }
+                    return true;
                 }
                 return false;
             }
@@ -1734,6 +1795,19 @@ public class ReaderActivity extends Activity {
         dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         final int targetW = (int) (dm.widthPixels * 0.85);
+
+        dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
+            @Override
+            public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
+                if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+                        || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP
+                        || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    return true;
+                }
+                return false;
+            }
+        });
+
         dialog.setOnShowListener(new DialogInterface.OnShowListener() {
             @Override
             public void onShow(DialogInterface d) {
@@ -2678,9 +2752,17 @@ public class ReaderActivity extends Activity {
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyHandler.handleKeyDown(keyCode, event)) {
+        if (keyHandler != null && keyHandler.handleKeyDown(keyCode, event)) {
             return true;
         }
         return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (keyHandler != null && keyHandler.handleKeyUp(keyCode, event)) {
+            return true;
+        }
+        return super.onKeyUp(keyCode, event);
     }
 }

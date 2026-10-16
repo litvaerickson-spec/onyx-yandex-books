@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.4] - 2026-10-17
+
+### Zero-Scroll Architecture for Font Dialog, Complete Volume Slider Suppression & Full Window Invalidation
+- **Полное устранение появления системного ползунка громкости при использовании боковых кнопок листания**:
+  - В диалоге выбора шрифта (`showFontSelectionDialog`), оглавлении (`showTocDialog`), карточке книги (`showBookDetailsDialog`), окне обновления (`AppUpdateManager`) и прогрессе чтения (`showProgressDialog`) обработчик `dialog.setOnKeyListener` теперь перехватывает и безусловно возвращает `true` как для `KeyEvent.ACTION_DOWN`, так и для `KeyEvent.ACTION_UP` для всех кодов клавиш `KEYCODE_VOLUME_DOWN`, `KEYCODE_VOLUME_UP`, `KEYCODE_PAGE_DOWN`, `KEYCODE_PAGE_UP`.
+  - В `ReaderActivity`, `MainActivity`, `AuthActivity` и `AuthWebViewActivity` добавлены обязательные переопределения `onKeyUp()`, а в [`HardwareKeyHandler`](app/src/main/java/com/onyx/yandexbooks/core/eink/HardwareKeyHandler.java) реализован метод `handleKeyUp()`. Это гарантирует, что события отпускания физических клавиш больше никогда не передаются в системный `VolumePanel` Android.
+- **Архитектура диалога выбора шрифта без прокрутки (Zero-Scroll E-Ink Architecture)**:
+  - Устранена первопричина артефактов на Onyx Boox Darwin 1 (Android 4.2.2 Jelly Bean): контейнер `EinkScrollView` полностью удален из диалога выбора шрифта.
+  - Все 7 встроенных E-Ink шрифтов (Literata, Charis SIL, PT Serif, PT Sans, Системный Serif, Системный Sans, Моноширинный) переведены на сверхкомпактный однострочный формат высотой всего 36dp с отображением названия в собственной гарнитуре, радио-меткой `●`/`○` и компактным описанием.
+  - Высота всего окна диалога составляет ~370dp (менее 50% высоты экрана Darwin 1), благодаря чему диалог целиком помещается на дисплее с огромным запасом по высоте без какой-либо прокрутки (`mScrollY` строго равен 0).
+  - Добавлена аппаратная навигация: нажатия физических кнопок листания/громкости в диалоге перемещают фокус выбора по списку шрифтов вверх/вниз без скроллинга, а нажатие центральной кнопки или тап по экрану мгновенно применяет выбранный шрифт.
+- **Принудительная полноэкранная инвалидация для прокручиваемых контейнеров (Rockchip RK3026 Hardware Blit Fix)**:
+  - Выявлен аппаратный сбой 2D-растеризатора Rockchip RK3026 (Darwin 1) в режиме `android:hardwareAccelerated="false"`: при передаче частичного прямоугольника (`Surface.lockCanvas(dirtyRect)`) драйвер RGA обновляет только первый тайл 512×512 в левом верхнем углу, оставляя остальную область экрана неперерисованной.
+  - В [`EinkScrollView`](app/src/main/java/com/onyx/yandexbooks/core/eink/EinkScrollView.java) и [`EinkWebView`](app/src/main/java/com/onyx/yandexbooks/core/eink/EinkWebView.java) все вызовы `invalidate()`, `invalidate(Rect)` и `invalidate(l, t, r, b)` теперь принудительно вызывают `getRootView().invalidate(0, 0, width, height)` с координатами полного окна, заставляя SurfaceFlinger и контроллер экрана выполнять полное бесшовное обновление всей поверхности кадра.
+  - В `EinkScrollView.onTouchEvent` добавлена проверка высоты содержимого: если дочерний макет целиком помещается на экране (как на экране авторизации `AuthActivity`), прокрутка блокируется, предотвращая паразитный сдвиг `mScrollY`.
+
 ## [v1.5.3] - 2026-10-11
 
 ### Fix Android 4.2.2 Jelly Bean (Onyx Darwin 1) Scroll Dirty-Rect Tearing, WebView Barcode Screen & Full API 17 Audit

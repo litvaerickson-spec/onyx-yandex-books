@@ -7,7 +7,7 @@
 4. Onyx Boox Darwin 6 (Android 4.4.4 KitKat, API 19, Freescale i.MX6, 1072x1448, density=1.88, 300 DPI Carta Plus, 1 GB RAM)
 
 Включает:
-- [МОДУЛЬ 1] Инспекция реального Dalvik DEX-байткода (dexdump) внутри yandex-books-lite-v1.5.3.apk.
+- [МОДУЛЬ 1] Инспекция реального Dalvik DEX-байткода (dexdump) внутри yandex-books-lite-v1.5.4.apk.
 - [МОДУЛЬ 2] Физический запуск скомпилированных Java-классов (.class) в JVM (MultiDeviceVmHarness)
              по 4 виртуальным машинам (Darwin 1, Darwin 3, Darwin 5, Darwin 6).
 - [МОДУЛЬ 3] Попиксельная симуляция кадрового буфера (Framebuffer) при прокрутке EinkScrollView и EinkWebView
@@ -84,7 +84,7 @@ def test_dex_bytecode_and_source_audit():
     assert not violations, f"Обнаружены нарушения API 17 в исходном коде: {violations}"
     print("✅ Исходный код com.onyx.yandexbooks: 0 вызовов API 19+ (StandardCharsets, addSuppressed, evaluateJavascript).")
 
-    apk_path = os.path.join(PROJECT_DIR, "yandex-books-lite-v1.5.3.apk")
+    apk_path = os.path.join(PROJECT_DIR, "yandex-books-lite-v1.5.4.apk")
     assert os.path.exists(apk_path), f"APK не найден: {apk_path}"
 
     dex_tmp = os.path.join(PROJECT_DIR, "build", "inspect_classes.dex")

@@ -1209,8 +1209,8 @@ public class MainActivity extends Activity {
                 booksListView.setSelection(target);
                 updateShelfFooter();
                 EpdController.requestFullRefresh(MainActivity.this, booksListView);
-                return true;
             }
+            return true;
         } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
             if (booksListView != null && !currentBooks.isEmpty()) {
                 int current = booksListView.getFirstVisiblePosition();
@@ -1218,10 +1218,19 @@ public class MainActivity extends Activity {
                 booksListView.setSelection(target);
                 updateShelfFooter();
                 EpdController.requestFullRefresh(MainActivity.this, booksListView);
-                return true;
             }
+            return true;
         }
         return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+                || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            return true;
+        }
+        return super.onKeyUp(keyCode, event);
     }
 
     private void updateReaderModeButton() {
@@ -2073,12 +2082,14 @@ public class MainActivity extends Activity {
         dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
             @Override
             public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
-                if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                    if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-                        return scrollView.pageScrollEink(true);
-                    } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-                        return scrollView.pageScrollEink(false);
+                if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+                        || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP
+                        || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                        boolean down = (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_DOWN);
+                        scrollView.pageScrollEink(down);
                     }
+                    return true;
                 }
                 return false;
             }

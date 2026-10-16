@@ -73,6 +73,18 @@ public class EpdController {
     public static void invalidateViewTree(View view) {
         if (view == null) return;
         try {
+            View root = view.getRootView();
+            if (root != null) {
+                int rw = root.getWidth();
+                int rh = root.getHeight();
+                if (rw > 0 && rh > 0) {
+                    root.invalidate(0, 0, rw, rh);
+                } else {
+                    root.invalidate();
+                }
+                root.postInvalidate();
+            }
+
             int w = view.getWidth();
             int h = view.getHeight();
             int sx = view.getScrollX();
@@ -103,18 +115,6 @@ public class EpdController {
                     }
                 }
                 parent = parent.getParent();
-            }
-
-            View root = view.getRootView();
-            if (root != null) {
-                int rw = root.getWidth();
-                int rh = root.getHeight();
-                if (rw > 0 && rh > 0) {
-                    root.invalidate(0, 0, rw, rh);
-                } else {
-                    root.invalidate();
-                }
-                root.postInvalidate();
             }
         } catch (Throwable ignored) {}
     }

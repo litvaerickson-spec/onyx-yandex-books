@@ -31,8 +31,9 @@ marketing_materials/
 docs/physical_test_*
 docs/virtual_test_*
 
-# Temporary release notes drafts (use CHANGELOG.md for official logs)
-release_notes*.md
+# Temporary release notes drafts (use CHANGELOG.md and RELEASE_NOTES.md for official logs)
+docs/release_notes_*.md
+!RELEASE_NOTES.md
 
 # Design proposals drafts
 docs/icon_proposals/

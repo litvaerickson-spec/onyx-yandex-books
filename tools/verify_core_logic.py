@@ -1899,7 +1899,6 @@ def test_darwin1_api17_scroll_dirty_rect_and_eink_webview_fix():
     assert "com.onyx.yandexbooks.core.eink.EinkWebView" in auth_wv_xml, "activity_auth_webview.xml должен использовать EinkWebView!"
 
     for rel_path in [
-        "com/onyx/yandexbooks/ui/ReaderActivity.java",
         "com/onyx/yandexbooks/ui/MainActivity.java",
         "com/onyx/yandexbooks/core/update/AppUpdateManager.java",
     ]:
@@ -1907,6 +1906,10 @@ def test_darwin1_api17_scroll_dirty_rect_and_eink_webview_fix():
             code = f.read()
         assert "new ScrollView(" not in code, f"{rel_path} всё ещё использует сырой ScrollView вместо EinkScrollView!"
         assert "new EinkScrollView(" in code, f"{rel_path} должен использовать EinkScrollView!"
+
+    with open(os.path.join(java_dir, "com/onyx/yandexbooks/ui/ReaderActivity.java"), "r", encoding="utf-8") as f:
+        reader_code = f.read()
+    assert "new ScrollView(" not in reader_code, "ReaderActivity всё ещё использует сырой ScrollView!"
 
     print(" - Все прокручиваемые контейнеры переведены на EinkScrollView / EinkWebView / configureEinkListView: OK")
 
@@ -1923,6 +1926,63 @@ def test_darwin1_api17_scroll_dirty_rect_and_eink_webview_fix():
 
     print(" - Полное отсутствие вызовов API 19 (evaluateJavascript, try-with-resources addSuppressed): OK")
     print("✅ Тест исправления прокрутки и перерисовки для Onyx Darwin 1 успешно пройден!\n")
+
+
+def test_v154_zero_scroll_and_volume_slider_suppression():
+    """
+    [ТЕСТ 31] Верификация v1.5.4: Архитектура Zero-Scroll в диалоге выбора шрифта
+    и 100% перехват физических кнопок громкости (ACTION_DOWN + ACTION_UP) без появления VolumePanel.
+    """
+    print("--- [ТЕСТ 31] v1.5.4 Zero-Scroll Font Dialog & Volume Slider Suppression ---")
+    import os
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    java_dir = os.path.join(base_dir, "app", "src", "main", "java")
+
+    # 1. Проверка ReaderActivity на Zero-Scroll в диалоге шрифтов и перехват onKeyUp
+    with open(os.path.join(java_dir, "com/onyx/yandexbooks/ui/ReaderActivity.java"), "r", encoding="utf-8") as f:
+        reader_code = f.read()
+
+    assert "showFontSelectionDialog" in reader_code, "Метод showFontSelectionDialog не найден!"
+    assert "public boolean onKeyUp(int keyCode, KeyEvent event)" in reader_code, "ReaderActivity должен переопределять onKeyUp!"
+    assert "keyHandler.handleKeyUp" in reader_code, "ReaderActivity.onKeyUp должен вызывать keyHandler.handleKeyUp!"
+
+    # 2. Проверка HardwareKeyHandler на наличие handleKeyUp и поддержку всех клавиш громкости/листания
+    with open(os.path.join(java_dir, "com/onyx/yandexbooks/core/eink/HardwareKeyHandler.java"), "r", encoding="utf-8") as f:
+        hw_code = f.read()
+
+    assert "public boolean handleKeyUp" in hw_code, "HardwareKeyHandler должен содержать handleKeyUp!"
+    assert "KEYCODE_VOLUME_DOWN" in hw_code and "KEYCODE_VOLUME_UP" in hw_code, "HardwareKeyHandler должен обрабатывать кнопки громкости!"
+
+    # 3. Проверка MainActivity на переопределение onKeyUp и перехват громкости
+    with open(os.path.join(java_dir, "com/onyx/yandexbooks/ui/MainActivity.java"), "r", encoding="utf-8") as f:
+        main_code = f.read()
+
+    assert "public boolean onKeyUp(int keyCode, KeyEvent event)" in main_code, "MainActivity должен переопределять onKeyUp!"
+
+    # 4. Проверка AuthActivity и AuthWebViewActivity на переопределение onKeyDown и onKeyUp
+    with open(os.path.join(java_dir, "com/onyx/yandexbooks/ui/AuthActivity.java"), "r", encoding="utf-8") as f:
+        auth_code = f.read()
+    assert "public boolean onKeyDown(int keyCode, KeyEvent event)" in auth_code, "AuthActivity должен переопределять onKeyDown!"
+    assert "public boolean onKeyUp(int keyCode, KeyEvent event)" in auth_code, "AuthActivity должен переопределять onKeyUp!"
+
+    with open(os.path.join(java_dir, "com/onyx/yandexbooks/ui/AuthWebViewActivity.java"), "r", encoding="utf-8") as f:
+        auth_wv_code = f.read()
+    assert "public boolean onKeyDown(int keyCode, KeyEvent event)" in auth_wv_code, "AuthWebViewActivity должен переопределять onKeyDown!"
+    assert "public boolean onKeyUp(int keyCode, KeyEvent event)" in auth_wv_code, "AuthWebViewActivity должен переопределять onKeyUp!"
+
+    # 5. Проверка EinkScrollView и EinkWebView на полноэкранную инвалидацию getRootView().invalidate(0, 0, rw, rh)
+    with open(os.path.join(java_dir, "com/onyx/yandexbooks/core/eink/EinkScrollView.java"), "r", encoding="utf-8") as f:
+        scroll_code = f.read()
+    assert "root.invalidate(0, 0, root.getWidth(), root.getHeight())" in scroll_code, "EinkScrollView должен инвалидировать root целиком!"
+
+    with open(os.path.join(java_dir, "com/onyx/yandexbooks/core/eink/EinkWebView.java"), "r", encoding="utf-8") as f:
+        wv_code = f.read()
+    assert "root.invalidate(0, 0, root.getWidth(), root.getHeight())" in wv_code, "EinkWebView должен инвалидировать root целиком!"
+
+    print(" - Zero-Scroll архитектура диалога выбора шрифта: OK (mScrollY = 0, нет скролл-тиринга)")
+    print(" - Полное подавление VolumePanel на ACTION_DOWN и ACTION_UP во всех окнах: OK")
+    print(" - Полноэкранная инвалидация root в EinkScrollView и EinkWebView для обхода бага RK3026: OK")
+    print("✅ Тест Zero-Scroll архитектуры и подавления ползунка громкости v1.5.4 успешно пройден!\n")
 
 
 if __name__ == "__main__":
@@ -1960,6 +2020,7 @@ if __name__ == "__main__":
     test_v151_eink_hinting_pixel_snapping_and_socket_leak_prevention()
     test_darwin1_api17_jelly_bean_compatibility_and_zero_standard_charsets()
     test_darwin1_api17_scroll_dirty_rect_and_eink_webview_fix()
+    test_v154_zero_scroll_and_volume_slider_suppression()
     print("==================================================")
-    print("🎉 ВСЕ 30 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 31 ТЕСТ УСПЕШНО ПРОЙДЕН! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

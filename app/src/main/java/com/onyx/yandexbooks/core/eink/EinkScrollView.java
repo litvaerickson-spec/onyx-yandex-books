@@ -55,12 +55,9 @@ public class EinkScrollView extends ScrollView {
 
     @Override
     public void invalidate() {
-        int w = getWidth();
-        int h = getHeight();
-        if (w > 0 && h > 0) {
-            int sx = getScrollX();
-            int sy = getScrollY();
-            super.invalidate(sx, sy, sx + w, sy + h);
+        View root = getRootView();
+        if (root != null && root.getWidth() > 0 && root.getHeight() > 0) {
+            root.invalidate(0, 0, root.getWidth(), root.getHeight());
         } else {
             super.invalidate();
         }
@@ -68,12 +65,9 @@ public class EinkScrollView extends ScrollView {
 
     @Override
     public void invalidate(Rect dirty) {
-        int w = getWidth();
-        int h = getHeight();
-        if (w > 0 && h > 0) {
-            int sx = getScrollX();
-            int sy = getScrollY();
-            super.invalidate(sx, sy, sx + w, sy + h);
+        View root = getRootView();
+        if (root != null && root.getWidth() > 0 && root.getHeight() > 0) {
+            root.invalidate(0, 0, root.getWidth(), root.getHeight());
         } else {
             super.invalidate(dirty);
         }
@@ -81,12 +75,9 @@ public class EinkScrollView extends ScrollView {
 
     @Override
     public void invalidate(int l, int t, int r, int b) {
-        int w = getWidth();
-        int h = getHeight();
-        if (w > 0 && h > 0) {
-            int sx = getScrollX();
-            int sy = getScrollY();
-            super.invalidate(sx, sy, sx + w, sy + h);
+        View root = getRootView();
+        if (root != null && root.getWidth() > 0 && root.getHeight() > 0) {
+            root.invalidate(0, 0, root.getWidth(), root.getHeight());
         } else {
             super.invalidate(l, t, r, b);
         }
@@ -113,6 +104,14 @@ public class EinkScrollView extends ScrollView {
 
     @Override
     public boolean onTouchEvent(MotionEvent ev) {
+        // Если дочернее содержимое целиком умещается в видимую высоту контейнера,
+        // блокируем прокрутку (mScrollY остаётся строго 0), предотвращая артефакты E-Ink
+        if (getChildCount() > 0) {
+            View child = getChildAt(0);
+            if (child != null && child.getHeight() <= (getHeight() - getPaddingTop() - getPaddingBottom())) {
+                return false;
+            }
+        }
         boolean handled = super.onTouchEvent(ev);
         int action = ev.getActionMasked();
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
@@ -147,6 +146,10 @@ public class EinkScrollView extends ScrollView {
         }
 
         scrollTo(0, targetY);
+        View root = getRootView();
+        if (root != null && root.getWidth() > 0 && root.getHeight() > 0) {
+            root.invalidate(0, 0, root.getWidth(), root.getHeight());
+        }
         EpdController.requestFullRefresh(getContext(), this);
         return true;
     }

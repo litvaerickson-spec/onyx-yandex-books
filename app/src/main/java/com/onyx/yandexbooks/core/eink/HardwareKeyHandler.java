@@ -57,10 +57,18 @@ public class HardwareKeyHandler {
         return false;
     }
 
-    private boolean isPageKey(int keyCode) {
+    public boolean handleKeyUp(int keyCode, KeyEvent event) {
+        return isPageKey(keyCode);
+    }
+
+    public static boolean isPageKey(int keyCode) {
         return keyCode == KeyEvent.KEYCODE_PAGE_DOWN ||
                keyCode == KeyEvent.KEYCODE_PAGE_UP ||
                keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
-               keyCode == KeyEvent.KEYCODE_VOLUME_UP;
+               keyCode == KeyEvent.KEYCODE_VOLUME_UP ||
+               keyCode == KeyEvent.KEYCODE_DPAD_DOWN ||
+               keyCode == KeyEvent.KEYCODE_DPAD_UP ||
+               keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
+               keyCode == KeyEvent.KEYCODE_DPAD_LEFT;
     }
 }
