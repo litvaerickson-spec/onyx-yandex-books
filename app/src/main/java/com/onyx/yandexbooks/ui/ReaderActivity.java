@@ -3,6 +3,8 @@ package com.onyx.yandexbooks.ui;
 import android.app.Activity;
 import android.app.Dialog;
 import android.content.DialogInterface;
+import android.content.pm.ActivityInfo;
+import android.content.res.Configuration;
 import java.io.File;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -37,6 +39,7 @@ import com.onyx.yandexbooks.core.api.models.Book;
 import com.onyx.yandexbooks.core.api.models.Chapter;
 import com.onyx.yandexbooks.core.api.models.ReadingProgress;
 import com.onyx.yandexbooks.core.auth.TokenStorage;
+import com.onyx.yandexbooks.core.eink.EinkListView;
 import com.onyx.yandexbooks.core.eink.EinkScrollView;
 import com.onyx.yandexbooks.core.eink.EpdController;
 import com.onyx.yandexbooks.core.eink.HardwareKeyHandler;
@@ -123,6 +126,7 @@ public class ReaderActivity extends Activity {
     private Button btnToggleLineSpacing;
     private Button btnToggleMargins;
     private Button btnToggleVertMargins;
+    private Button btnToggleOrientation;
 
     private String bookUuid;
     private String bookTitle;
@@ -232,12 +236,14 @@ public class ReaderActivity extends Activity {
         btnToggleLineSpacing = (Button) findViewById(R.id.btn_toggle_line_spacing);
         btnToggleMargins = (Button) findViewById(R.id.btn_toggle_margins);
         btnToggleVertMargins = (Button) findViewById(R.id.btn_toggle_vert_margins);
+        btnToggleOrientation = (Button) findViewById(R.id.btn_toggle_orientation);
 
         if (readerBookTitleTop != null) {
             readerBookTitleTop.setText(bookTitle != null ? bookTitle : "Яндекс Книги");
         }
 
         appSettings = new com.onyx.yandexbooks.core.storage.AppSettings(this);
+        applyOrientation();
         typographyConfig = new TypographyConfig();
         typographyConfig.setFontSizeSp(appSettings.getFontSizeSp());
         typographyConfig.setFontFamily(appSettings.getFontFamily());
@@ -766,6 +772,16 @@ public class ReaderActivity extends Activity {
                 }
             });
         }
+
+        updateOrientationButtonText();
+        if (btnToggleOrientation != null) {
+            btnToggleOrientation.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    cycleOrientation();
+                }
+            });
+        }
     }
 
     private void switchFormatSubtab(String subtab) {
@@ -831,7 +847,7 @@ public class ReaderActivity extends Activity {
         root.addView(titleView);
 
         TextView hintView = new TextView(this);
-        hintView.setText("7 оптимизированных шрифтов для экранов E-Ink");
+        hintView.setText("8 оптимизированных шрифтов для экранов E-Ink");
         hintView.setTextSize(10);
         hintView.setTextColor(Color.BLACK);
         hintView.setGravity(Gravity.CENTER);
@@ -871,8 +887,8 @@ public class ReaderActivity extends Activity {
             int itemPadH = (int) (8 * density);
             int itemPadV = (int) (4 * density);
             itemLayout.setPadding(itemPadH, itemPadV, itemPadH, itemPadV);
-            LinearLayout.LayoutParams itemLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (36 * density));
-            itemLp.setMargins(0, (int) (1.5 * density), 0, (int) (1.5 * density));
+            LinearLayout.LayoutParams itemLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (33 * density));
+            itemLp.setMargins(0, (int) (1 * density), 0, (int) (1 * density));
             itemLayout.setLayoutParams(itemLp);
 
             TextView bulletView = new TextView(this);
@@ -1082,7 +1098,9 @@ public class ReaderActivity extends Activity {
 
     private String getMarginButtonText() {
         String mode = appSettings.getMarginMode();
-        if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_MEDIUM.equalsIgnoreCase(mode)) {
+        if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_EXTRA_NARROW.equalsIgnoreCase(mode)) {
+            return "Сверх-узкие (8)";
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_MEDIUM.equalsIgnoreCase(mode)) {
             return "Средние (32)";
         } else if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_WIDE.equalsIgnoreCase(mode)) {
             return "Широкие (48)";
@@ -1094,12 +1112,14 @@ public class ReaderActivity extends Activity {
     private void cycleMarginMode() {
         String current = appSettings.getMarginMode();
         String nextMode;
-        if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_NARROW.equalsIgnoreCase(current)) {
+        if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_EXTRA_NARROW.equalsIgnoreCase(current)) {
+            nextMode = com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_NARROW;
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_NARROW.equalsIgnoreCase(current)) {
             nextMode = com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_MEDIUM;
         } else if (com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_MEDIUM.equalsIgnoreCase(current)) {
             nextMode = com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_WIDE;
         } else {
-            nextMode = com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_NARROW;
+            nextMode = com.onyx.yandexbooks.core.storage.AppSettings.MARGIN_EXTRA_NARROW;
         }
         appSettings.setMarginMode(nextMode);
         int px = appSettings.getMarginPaddingPx();
@@ -1137,6 +1157,50 @@ public class ReaderActivity extends Activity {
         updateVertMarginButtonText();
         if (readerCanvas != null) readerCanvas.setTypographyConfig(typographyConfig);
         repaginateCurrentChapter();
+    }
+
+    private void updateOrientationButtonText() {
+        if (btnToggleOrientation == null) return;
+        String mode = appSettings.getReaderOrientation();
+        if (com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_LANDSCAPE.equalsIgnoreCase(mode)) {
+            btnToggleOrientation.setText("Ландшафт");
+        } else {
+            btnToggleOrientation.setText("Портрет");
+        }
+    }
+
+    private void cycleOrientation() {
+        String current = appSettings.getReaderOrientation();
+        String next = com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_LANDSCAPE.equalsIgnoreCase(current)
+                ? com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_PORTRAIT
+                : com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_LANDSCAPE;
+        appSettings.setReaderOrientation(next);
+        updateOrientationButtonText();
+        applyOrientation();
+    }
+
+    private void applyOrientation() {
+        String mode = appSettings.getReaderOrientation();
+        if (com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_LANDSCAPE.equalsIgnoreCase(mode)) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+        } else {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        }
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        updateOrientationButtonText();
+        if (readerCanvas != null) {
+            readerCanvas.post(new Runnable() {
+                @Override
+                public void run() {
+                    repaginateCurrentChapter();
+                    EpdController.requestFullRefresh(ReaderActivity.this, readerCanvas);
+                }
+            });
+        }
     }
 
     private void updateMenuControls() {
@@ -1286,7 +1350,7 @@ public class ReaderActivity extends Activity {
         root.addView(divider, divLp);
 
         // Контейнер 1: Оглавление (Древовидное оглавление NeoReader)
-        final ListView listChaptersView = new ListView(this);
+        final EinkListView listChaptersView = new EinkListView(this);
         listChaptersView.setDivider(new ColorDrawable(Color.LTGRAY));
         listChaptersView.setDividerHeight((int) Math.max(1, density));
         EpdController.configureEinkListView(this, listChaptersView);
@@ -1413,7 +1477,7 @@ public class ReaderActivity extends Activity {
         btnAddBookmark.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (34 * density)));
         bookmarksContainer.addView(btnAddBookmark);
 
-        final ListView listBookmarksView = new ListView(this);
+        final EinkListView listBookmarksView = new EinkListView(this);
         listBookmarksView.setDivider(new ColorDrawable(Color.LTGRAY));
         listBookmarksView.setDividerHeight((int) Math.max(1, density));
         EpdController.configureEinkListView(this, listBookmarksView);
@@ -1654,19 +1718,14 @@ public class ReaderActivity extends Activity {
                         || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP
                         || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
                     if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-                        ListView activeList = (listChaptersView.getVisibility() == View.VISIBLE) ? listChaptersView : listBookmarksView;
+                        EinkListView activeList = (listChaptersView.getVisibility() == View.VISIBLE) ? listChaptersView : listBookmarksView;
                         if (activeList != null && activeList.getVisibility() == View.VISIBLE && activeList.getCount() > 0) {
-                            int first = activeList.getFirstVisiblePosition();
-                            int visibleCount = Math.max(1, activeList.getLastVisiblePosition() - first);
                             if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                                int nextPos = Math.min(activeList.getCount() - 1, first + visibleCount);
-                                activeList.setSelection(nextPos);
-                                EpdController.requestFullRefresh(ReaderActivity.this, root);
+                                activeList.pageScrollEink(true);
                             } else {
-                                int prevPos = Math.max(0, first - visibleCount);
-                                activeList.setSelection(prevPos);
-                                EpdController.requestFullRefresh(ReaderActivity.this, root);
+                                activeList.pageScrollEink(false);
                             }
+                            EpdController.requestFullRefresh(ReaderActivity.this, root);
                         }
                     }
                     return true;

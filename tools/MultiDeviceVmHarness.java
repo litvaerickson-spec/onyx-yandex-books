@@ -362,7 +362,7 @@ public class MultiDeviceVmHarness {
             throw new AssertionError("Сбой моделей данных Book / Chapter / ReadingProgress!");
         }
 
-        System.out.println("  [5]  TextPaginator.class + TeXHyphenator.class + TypographyConfig.class (7 шрифтов, точек переноса="
+        System.out.println("  [5]  TextPaginator.class + TeXHyphenator.class + TypographyConfig.class (8 шрифтов, точек переноса="
                 + pts.size() + ", страниц гл.1=" + ch1Pages.size() + ", гл.2 с картинкой=" + ch2Pages.size() + "): OK");
     }
 

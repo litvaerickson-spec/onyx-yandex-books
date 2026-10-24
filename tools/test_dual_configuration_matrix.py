@@ -84,7 +84,10 @@ def test_dex_bytecode_and_source_audit():
     assert not violations, f"Обнаружены нарушения API 17 в исходном коде: {violations}"
     print("✅ Исходный код com.onyx.yandexbooks: 0 вызовов API 19+ (StandardCharsets, addSuppressed, evaluateJavascript).")
 
-    apk_path = os.path.join(PROJECT_DIR, "yandex-books-lite-v1.5.4.apk")
+    ver_file = os.path.join(PROJECT_DIR, "VERSION")
+    with open(ver_file, "r", encoding="utf-8") as vf:
+        ver_str = vf.read().strip()
+    apk_path = os.path.join(PROJECT_DIR, f"yandex-books-lite-v{ver_str}.apk")
     assert os.path.exists(apk_path), f"APK не найден: {apk_path}"
 
     dex_tmp = os.path.join(PROJECT_DIR, "build", "inspect_classes.dex")
@@ -770,6 +773,7 @@ def run_all_devices_functional_and_ui_audit():
         ("Charis SIL (KOReader / PocketBook)", "charis_sil", "Аа Бб Вв Гг Дд — Высокая контрастность для долгого чтения"),
         ("PT Serif (Отечественная классика)", "pt_serif", "Аа Бб Вв Гг Дд — Классическая русская антиква ПараТайп"),
         ("PT Sans (Чёткий гротеск без засечек)", "pt_sans", "Аа Бб Вв Гг Дд — Идеальная разборчивость мелкого кегля"),
+        ("Inglobal (Мягкий рубленый шрифт Apache 2.0)", "inglobal", "Аа Бб Вв Гг Дд — Бесплатный шрифт для комфортного чтения"),
         ("Georgia (Системная антиква с засечками)", "serif", "Аа Бб Вв Гг Дд — Стандартный системный шрифт с засечками"),
         ("Palatino / Roboto (Системный без засечек)", "sans-serif", "Аа Бб Вв Гг Дд — Чистый системный шрифт без засечек"),
         ("Monospace (Моноширинный терминальный)", "monospace", "Аа Бб Вв Гг Дд — Одинаковая ширина всех символов"),
@@ -871,7 +875,7 @@ def run_all_devices_functional_and_ui_audit():
             r_png = os.path.join(out_dir, f"{prefix}_verified_reader_{mode_tag}.png")
             img_r.save(r_png)
 
-        print(f"   ✅ Компактный диалог 7 шрифтов: высота {total_dlg_h}px из {max_allowed_h}px (100% вмещение на 1 экран без скролла).")
+        print(f"   ✅ Компактный диалог 8 шрифтов: высота {total_dlg_h}px из {max_allowed_h}px (100% вмещение на 1 экран без скролла).")
         print(f"   ✅ Холст чтения (Дневной и Ночной режимы): 0 обрезаний, целые координаты пикселей, скриншоты сохранены в {out_dir}")
 
 

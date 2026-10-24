@@ -312,7 +312,7 @@ public class ReaderCanvasView extends View {
                         int drawX = Math.round(wordX);
                         canvas.drawText(words[i], drawX, drawY, textPaint);
                         wordX += textPaint.measureText(words[i]) + textPaint.measureText(" ") + line.wordSpacing;
-                        if (wordX > maxAllowedX) {
+                        if (wordX > maxAllowedX + 4f) {
                             break;
                         }
                     }

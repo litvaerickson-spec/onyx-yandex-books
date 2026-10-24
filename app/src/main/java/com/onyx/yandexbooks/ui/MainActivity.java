@@ -26,6 +26,7 @@ import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import com.onyx.yandexbooks.core.eink.EinkListView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -61,7 +62,7 @@ public class MainActivity extends Activity {
 
     private static final int REQUEST_AUTH = 1001;
 
-    private ListView booksListView;
+    private EinkListView booksListView;
     private Button tabReadingBtn, tabToReadBtn, tabCatalogBtn, tabSearchBtn;
     private Button btnToggleReaderMode, btnCheckUpdate, btnMainMenu;
     private LinearLayout searchBarContainer;
@@ -105,7 +106,7 @@ public class MainActivity extends Activity {
         syncManager = new SyncManager(this, apiClient);
         coverLoader = CoverLoader.getInstance(this);
 
-        booksListView = (ListView) findViewById(R.id.books_list_view);
+        booksListView = (EinkListView) findViewById(R.id.books_list_view);
         EpdController.configureEinkListView(this, booksListView);
         tabReadingBtn = (Button) findViewById(R.id.tab_reading_btn);
         tabToReadBtn = (Button) findViewById(R.id.tab_to_read_btn);

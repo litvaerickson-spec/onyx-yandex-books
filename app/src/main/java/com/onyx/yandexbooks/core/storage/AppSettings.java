@@ -15,9 +15,14 @@ public class AppSettings {
     public static final String READER_MODE_LITE = "lite";
 
     public static final String KEY_MARGIN_MODE = "margin_mode";
-    public static final String MARGIN_NARROW = "narrow";   // 18px
-    public static final String MARGIN_MEDIUM = "medium";   // 28px
-    public static final String MARGIN_WIDE = "wide";       // 42px
+    public static final String MARGIN_EXTRA_NARROW = "extra_narrow"; // 8px
+    public static final String MARGIN_NARROW = "narrow";             // 18px
+    public static final String MARGIN_MEDIUM = "medium";             // 32px
+    public static final String MARGIN_WIDE = "wide";                 // 48px
+
+    public static final String KEY_ORIENTATION = "reader_orientation";
+    public static final String ORIENTATION_PORTRAIT = "portrait";
+    public static final String ORIENTATION_LANDSCAPE = "landscape";
 
     private final SharedPreferences prefs;
 
@@ -51,13 +56,23 @@ public class AppSettings {
 
     public int getMarginPaddingPx() {
         String mode = getMarginMode();
-        if (MARGIN_MEDIUM.equalsIgnoreCase(mode)) {
-            return 28;
+        if (MARGIN_EXTRA_NARROW.equalsIgnoreCase(mode)) {
+            return 8;
+        } else if (MARGIN_MEDIUM.equalsIgnoreCase(mode)) {
+            return 32;
         } else if (MARGIN_WIDE.equalsIgnoreCase(mode)) {
-            return 42;
+            return 48;
         } else {
             return 18; // Узкие по умолчанию
         }
+    }
+
+    public String getReaderOrientation() {
+        return prefs.getString(KEY_ORIENTATION, ORIENTATION_PORTRAIT);
+    }
+
+    public void setReaderOrientation(String orientation) {
+        prefs.edit().putString(KEY_ORIENTATION, orientation).apply();
     }
 
     public static final String KEY_FONT_SIZE = "font_size_sp";

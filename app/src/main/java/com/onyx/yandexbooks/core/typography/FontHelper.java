@@ -43,6 +43,7 @@ public class FontHelper {
         AVAILABLE_FONTS.add(new FontItem("charis_sil", "Charis SIL", "Эталонный шрифт ридеров KOReader и AlReader", "В чащах юга жил-был цитрус? Да! 12345", "fonts/charis_sil.ttf"));
         AVAILABLE_FONTS.add(new FontItem("pt_serif", "PT Serif", "Классический русский книжный с засечками (ПараТайп)", "В чащах юга жил-был цитрус? Да! 12345", "fonts/pt_serif.ttf"));
         AVAILABLE_FONTS.add(new FontItem("pt_sans", "PT Sans", "Чистый рубленый шрифт без засечек (ПараТайп)", "В чащах юга жил-был цитрус? Да! 12345", "fonts/pt_sans.ttf"));
+        AVAILABLE_FONTS.add(new FontItem("inglobal", "Inglobal", "Мягкий рубленый шрифт (Apache 2.0)", "В чащах юга жил-был цитрус? Да! 12345", "fonts/inglobal.ttf"));
         AVAILABLE_FONTS.add(new FontItem("serif", "Системный Serif", "Встроенный системный Android-шрифт с засечками", "В чащах юга жил-был цитрус? Да! 12345", null));
         AVAILABLE_FONTS.add(new FontItem("sans-serif", "Системный Sans", "Стандартный интерфейсный системный шрифт", "В чащах юга жил-был цитрус? Да! 12345", null));
         AVAILABLE_FONTS.add(new FontItem("monospace", "Моноширинный", "Фиксированная ширина символов для кода", "В чащах юга жил-был цитрус? Да! 12345", null));

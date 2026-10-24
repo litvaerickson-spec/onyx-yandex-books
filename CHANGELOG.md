@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.5] - 2026-10-24
+
+### Specialized EinkListView, Margin Symmetry with Extra-Narrow (8px), Inglobal Font (Apache 2.0) & Landscape Orientation
+- **Специализированный EinkListView для устранения частичной перерисовки при скролле пальцем на Darwin 1**:
+  - Создан компонент [`EinkListView`](app/src/main/java/com/onyx/yandexbooks/core/eink/EinkListView.java), наследующий `android.widget.ListView` и решающий проблему частичной перерисовки тайлов 512×512 видеоконтроллера Rockchip RK3026 на Android 4.2.2 Jelly Bean.
+  - Все перегрузки `invalidate()`, `invalidate(Rect)`, `invalidate(int, int, int, int)` и `invalidateViews()` принудительно вызывают `getRootView().invalidate(0, 0, width, height)` с границами полного окна.
+  - Полностью отключены кэши скроллинга (`scrollingCacheEnabled=false`, `drawingCacheEnabled=false`), overscroll-эффекты и градиенты затухания.
+  - Реализован дискретный постраничный скролл `pageScrollEink(boolean down)` для боковых аппаратных кнопок листания и отложенная EPD-очистка экрана (160 мс) по завершении жеста скроллинга пальцем (`ACTION_UP` / `ACTION_CANCEL`).
+  - Оглавление ридера (`listChaptersView`), закладки (`listBookmarksView`) и книжная полка (`booksListView`) переведены на `EinkListView`.
+- **Исправление геометрии боковых полей и режим «Сверх-узкие (8px)»**:
+  - Синхронизированы фактические значения отступов: «Сверх-узкие (8)» — 8 px (максимальная полезная область экрана для комфортного чтения), «Узкие (18)» — 18 px, «Средние (32)» — 32 px (устранено расхождение, ранее в коде возвращалось 28 px), «Широкие (48)» — 48 px (ранее 42 px).
+  - Скорректирован порог выравнивания строк по ширине (Justify threshold увеличен с 0.35 до 0.45), устраняющий асимметричные разрывы текста справа при средних и широких полях.
+  - Добавлен защитный допуск при округлении координат (`maxAllowedX + 4f`), исключающий ложное отсечение последнего слова строки.
+- **Внедрение бесплатного шрифта Inglobal (Apache 2.0)**:
+  - Интегрирован высокоразборчивый рубленый шрифт `inglobal.ttf` (лицензия Apache 2.0, дизайнеры А. Кочетов, Д. Давыдов, Е. Юртаев).
+  - Зарегистрирован в реестре [`FontHelper`](app/src/main/java/com/onyx/yandexbooks/core/typography/FontHelper.java), расширив выбор до 8 гарнитур (Literata, Charis SIL, PT Serif, PT Sans, Inglobal, Системный Serif, Системный Sans, Моноширинный).
+  - Диалог выбора шрифта сохранен в сверхкомпактной Zero-Scroll архитектуре (~380dp) с полной поддержкой листания физическими кнопками.
+- **Поддержка альбомной (ландшафтной) ориентации экрана**:
+  - В меню ридера (подвкладка «Между строк») добавлен переключатель ориентации «Портрет» / «Ландшафт».
+  - Настройка сохраняется в `AppSettings.KEY_ORIENTATION`.
+  - Реализована динамическая адаптивная перепагинация текущей главы через `OnCanvasSizeChangeListener` и `onConfigurationChanged()`.
+
 ## [v1.5.4] - 2026-10-17
 
 ### Zero-Scroll Architecture for Font Dialog, Complete Volume Slider Suppression & Full Window Invalidation

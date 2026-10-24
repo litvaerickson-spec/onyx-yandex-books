@@ -237,7 +237,7 @@ public class TextPaginator {
         }
         float actualTextWidth = paint.measureText(lineText);
         float delta = targetWidth - actualTextWidth;
-        if (delta > 0 && delta < targetWidth * 0.35f) { // Защита от неестественно огромных пробелов
+        if (delta > 0 && delta < targetWidth * 0.45f) { // Защита от неестественно огромных пробелов
             return delta / spaceCount;
         }
         return 0;

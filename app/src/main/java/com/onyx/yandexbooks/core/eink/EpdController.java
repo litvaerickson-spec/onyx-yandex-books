@@ -160,7 +160,8 @@ public class EpdController {
                 public void onScrollStateChanged(AbsListView view, int scrollState) {
                     invalidateViewTree(view);
                     if (scrollState == AbsListView.OnScrollListener.SCROLL_STATE_IDLE) {
-                        requestFullRefresh(context, view);
+                        View target = view.getRootView() != null ? view.getRootView() : view;
+                        requestFullRefresh(context, target);
                     }
                 }
 

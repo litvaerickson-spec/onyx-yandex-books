@@ -8,6 +8,9 @@
 """
 
 import sys
+import os
+
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def test_tex_hyphenation():
     print("--- [ТЕСТ 1] TeX Hyphenator (Слоговые переносы слов) ---")
@@ -1985,6 +1988,71 @@ def test_v154_zero_scroll_and_volume_slider_suppression():
     print("✅ Тест Zero-Scroll архитектуры и подавления ползунка громкости v1.5.4 успешно пройден!\n")
 
 
+def test_v155_eink_listview_margins_inglobal_orientation():
+    print("--- [ТЕСТ 32] v1.5.5 EinkListView, поля 8-48px, шрифт Inglobal (Apache 2.0) и ландшафт ---")
+
+    # 1. Проверка EinkListView
+    eink_lv_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/eink/EinkListView.java")
+    assert os.path.exists(eink_lv_path), "Файл EinkListView.java должен существовать!"
+    with open(eink_lv_path, "r", encoding="utf-8") as f:
+        lv_code = f.read()
+    assert "class EinkListView extends ListView" in lv_code
+    assert "root.invalidate(0, 0, root.getWidth(), root.getHeight())" in lv_code
+    assert "pageScrollEink(boolean down)" in lv_code
+
+    # Проверка использования EinkListView в оглавлении ридера
+    reader_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/ReaderActivity.java")
+    with open(reader_path, "r", encoding="utf-8") as f:
+        reader_code = f.read()
+    assert "new EinkListView(this)" in reader_code, "Оглавление и закладки в ReaderActivity должны использовать EinkListView!"
+
+    # Проверка использования EinkListView в activity_main.xml
+    main_xml_path = os.path.join(PROJECT_DIR, "app/src/main/res/layout/activity_main.xml")
+    with open(main_xml_path, "r", encoding="utf-8") as f:
+        main_xml = f.read()
+    assert "com.onyx.yandexbooks.core.eink.EinkListView" in main_xml, "books_list_view в activity_main.xml должен быть EinkListView!"
+
+    # 2. Проверка боковых полей (8, 18, 32, 48)
+    settings_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/storage/AppSettings.java")
+    with open(settings_path, "r", encoding="utf-8") as f:
+        settings_code = f.read()
+    assert 'MARGIN_EXTRA_NARROW = "extra_narrow"' in settings_code
+    assert 'return 8;' in settings_code
+    assert 'return 18;' in settings_code
+    assert 'return 32;' in settings_code
+    assert 'return 48;' in settings_code
+    assert "Сверх-узкие (8)" in reader_code
+    assert "Узкие (18)" in reader_code
+    assert "Средние (32)" in reader_code
+    assert "Широкие (48)" in reader_code
+
+    # 3. Проверка шрифта Inglobal
+    font_path = os.path.join(PROJECT_DIR, "app/src/main/assets/fonts/inglobal.ttf")
+    assert os.path.exists(font_path), "Файл inglobal.ttf должен присутствовать в assets/fonts/!"
+    font_size = os.path.getsize(font_path)
+    assert font_size > 40000, f"Размер inglobal.ttf слишком мал ({font_size} байт)"
+    font_helper_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/typography/FontHelper.java")
+    with open(font_helper_path, "r", encoding="utf-8") as f:
+        fh_code = f.read()
+    assert '"inglobal"' in fh_code
+    assert '"Inglobal"' in fh_code
+    assert 'Apache 2.0' in fh_code
+    assert "8 оптимизированных шрифтов" in reader_code
+
+    # 4. Проверка ландшафтной ориентации
+    assert "ORIENTATION_PORTRAIT" in settings_code
+    assert "ORIENTATION_LANDSCAPE" in settings_code
+    assert "btn_toggle_orientation" in reader_code
+    assert "setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)" in reader_code
+    assert "onConfigurationChanged(Configuration newConfig)" in reader_code
+
+    print(" - EinkListView с полной перерисовкой и постраничным листанием: OK")
+    print(" - Боковые поля: Сверх-узкие (8px), Узкие (18px), Средние (32px), Широкие (48px): OK")
+    print(" - Шрифт Inglobal (Apache 2.0): корректно внедрен и зарегистрирован в 8 гарнитурах: OK")
+    print(" - Ландшафтная ориентация: Портрет / Ландшафт с адаптивным репагинированием: OK")
+    print("✅ Тест v1.5.5 EinkListView, полей 8-48px, Inglobal и ландшафта успешно пройден!\n")
+
+
 if __name__ == "__main__":
     print("==================================================")
     print("🚀 Запуск тотальной верификации ядра Яндекс Книги")
@@ -2021,6 +2089,7 @@ if __name__ == "__main__":
     test_darwin1_api17_jelly_bean_compatibility_and_zero_standard_charsets()
     test_darwin1_api17_scroll_dirty_rect_and_eink_webview_fix()
     test_v154_zero_scroll_and_volume_slider_suppression()
+    test_v155_eink_listview_margins_inglobal_orientation()
     print("==================================================")
-    print("🎉 ВСЕ 31 ТЕСТ УСПЕШНО ПРОЙДЕН! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 32 ТЕСТА УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

@@ -245,7 +245,7 @@
         android:layout_weight="1">
 
         <!-- Список книг на полке -->
-        <ListView
+        <com.onyx.yandexbooks.core.eink.EinkListView
             android:id="@+id/books_list_view"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
