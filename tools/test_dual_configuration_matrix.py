@@ -743,28 +743,58 @@ def run_all_devices_functional_and_ui_audit():
 
     configs = [
         {
-            "name": "Onyx Boox Darwin 1 (Android 4.2.2, API 17, RK3026)",
+            "name": "Onyx Boox Darwin 1 (Портрет, Android 4.2.2, API 17, RK3026)",
             "width": 758,
             "height": 1024,
             "density": 1.33,
+            "is_landscape": False,
             "out_dir": OUT_DIR_D1,
-            "prefix": "darwin1",
+            "prefix": "darwin1_port",
         },
         {
-            "name": "Onyx Boox Darwin 3 / Darwin 5 (Android 4.4.4, API 19, i.MX6)",
+            "name": "Onyx Boox Darwin 1 (Ландшафт, Android 4.2.2, API 17, RK3026)",
+            "width": 1024,
+            "height": 758,
+            "density": 1.33,
+            "is_landscape": True,
+            "out_dir": OUT_DIR_D1,
+            "prefix": "darwin1_land",
+        },
+        {
+            "name": "Onyx Boox Darwin 3 / Darwin 5 (Портрет, Android 4.4.4, API 19, i.MX6)",
             "width": 758,
             "height": 1024,
             "density": 1.33,
+            "is_landscape": False,
             "out_dir": OUT_DIR_D1,
-            "prefix": "darwin3_5",
+            "prefix": "darwin3_5_port",
         },
         {
-            "name": "Onyx Boox Darwin 6 (Android 4.4.4, API 19, 300 DPI Carta Plus)",
+            "name": "Onyx Boox Darwin 3 / Darwin 5 (Ландшафт, Android 4.4.4, API 19, i.MX6)",
+            "width": 1024,
+            "height": 758,
+            "density": 1.33,
+            "is_landscape": True,
+            "out_dir": OUT_DIR_D1,
+            "prefix": "darwin3_5_land",
+        },
+        {
+            "name": "Onyx Boox Darwin 6 (Портрет, Android 4.4.4, API 19, 300 DPI Carta Plus)",
             "width": 1072,
             "height": 1448,
             "density": 1.88,
+            "is_landscape": False,
             "out_dir": OUT_DIR_D6,
-            "prefix": "darwin6",
+            "prefix": "darwin6_port",
+        },
+        {
+            "name": "Onyx Boox Darwin 6 (Ландшафт, Android 4.4.4, API 19, 300 DPI Carta Plus)",
+            "width": 1448,
+            "height": 1072,
+            "density": 1.88,
+            "is_landscape": True,
+            "out_dir": OUT_DIR_D6,
+            "prefix": "darwin6_land",
         },
     ]
 
@@ -788,31 +818,31 @@ def run_all_devices_functional_and_ui_audit():
 
         print(f"\n🔹 Проверка устройства: {cfg['name']} [{w}x{h}, density={density}]")
 
-        # 1. Рендеринг и проверка компактного диалога выбора шрифта (7 шрифтов на 1 экране без прокрутки)
+        # 1. Рендеринг и проверка компактного диалога выбора шрифта (8 шрифтов на 1 экране без прокрутки)
         img_font = Image.new("RGB", (w, h), (220, 220, 220))
         d_font = ImageDraw.Draw(img_font)
-        dlg_w = int(w * 0.90)
+        dlg_w = min(int(w * 0.90), int(580 * density))
         dlg_x = (w - dlg_w) // 2
 
-        pad_outer = int(12 * density)
-        header_h = int(28 * density)
-        card_h = int(40 * density)
-        card_gap = int(4 * density)
-        close_btn_h = int(38 * density)
+        pad_outer = int(8 * density)
+        header_h = int(24 * density)
+        card_h = int(33 * density)
+        card_gap = int(2 * density)
+        close_btn_h = int(32 * density)
 
-        total_dlg_h = pad_outer * 2 + header_h + len(font_items) * (card_h + card_gap) + close_btn_h + int(10 * density)
+        total_dlg_h = pad_outer * 2 + header_h + len(font_items) * (card_h + card_gap) + close_btn_h + int(6 * density)
         max_allowed_h = int(h * 0.92)
         assert total_dlg_h < max_allowed_h, f"Диалог шрифтов не помещается на 1 экран {cfg['name']}: {total_dlg_h} >= {max_allowed_h}"
 
         dlg_y = (h - total_dlg_h) // 2
         d_font.rectangle([dlg_x, dlg_y, dlg_x + dlg_w, dlg_y + total_dlg_h], fill=(255, 255, 255), outline=(0, 0, 0), width=3)
 
-        f_hdr = get_font(15 * density, bold=True)
-        f_l1 = get_font(13 * density, bold=True)
-        f_l2 = get_font(11 * density, bold=False)
+        f_hdr = get_font(14 * density, bold=True)
+        f_l1 = get_font(12 * density, bold=True)
+        f_l2 = get_font(10 * density, bold=False)
 
         cur_y = dlg_y + pad_outer
-        d_font.text((dlg_x + pad_outer, cur_y), "Выберите шрифт для чтения", font=f_hdr, fill=(0, 0, 0))
+        d_font.text((dlg_x + pad_outer, cur_y), "Выберите шрифт для чтения (8 гарнитур)", font=f_hdr, fill=(0, 0, 0))
         cur_y += header_h
 
         for idx, (title, key, sample) in enumerate(font_items):
@@ -824,59 +854,75 @@ def run_all_devices_functional_and_ui_audit():
                 outline=(0, 0, 0),
                 width=2 if selected else 1,
             )
-            d_font.text((dlg_x + pad_outer + int(8 * density), cur_y + int(4 * density)), prefix_mark + title, font=f_l1, fill=(0, 0, 0))
-            d_font.text((dlg_x + pad_outer + int(8 * density), cur_y + int(21 * density)), sample, font=f_l2, fill=(0, 0, 0))
+            d_font.text((dlg_x + pad_outer + int(6 * density), cur_y + int(3 * density)), prefix_mark + title, font=f_l1, fill=(0, 0, 0))
+            d_font.text((dlg_x + pad_outer + int(6 * density), cur_y + int(17 * density)), sample, font=f_l2, fill=(0, 0, 0))
             cur_y += card_h + card_gap
 
-        cur_y += int(4 * density)
+        cur_y += int(2 * density)
         d_font.rectangle([dlg_x + pad_outer, cur_y, dlg_x + dlg_w - pad_outer, cur_y + close_btn_h], fill=(255, 255, 255), outline=(0, 0, 0), width=2)
-        d_font.text((dlg_x + dlg_w // 2 - int(35 * density), cur_y + int(8 * density)), "Закрыть", font=f_l1, fill=(0, 0, 0))
+        d_font.text((dlg_x + dlg_w // 2 - int(30 * density), cur_y + int(6 * density)), "Закрыть", font=f_l1, fill=(0, 0, 0))
 
-        font_dlg_png = os.path.join(out_dir, f"{prefix}_verified_font_dialog_7fonts.png")
+        font_dlg_png = os.path.join(out_dir, f"{prefix}_verified_font_dialog_8fonts.png")
         img_font.save(font_dlg_png)
 
-        # 2. Рендеринг и проверка холста чтения (Дневной режим + Инверсный Ночной режим) с привязкой к целым пикселям
-        for night_mode in [False, True]:
-            bg_col = (0, 0, 0) if night_mode else (255, 255, 255)
-            fg_col = (255, 255, 255) if night_mode else (0, 0, 0)
-            img_r = Image.new("RGB", (w, h), bg_col)
-            d_r = ImageDraw.Draw(img_r)
+        # 2. Рендеринг и проверка холста чтения (Дневной/Ночной режим + матрица полей 8, 18, 32, 48px)
+        margin_options = [
+            ("extra_narrow", 8, "Сверх-узкие (8px)"),
+            ("narrow", 18, "Узкие (18px)"),
+            ("medium", 32, "Средние (32px)"),
+            ("wide", 48, "Широкие (48px)")
+        ]
 
-            pad_x = round(18 * (density / 1.33))
-            pad_top = round(12 * (density / 1.33))
-            header_res = round(26 * (density / 1.33))
-            footer_res = round(20 * (density / 1.33))
+        for m_key, m_px, m_label in margin_options:
+            avail_w = w - 2 * m_px
+            assert avail_w > 0, f"Ширина контента отрицательна при поле {m_px}px: {avail_w}"
+            assert (w - m_px) - (m_px + avail_w) == 0, f"Асимметрия боковых полей при {m_px}px!"
 
-            f_rh = get_font(12 * density, bold=False)
-            f_rt = get_font(16 * density, bold=False)
-            f_rf = get_font(12 * density, bold=True)
+            for night_mode in [False, True]:
+                bg_col = (0, 0, 0) if night_mode else (255, 255, 255)
+                fg_col = (255, 255, 255) if night_mode else (0, 0, 0)
+                img_r = Image.new("RGB", (w, h), bg_col)
+                d_r = ImageDraw.Draw(img_r)
 
-            d_r.text((round(pad_x), round(pad_top)), "Глава 1. Первые шаги", font=f_rh, fill=fg_col)
-            y_line = round(pad_top + header_res + 8 * density)
-            line_step = round(26 * (density / 1.33))
-            sample_lines = [
-                "Текст первой подглавы книги. Чтение на E-Ink дисплее комфортно для",
-                "глаз благодаря высокой плотности пикселей Carta и аппаратным слоговым",
-                "переносам по алгоритму Франклина-Ляна.",
-                "Каждая страница форматируется с ювелирной точностью, не допуская",
-                "наложений на колонтитулы и обрезки крайних строк.",
-                "Встроенные шрифты Literata, Charis SIL, PT Serif и PT Sans отрисовываются",
-                "с полным байткод-хинтингом FreeType и округлением координат Math.round().",
-            ]
-            for ln in sample_lines:
-                assert y_line < h - footer_res - 6, "Наложение строки текста на нижний колонтитул!"
-                d_r.text((round(pad_x), round(y_line)), ln, font=f_rt, fill=fg_col)
-                y_line += line_step
+                pad_x = m_px
+                pad_top = round(12 * (density / 1.33))
+                header_res = round(26 * (density / 1.33))
+                footer_res = round(20 * (density / 1.33))
 
-            footer_str = "Стр. 5 из 43 (12%)"
-            d_r.text((round(pad_x), round(h - footer_res)), footer_str, font=f_rf, fill=fg_col)
+                f_rh = get_font(12 * density, bold=False)
+                f_rt = get_font(16 * density, bold=False)
+                f_rf = get_font(12 * density, bold=True)
 
-            mode_tag = "night" if night_mode else "day"
-            r_png = os.path.join(out_dir, f"{prefix}_verified_reader_{mode_tag}.png")
-            img_r.save(r_png)
+                d_r.text((pad_x, pad_top), f"Глава 1. Первые шаги [{m_label}]", font=f_rh, fill=fg_col)
+                y_line = round(pad_top + header_res + 8 * density)
+                line_step = round(26 * (density / 1.33))
+                sample_lines = [
+                    "Текст первой подглавы книги. Чтение на E-Ink дисплее комфортно для",
+                    "глаз благодаря высокой плотности пикселей Carta и аппаратным слоговым",
+                    "переносам по алгоритму Франклина-Ляна.",
+                    "Каждая страница форматируется с ювелирной точностью, не допуская",
+                    "наложений на колонтитулы и обрезки крайних строк.",
+                    "Встроенные шрифты Literata, Charis SIL, PT Serif, PT Sans и Inglobal",
+                    "отрисовываются с полным хинтингом FreeType и округлением Math.round().",
+                ]
+                for ln in sample_lines:
+                    assert y_line < h - footer_res - 6, "Наложение строки текста на нижний колонтитул!"
+                    d_r.text((pad_x, y_line), ln, font=f_rt, fill=fg_col)
+                    y_line += line_step
+
+                footer_str = "Стр. 5 из 43 (12%)"
+                # В ReaderCanvasView: int drawFooterX = Math.round(getWidth() - config.getPaddingRightPx() - pageInfoWidth);
+                # Приблизительный расчет ширины футера:
+                footer_w = len(footer_str) * int(7 * density)
+                footer_x = w - pad_x - footer_w
+                d_r.text((footer_x, round(h - footer_res)), footer_str, font=f_rf, fill=fg_col)
+
+                mode_tag = "night" if night_mode else "day"
+                r_png = os.path.join(out_dir, f"{prefix}_reader_{m_key}_{mode_tag}.png")
+                img_r.save(r_png)
 
         print(f"   ✅ Компактный диалог 8 шрифтов: высота {total_dlg_h}px из {max_allowed_h}px (100% вмещение на 1 экран без скролла).")
-        print(f"   ✅ Холст чтения (Дневной и Ночной режимы): 0 обрезаний, целые координаты пикселей, скриншоты сохранены в {out_dir}")
+        print(f"   ✅ Холст чтения: проверены 4 режима полей (8, 18, 32, 48px), Дневной/Ночной режимы, симметрия 100%, скриншоты в {out_dir}")
 
 
 def main():

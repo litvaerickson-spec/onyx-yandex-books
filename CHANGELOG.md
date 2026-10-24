@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.6] - 2026-10-24
+
+### Multi-Device Orientation Isolation, Adaptive Landscape Dialog Ergonomics & Comprehensive Hardware Matrix Verification
+- **Изоляция портретной ориентации библиотечных экранов на бездатчиковых устройствах**:
+  - В `AndroidManifest.xml` для `MainActivity`, `AuthActivity` и `AuthWebViewActivity` явно зафиксирован атрибут `android:screenOrientation="portrait"`.
+  - Устранена потенциальная утечка альбомной ориентации: на ридерах Onyx Boox Darwin 1, 3, 5 без встроенного акселерометра возврат из альбома в библиотеку или авторизацию гарантированно сохраняет вертикальную ориентацию полок и списков.
+- **Адаптивная эргономика модальных диалогов в альбомном режиме (Landscape)**:
+  - В `ReaderActivity` внедрено адаптивное ограничение максимальной ширины диалогов: выбора шрифтов (`Math.min(0.92 * width, 580 * density)`), оглавления (`Math.min(0.92 * width, 680 * density)`) и прогресса чтения (`Math.min(0.85 * width, 520 * density)`).
+  - Устранено чрезмерное горизонтальное растягивание диалоговых окон на дисплеях шириной 1024 px (Darwin 1/3/5) и 1448 px (Darwin 6 Carta Plus), обеспечивая эстетичные поля и гармоничный баланс верстки.
+- **Исчерпывающая 6-факторная матрица автоматизированного тестирования**:
+  - Комплексный стенд `test_dual_configuration_matrix.py` расширен до тестирования 6 конфигураций: Darwin 1 Портрет/Ландшафт (758×1024 / 1024×758, API 17), Darwin 3/5 Портрет/Ландшафт (758×1024 / 1024×758, API 19) и Darwin 6 Портрет/Ландшафт (1072×1448 / 1448×1072, API 19).
+  - Для каждого устройства и ориентации проверены все 4 режима боковых полей (8, 18, 32, 48px), полная симметрия левого и правого отступов, отсутствие клиппинга текста, 100% вмещение диалогов без прокрутки и корректность рендеринга дневного/ночного режимов.
+
 ## [v1.5.5] - 2026-10-24
 
 ### Specialized EinkListView, Margin Symmetry with Extra-Narrow (8px), Inglobal Font (Apache 2.0) & Landscape Orientation

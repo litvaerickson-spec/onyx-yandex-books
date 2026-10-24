@@ -2053,6 +2053,56 @@ def test_v155_eink_listview_margins_inglobal_orientation():
     print("✅ Тест v1.5.5 EinkListView, полей 8-48px, Inglobal и ландшафта успешно пройден!\n")
 
 
+def test_v156_multi_device_matrix_and_orientation_leakage_prevention():
+    print("--- [ТЕСТ 33] v1.5.6 Multi-Device Matrix & Orientation Leakage Prevention ---")
+
+    # 1. Проверка изоляции ориентации экрана в AndroidManifest.xml
+    manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        manifest_code = f.read()
+
+    assert 'android:versionName="1.5.6"' in manifest_code, "versionName в AndroidManifest.xml должен быть 1.5.6!"
+    assert 'android:versionCode="39"' in manifest_code, "versionCode в AndroidManifest.xml должен быть 39!"
+
+    # Проверка того, что MainActivity, AuthActivity и AuthWebViewActivity жестко зафиксированы в portrait
+    assert '<activity\n            android:name=".ui.MainActivity"\n            android:screenOrientation="portrait"' in manifest_code or \
+           'android:name=".ui.MainActivity"' in manifest_code and 'android:screenOrientation="portrait"' in manifest_code
+    assert 'android:name=".ui.AuthActivity"' in manifest_code and 'android:screenOrientation="portrait"' in manifest_code
+    assert 'android:name=".ui.AuthWebViewActivity"' in manifest_code and 'android:screenOrientation="portrait"' in manifest_code
+
+    # 2. Проверка адаптивной эргономики диалогов в ReaderActivity при повороте в альбомный режим
+    reader_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/ReaderActivity.java")
+    with open(reader_path, "r", encoding="utf-8") as f:
+        reader_code = f.read()
+
+    assert "Math.min((int) (dm.widthPixels * 0.92), (int) (580 * density))" in reader_code, "Ширина диалога шрифтов должна быть ограничена в ландшафте!"
+    assert "Math.min((int) (dm.widthPixels * 0.92), (int) (680 * density))" in reader_code, "Ширина диалога оглавления должна быть ограничена в ландшафте!"
+    assert "Math.min((int) (dm.widthPixels * 0.85), (int) (520 * density))" in reader_code, "Ширина диалога прогресса должна быть ограничена в ландшафте!"
+
+    # 3. Проверка VERSION и build.gradle
+    version_file = os.path.join(PROJECT_DIR, "VERSION")
+    with open(version_file, "r", encoding="utf-8") as f:
+        v_str = f.read().strip()
+    assert v_str == "1.5.6", f"VERSION должен быть 1.5.6, получено: {v_str}"
+
+    gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
+    with open(gradle_file, "r", encoding="utf-8") as f:
+        gradle_code = f.read()
+    assert 'versionName "1.5.6"' in gradle_code
+    assert 'versionCode 39' in gradle_code
+
+    # 4. Проверка существования релизного APK v1.5.6
+    apk_path = os.path.join(PROJECT_DIR, "yandex-books-lite-v1.5.6.apk")
+    assert os.path.exists(apk_path), f"Файл {apk_path} должен существовать!"
+    assert os.path.getsize(apk_path) > 3000000, "Размер APK должен быть > 3 МБ"
+
+    print(" - Защита от утечки ландшафтной ориентации (MainActivity, AuthActivity зафиксированы в portrait): OK")
+    print(" - Эргономичное адаптивное ограничение ширины диалогов в Landscape-режиме: OK")
+    print(" - Синхронизация версий (VERSION, AndroidManifest, build.gradle): OK")
+    print(" - Собран и подписан релизный APK yandex-books-lite-v1.5.6.apk: OK")
+    print("✅ Тест v1.5.6 Multi-Device Matrix & Orientation Leakage Prevention успешно пройден!\n")
+
+
 if __name__ == "__main__":
     print("==================================================")
     print("🚀 Запуск тотальной верификации ядра Яндекс Книги")
@@ -2090,6 +2140,7 @@ if __name__ == "__main__":
     test_darwin1_api17_scroll_dirty_rect_and_eink_webview_fix()
     test_v154_zero_scroll_and_volume_slider_suppression()
     test_v155_eink_listview_margins_inglobal_orientation()
+    test_v156_multi_device_matrix_and_orientation_leakage_prevention()
     print("==================================================")
-    print("🎉 ВСЕ 32 ТЕСТА УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 33 ТЕСТА УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

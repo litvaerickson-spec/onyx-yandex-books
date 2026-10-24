@@ -828,7 +828,7 @@ public class ReaderActivity extends Activity {
 
         final float density = getResources().getDisplayMetrics().density;
         DisplayMetrics dm = getResources().getDisplayMetrics();
-        final int targetW = (int) (dm.widthPixels * 0.92);
+        final int targetW = Math.min((int) (dm.widthPixels * 0.92), (int) (580 * density));
 
         final LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -1708,7 +1708,7 @@ public class ReaderActivity extends Activity {
 
         dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        final int targetW = (int) (dm.widthPixels * 0.92);
+        final int targetW = Math.min((int) (dm.widthPixels * 0.92), (int) (680 * density));
         final int targetH = (int) (dm.heightPixels * 0.88);
 
         dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
@@ -1853,7 +1853,7 @@ public class ReaderActivity extends Activity {
 
         dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        final int targetW = (int) (dm.widthPixels * 0.85);
+        final int targetW = Math.min((int) (dm.widthPixels * 0.85), (int) (520 * density));
 
         dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
             @Override
