@@ -344,6 +344,18 @@ public class MainActivity extends Activity {
         dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         final int targetW = (int) (dm.widthPixels * 0.88);
+        dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
+            @Override
+            public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
+                if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+                        || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP
+                        || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    return true;
+                }
+                return false;
+            }
+        });
+
         dialog.setOnShowListener(new DialogInterface.OnShowListener() {
             @Override
             public void onShow(DialogInterface d) {
@@ -538,6 +550,18 @@ public class MainActivity extends Activity {
 
         dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         dialog.setCanceledOnTouchOutside(false);
+
+        dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
+            @Override
+            public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
+                if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+                        || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP
+                        || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    return true;
+                }
+                return false;
+            }
+        });
 
         dialog.setOnShowListener(new DialogInterface.OnShowListener() {
             @Override
@@ -1204,6 +1228,9 @@ public class MainActivity extends Activity {
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            if (event.getRepeatCount() > 0) {
+                return true;
+            }
             if (booksListView != null && !currentBooks.isEmpty()) {
                 int current = booksListView.getFirstVisiblePosition();
                 int target = Math.min(currentBooks.size() - 1, current + 3);
@@ -1213,6 +1240,9 @@ public class MainActivity extends Activity {
             }
             return true;
         } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            if (event.getRepeatCount() > 0) {
+                return true;
+            }
             if (booksListView != null && !currentBooks.isEmpty()) {
                 int current = booksListView.getFirstVisiblePosition();
                 int target = Math.max(0, current - 3);

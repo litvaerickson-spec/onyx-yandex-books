@@ -107,7 +107,7 @@ public class AuthWebViewActivity extends Activity {
                 || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
                 || keyCode == KeyEvent.KEYCODE_VOLUME_UP;
         if (isPageOrVolume) {
-            if (event.getAction() == KeyEvent.ACTION_DOWN && webView != null) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0 && webView != null) {
                 boolean down = (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN);
                 webView.pageScrollEink(down);
             }

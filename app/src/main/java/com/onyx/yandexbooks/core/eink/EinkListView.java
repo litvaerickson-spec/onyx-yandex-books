@@ -152,4 +152,10 @@ public class EinkListView extends ListView {
         scheduleEpdRefresh();
         return true;
     }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        mainHandler.removeCallbacks(fullRefreshRunnable);
+        super.onDetachedFromWindow();
+    }
 }

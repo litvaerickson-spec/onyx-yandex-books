@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -e
 
-VERSION="${1:-1.4.0}"
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VERSION="${1:-$(cat "$PROJECT_DIR/VERSION" 2>/dev/null || echo "1.5.8")}"
 TARGET_APK="yandex-books-lite-v${VERSION}.apk"
 
 echo "=== Сборка Яндекс Книги APK (Версия: $VERSION) ==="
@@ -13,7 +14,6 @@ SDK_ROOT="/opt/homebrew/share/android-commandlinetools"
 BUILD_TOOLS="$SDK_ROOT/build-tools/30.0.3"
 PLATFORM="$SDK_ROOT/platforms/android-19/android.jar"
 
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
 
 mkdir -p build/classes build/lib

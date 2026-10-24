@@ -408,11 +408,17 @@ public class AuthActivity extends Activity {
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            if (event.getRepeatCount() > 0) {
+                return true;
+            }
             if (authScrollView != null) {
                 authScrollView.pageScrollEink(true);
             }
             return true;
         } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            if (event.getRepeatCount() > 0) {
+                return true;
+            }
             if (authScrollView != null) {
                 authScrollView.pageScrollEink(false);
             }

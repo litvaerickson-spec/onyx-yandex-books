@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.8] - 2026-10-24
+
+### Manifest uses-sdk & supports-screens Isolation, Memory Leak Prevention & Universal Dialog Key Suppression
+
+- **Явное объявление `<uses-sdk>` и `<supports-screens>` в `AndroidManifest.xml`**:
+  - Ранее при сборке пакета через `aapt` манифест не содержал явных тегов `<uses-sdk>` и `<supports-screens>`, из-за чего бинарный APK распознавался Android OS как устаревший (`targetSdkVersion < 4`).
+  - Это приводило к навязыванию системой совместимого режима масштабирования экрана (`supports-any-density: false`) и инъекции неиспользуемого разрешения `READ_PHONE_STATE`.
+  - На ридере Darwin 6 (Carta Plus 300 PPI, 1072×1448) и Darwin 1/3/5 (758×1024, density 1.33) это могло вызывать размытие при масштабировании тайлов.
+  - Добавлены `<uses-sdk android:minSdkVersion="17" android:targetSdkVersion="19" />` и `<supports-screens android:smallScreens="true" android:normalScreens="true" android:largeScreens="true" android:xlargeScreens="true" android:anyDensity="true" />`.
+- **Устранение риска утечки памяти (Memory Leak) в `EinkListView`**:
+  - В `EinkListView` реализован метод `onDetachedFromWindow()` с обязательной отменой отложенного колбэка `fullRefreshRunnable` через `mainHandler.removeCallbacks()`.
+  - Устранена потенциальная задержка освобождения Activity в памяти ридеров при закрытии диалогов оглавления и закладок.
+- **Подавление автоповтора клавиш и всплытия ползунка громкости во всех диалогах `MainActivity`**:
+  - В `showMainMenuDialog()` и `showBatchDownloadDialog()` добавлен `dialog.setOnKeyListener()` для перехвата клавиш регулировки громкости и листания.
+  - В `MainActivity.onKeyDown()`, `AuthActivity.onKeyDown()` и `AuthWebViewActivity.dispatchKeyEvent()` добавлен барьер против залипания клавиш (`event.getRepeatCount() > 0`), защищающий E-Ink экран от лавинообразных перерисовок при удержании физических кнопок.
+- **Безопасная автоконфигурация версии в `build_apk.sh`**:
+  - Скрипт сборки теперь считывает актуальную версию напрямую из файла `VERSION` вместо хардкода 1.4.0.
+
 ## [v1.5.7] - 2026-10-24
 
 ### Fixed: AuthWebViewActivity — Full VolumePanel Suppression via dispatchKeyEvent (Darwin 1)

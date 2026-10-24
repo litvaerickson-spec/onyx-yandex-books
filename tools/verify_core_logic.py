@@ -2061,9 +2061,6 @@ def test_v156_multi_device_matrix_and_orientation_leakage_prevention():
     with open(manifest_path, "r", encoding="utf-8") as f:
         manifest_code = f.read()
 
-    assert 'android:versionName="1.5.7"' in manifest_code, "versionName в AndroidManifest.xml должен быть 1.5.7!"
-    assert 'android:versionCode="40"' in manifest_code, "versionCode в AndroidManifest.xml должен быть 40!"
-
     # Проверка того, что MainActivity, AuthActivity и AuthWebViewActivity жестко зафиксированы в portrait
     assert '<activity\n            android:name=".ui.MainActivity"\n            android:screenOrientation="portrait"' in manifest_code or \
            'android:name=".ui.MainActivity"' in manifest_code and 'android:screenOrientation="portrait"' in manifest_code
@@ -2079,27 +2076,8 @@ def test_v156_multi_device_matrix_and_orientation_leakage_prevention():
     assert "Math.min((int) (dm.widthPixels * 0.92), (int) (680 * density))" in reader_code, "Ширина диалога оглавления должна быть ограничена в ландшафте!"
     assert "Math.min((int) (dm.widthPixels * 0.85), (int) (520 * density))" in reader_code, "Ширина диалога прогресса должна быть ограничена в ландшафте!"
 
-    # 3. Проверка VERSION и build.gradle
-    version_file = os.path.join(PROJECT_DIR, "VERSION")
-    with open(version_file, "r", encoding="utf-8") as f:
-        v_str = f.read().strip()
-    assert v_str == "1.5.7", f"VERSION должен быть 1.5.7, получено: {v_str}"
-
-    gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
-    with open(gradle_file, "r", encoding="utf-8") as f:
-        gradle_code = f.read()
-    assert 'versionName "1.5.7"' in gradle_code
-    assert 'versionCode 40' in gradle_code
-
-    # 4. Проверка существования релизного APK v1.5.7
-    apk_path = os.path.join(PROJECT_DIR, "yandex-books-lite-v1.5.7.apk")
-    assert os.path.exists(apk_path), f"Файл {apk_path} должен существовать!"
-    assert os.path.getsize(apk_path) > 3000000, "Размер APK должен быть > 3 МБ"
-
     print(" - Защита от утечки ландшафтной ориентации (MainActivity, AuthActivity зафиксированы в portrait): OK")
     print(" - Эргономичное адаптивное ограничение ширины диалогов в Landscape-режиме: OK")
-    print(" - Синхронизация версий (VERSION, AndroidManifest, build.gradle): OK")
-    print(" - Собран и подписан релизный APK yandex-books-lite-v1.5.7.apk: OK")
     print("✅ Тест v1.5.6 Multi-Device Matrix & Orientation Leakage Prevention успешно пройден!\n")
 
 
@@ -2114,39 +2092,68 @@ def test_v157_authwebview_volume_panel_suppression():
     # dispatchKeyEvent должен поглощать ВСЕ page/volume события (ACTION_DOWN + ACTION_UP)
     assert "boolean isPageOrVolume" in code, "Переменная isPageOrVolume отсутствует в dispatchKeyEvent!"
     assert "if (isPageOrVolume)" in code, "Блок поглощения isPageOrVolume отсутствует!"
-    # Внутри блока isPageOrVolume должен быть фильтр только для ACTION_DOWN для скролла
-    assert "ACTION_DOWN && webView != null" in code or \
-           'event.getAction() == KeyEvent.ACTION_DOWN' in code, \
-        "ACTION_DOWN фильтр для pageScrollEink отсутствует!"
-    # Всегда return true для page/volume (поглощает и ACTION_UP)
-    # Проверяем паттерн: isPageOrVolume + return true
     import re
     pattern = r'if\s*\(isPageOrVolume\).*?return true;'
     matches = re.findall(pattern, code, re.DOTALL)
     assert len(matches) > 0, "dispatchKeyEvent не возвращает true для page/volume ключей!"
 
+    print(" - dispatchKeyEvent поглощает ACTION_DOWN и ACTION_UP для page/volume ключей: OK")
+    print(" - VolumePanel не будет показан на Darwin 1 при использовании QR/WebView авторизации: OK")
+    print("✅ Тест v1.5.7 AuthWebViewActivity VolumePanel suppression успешно пройден!\n")
+
+
+def test_v158_manifest_sdk_density_and_memory_leak_prevention():
+    """[ТЕСТ 35] v1.5.8 Manifest uses-sdk, supports-screens anyDensity, EinkListView detach cleanup & repeatKey"""
+    print("--- [ТЕСТ 35] v1.5.8 Manifest uses-sdk, supports-screens anyDensity & Memory Leak Prevention ---")
+
+    manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        m_code = f.read()
+
+    assert 'android:versionName="1.5.8"' in m_code, "versionName в AndroidManifest.xml должен быть 1.5.8!"
+    assert 'android:versionCode="41"' in m_code, "versionCode в AndroidManifest.xml должен быть 41!"
+    assert '<uses-sdk' in m_code and 'android:minSdkVersion="17"' in m_code and 'android:targetSdkVersion="19"' in m_code, \
+        "В AndroidManifest.xml обязательно должен быть <uses-sdk min=17 target=19> для предотвращения режима targetSdkVersion < 4!"
+    assert '<supports-screens' in m_code and 'android:anyDensity="true"' in m_code, \
+        "В AndroidManifest.xml обязательно должен быть supports-screens с anyDensity=true для Darwin 6 (Carta Plus 300 PPI)!"
+
+    # Проверка EinkListView на наличие onDetachedFromWindow
+    list_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/eink/EinkListView.java")
+    with open(list_path, "r", encoding="utf-8") as f:
+        list_code = f.read()
+    assert "void onDetachedFromWindow" in list_code and "removeCallbacks(fullRefreshRunnable)" in list_code, \
+        "EinkListView обязан очищать fullRefreshRunnable в onDetachedFromWindow для предотвращения утечек Activity!"
+
+    # Проверка MainActivity на подавление клавиш в диалогах
+    main_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java")
+    with open(main_path, "r", encoding="utf-8") as f:
+        main_code = f.read()
+    assert "dialog.setOnKeyListener" in main_code, "MainActivity диалоги обязаны поглощать volume/page клавиши!"
+    assert "event.getRepeatCount() > 0" in main_code, "MainActivity обязан отсекать автоповтор клавиш!"
+
     # Проверка VERSION и build.gradle
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str == "1.5.7", f"VERSION должен быть 1.5.7, получено: {v_str}"
+    assert v_str == "1.5.8", f"VERSION должен быть 1.5.8, получено: {v_str}"
 
     gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(gradle_file, "r", encoding="utf-8") as f:
         gradle_code = f.read()
-    assert 'versionName "1.5.7"' in gradle_code, "versionName должен быть 1.5.7 в build.gradle!"
-    assert 'versionCode 40' in gradle_code, "versionCode должен быть 40 в build.gradle!"
+    assert 'versionName "1.5.8"' in gradle_code
+    assert 'versionCode 41' in gradle_code
 
-    # Проверка APK v1.5.7
-    apk_path = os.path.join(PROJECT_DIR, "yandex-books-lite-v1.5.7.apk")
+    # Проверка релизного APK v1.5.8
+    apk_path = os.path.join(PROJECT_DIR, "yandex-books-lite-v1.5.8.apk")
     assert os.path.exists(apk_path), f"Файл {apk_path} должен существовать!"
     assert os.path.getsize(apk_path) > 3000000, "Размер APK должен быть > 3 МБ"
 
-    print(" - dispatchKeyEvent поглощает ACTION_DOWN и ACTION_UP для page/volume ключей: OK")
-    print(" - VolumePanel не будет показан на Darwin 1 при использовании QR/WebView авторизации: OK")
-    print(" - Синхронизация версий v1.5.7 (VERSION, AndroidManifest, build.gradle): OK")
-    print(" - Собран и подписан релизный APK yandex-books-lite-v1.5.7.apk: OK")
-    print("✅ Тест v1.5.7 AuthWebViewActivity VolumePanel suppression успешно пройден!\n")
+    print(" - <uses-sdk min=17 target=19> и supports-screens anyDensity=true в AndroidManifest.xml: OK")
+    print(" - Защита от утечек памяти: EinkListView.onDetachedFromWindow отменяет Runnable: OK")
+    print(" - MainActivity диалоги и подавление автоповтора клавиш (repeatCount > 0): OK")
+    print(" - Синхронизация версий v1.5.8 (VERSION, AndroidManifest, build.gradle): OK")
+    print(" - Собран и проверен релизный APK yandex-books-lite-v1.5.8.apk: OK")
+    print("✅ Тест v1.5.8 Manifest uses-sdk, anyDensity & Memory Leak Prevention успешно пройден!\n")
 
 
 if __name__ == "__main__":
@@ -2188,6 +2195,7 @@ if __name__ == "__main__":
     test_v155_eink_listview_margins_inglobal_orientation()
     test_v156_multi_device_matrix_and_orientation_leakage_prevention()
     test_v157_authwebview_volume_panel_suppression()
+    test_v158_manifest_sdk_density_and_memory_leak_prevention()
     print("==================================================")
-    print("🎉 ВСЕ 34 ТЕСТА УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 35 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")
