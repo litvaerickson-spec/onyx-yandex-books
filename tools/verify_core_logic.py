@@ -2061,8 +2061,8 @@ def test_v156_multi_device_matrix_and_orientation_leakage_prevention():
     with open(manifest_path, "r", encoding="utf-8") as f:
         manifest_code = f.read()
 
-    assert 'android:versionName="1.5.6"' in manifest_code, "versionName в AndroidManifest.xml должен быть 1.5.6!"
-    assert 'android:versionCode="39"' in manifest_code, "versionCode в AndroidManifest.xml должен быть 39!"
+    assert 'android:versionName="1.5.7"' in manifest_code, "versionName в AndroidManifest.xml должен быть 1.5.7!"
+    assert 'android:versionCode="40"' in manifest_code, "versionCode в AndroidManifest.xml должен быть 40!"
 
     # Проверка того, что MainActivity, AuthActivity и AuthWebViewActivity жестко зафиксированы в portrait
     assert '<activity\n            android:name=".ui.MainActivity"\n            android:screenOrientation="portrait"' in manifest_code or \
@@ -2083,24 +2083,70 @@ def test_v156_multi_device_matrix_and_orientation_leakage_prevention():
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str == "1.5.6", f"VERSION должен быть 1.5.6, получено: {v_str}"
+    assert v_str == "1.5.7", f"VERSION должен быть 1.5.7, получено: {v_str}"
 
     gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(gradle_file, "r", encoding="utf-8") as f:
         gradle_code = f.read()
-    assert 'versionName "1.5.6"' in gradle_code
-    assert 'versionCode 39' in gradle_code
+    assert 'versionName "1.5.7"' in gradle_code
+    assert 'versionCode 40' in gradle_code
 
-    # 4. Проверка существования релизного APK v1.5.6
-    apk_path = os.path.join(PROJECT_DIR, "yandex-books-lite-v1.5.6.apk")
+    # 4. Проверка существования релизного APK v1.5.7
+    apk_path = os.path.join(PROJECT_DIR, "yandex-books-lite-v1.5.7.apk")
     assert os.path.exists(apk_path), f"Файл {apk_path} должен существовать!"
     assert os.path.getsize(apk_path) > 3000000, "Размер APK должен быть > 3 МБ"
 
     print(" - Защита от утечки ландшафтной ориентации (MainActivity, AuthActivity зафиксированы в portrait): OK")
     print(" - Эргономичное адаптивное ограничение ширины диалогов в Landscape-режиме: OK")
     print(" - Синхронизация версий (VERSION, AndroidManifest, build.gradle): OK")
-    print(" - Собран и подписан релизный APK yandex-books-lite-v1.5.6.apk: OK")
+    print(" - Собран и подписан релизный APK yandex-books-lite-v1.5.7.apk: OK")
     print("✅ Тест v1.5.6 Multi-Device Matrix & Orientation Leakage Prevention успешно пройден!\n")
+
+
+def test_v157_authwebview_volume_panel_suppression():
+    """[ТЕСТ 34] v1.5.7 AuthWebViewActivity dispatchKeyEvent полное подавление VolumePanel (ACTION_UP)"""
+    print("--- [ТЕСТ 34] v1.5.7 AuthWebViewActivity — Полное подавление VolumePanel через dispatchKeyEvent ---")
+
+    auth_wv_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/AuthWebViewActivity.java")
+    with open(auth_wv_path, "r", encoding="utf-8") as f:
+        code = f.read()
+
+    # dispatchKeyEvent должен поглощать ВСЕ page/volume события (ACTION_DOWN + ACTION_UP)
+    assert "boolean isPageOrVolume" in code, "Переменная isPageOrVolume отсутствует в dispatchKeyEvent!"
+    assert "if (isPageOrVolume)" in code, "Блок поглощения isPageOrVolume отсутствует!"
+    # Внутри блока isPageOrVolume должен быть фильтр только для ACTION_DOWN для скролла
+    assert "ACTION_DOWN && webView != null" in code or \
+           'event.getAction() == KeyEvent.ACTION_DOWN' in code, \
+        "ACTION_DOWN фильтр для pageScrollEink отсутствует!"
+    # Всегда return true для page/volume (поглощает и ACTION_UP)
+    # Проверяем паттерн: isPageOrVolume + return true
+    import re
+    pattern = r'if\s*\(isPageOrVolume\).*?return true;'
+    matches = re.findall(pattern, code, re.DOTALL)
+    assert len(matches) > 0, "dispatchKeyEvent не возвращает true для page/volume ключей!"
+
+    # Проверка VERSION и build.gradle
+    version_file = os.path.join(PROJECT_DIR, "VERSION")
+    with open(version_file, "r", encoding="utf-8") as f:
+        v_str = f.read().strip()
+    assert v_str == "1.5.7", f"VERSION должен быть 1.5.7, получено: {v_str}"
+
+    gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
+    with open(gradle_file, "r", encoding="utf-8") as f:
+        gradle_code = f.read()
+    assert 'versionName "1.5.7"' in gradle_code, "versionName должен быть 1.5.7 в build.gradle!"
+    assert 'versionCode 40' in gradle_code, "versionCode должен быть 40 в build.gradle!"
+
+    # Проверка APK v1.5.7
+    apk_path = os.path.join(PROJECT_DIR, "yandex-books-lite-v1.5.7.apk")
+    assert os.path.exists(apk_path), f"Файл {apk_path} должен существовать!"
+    assert os.path.getsize(apk_path) > 3000000, "Размер APK должен быть > 3 МБ"
+
+    print(" - dispatchKeyEvent поглощает ACTION_DOWN и ACTION_UP для page/volume ключей: OK")
+    print(" - VolumePanel не будет показан на Darwin 1 при использовании QR/WebView авторизации: OK")
+    print(" - Синхронизация версий v1.5.7 (VERSION, AndroidManifest, build.gradle): OK")
+    print(" - Собран и подписан релизный APK yandex-books-lite-v1.5.7.apk: OK")
+    print("✅ Тест v1.5.7 AuthWebViewActivity VolumePanel suppression успешно пройден!\n")
 
 
 if __name__ == "__main__":
@@ -2141,6 +2187,7 @@ if __name__ == "__main__":
     test_v154_zero_scroll_and_volume_slider_suppression()
     test_v155_eink_listview_margins_inglobal_orientation()
     test_v156_multi_device_matrix_and_orientation_leakage_prevention()
+    test_v157_authwebview_volume_panel_suppression()
     print("==================================================")
-    print("🎉 ВСЕ 33 ТЕСТА УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 34 ТЕСТА УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

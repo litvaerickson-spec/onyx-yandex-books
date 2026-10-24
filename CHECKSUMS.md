@@ -1,12 +1,9 @@
-# Контрольные суммы дистрибутивов (SHA-256)
+# SHA-256 Checksums — Яндекс Книги Lite for Onyx Boox Darwin
 
-### Версия 1.5.6 (24 октября 2026 г.)
-```
-ea9d4b02844e66c0bb33042a95ba7e7424b5193cb2dfd2f22d4e217f571ffd8d  yandex-books-lite-v1.5.6.apk
-```
-
-### История версий
-- **v1.5.5**: `b5d33f4ecd4dd8bbb3020e56907a9f707b9f312348ab49341b8e363f81587aa5`
-- **v1.5.4**: `e95196c1946b7914a7f6ad7cb4323ea9d71b8d7d20072f292a5df3f171b1291f`
-- **v1.5.3**: `5a9d20c576503c5ae124e3a479d2dfbc1cfdb1bfe746a5e1ca291df1eb8c6c2b`
-- **v1.5.2**: `82a4d3cf55694c92a95393d254f38fe1cb3ce5c73523f20ee4a27a81b2ae1477`
+| Версия  | Файл                              | Размер     | SHA-256                                                          |
+|---------|-----------------------------------|------------|------------------------------------------------------------------|
+| v1.5.7  | yandex-books-lite-v1.5.7.apk     | 3344816 байт | 6158034bb92aaeae09aeaad46348e2356baea665b9f36601c7cbe2171c3de5fa |
+| v1.5.6  | yandex-books-lite-v1.5.6.apk     | 3344816 байт | ea9d4b02844e66c0bb33042a95ba7e7424b5193cb2dfd2f22d4e217f571ffd8d |
+| v1.5.5  | yandex-books-lite-v1.5.5.apk     | -            | archived                                                         |
+| v1.5.4  | yandex-books-lite-v1.5.4.apk     | -            | archived                                                         |
+| v1.5.3  | yandex-books-lite-v1.5.3.apk     | -            | archived                                                         |

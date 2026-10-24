@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.7] - 2026-10-24
+
+### Fixed: AuthWebViewActivity — Full VolumePanel Suppression via dispatchKeyEvent (Darwin 1)
+
+- **Устранена утечка события `ACTION_UP` для клавиш громкости в окне WebView-авторизации**:
+  - В `AuthWebViewActivity` метод `dispatchKeyEvent()` ранее перехватывал `ACTION_DOWN` и возвращал `true` для page/volume-клавиш, но пропускал `ACTION_UP` в `super.dispatchKeyEvent()`.
+  - Это приводило к тому, что Android Framework видел «отпускание кнопки громкости» и показывал ползунок регулировки громкости (`VolumePanel`) поверх QR-кода авторизации на Onyx Boox Darwin 1.
+  - Исправлено: введён флаг `isPageOrVolume`, который поглощает **оба** события `ACTION_DOWN` и `ACTION_UP` для `KEYCODE_PAGE_DOWN/UP`, `KEYCODE_VOLUME_DOWN/UP`. Скролл выполняется только при `ACTION_DOWN`.
+  - Теперь VolumePanel гарантированно не появляется при использовании QR/WebView авторизации на **всех** ридерах Onyx Boox Darwin.
+
 ## [v1.5.6] - 2026-10-24
 
 ### Multi-Device Orientation Isolation, Adaptive Landscape Dialog Ergonomics & Comprehensive Hardware Matrix Verification

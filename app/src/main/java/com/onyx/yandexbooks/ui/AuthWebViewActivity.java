@@ -101,17 +101,18 @@ public class AuthWebViewActivity extends Activity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        if (event.getAction() == KeyEvent.ACTION_DOWN && webView != null) {
-            int keyCode = event.getKeyCode();
-            if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-                if (webView.pageScrollEink(true)) {
-                    return true;
-                }
-            } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-                if (webView.pageScrollEink(false)) {
-                    return true;
-                }
+        int keyCode = event.getKeyCode();
+        boolean isPageOrVolume = keyCode == KeyEvent.KEYCODE_PAGE_DOWN
+                || keyCode == KeyEvent.KEYCODE_PAGE_UP
+                || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+                || keyCode == KeyEvent.KEYCODE_VOLUME_UP;
+        if (isPageOrVolume) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && webView != null) {
+                boolean down = (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN);
+                webView.pageScrollEink(down);
             }
+            // Поглощаем оба ACTION_DOWN и ACTION_UP для подавления VolumePanel на Darwin 1 (RK3026 / Android 4.2.2)
+            return true;
         }
         return super.dispatchKeyEvent(event);
     }
