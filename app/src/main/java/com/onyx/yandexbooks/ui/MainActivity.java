@@ -1310,7 +1310,7 @@ public class MainActivity extends Activity {
         }
 
         if (needsShelfUpdate) {
-            apiClient.updateBookShelfState(book.getUuid(), "reading", new YandexBooksApiClient.ApiCallback<Boolean>() {
+            apiClient.updateBookShelfState(book.getUuid(), book.getLibraryCardId(), "reading", new YandexBooksApiClient.ApiCallback<Boolean>() {
                 @Override
                 public void onSuccess(Boolean result) {
                     // Полка на сервере успешно синхронизирована в фоне
@@ -1355,7 +1355,7 @@ public class MainActivity extends Activity {
             }
         }
 
-        apiClient.updateBookShelfState(book.getUuid(), targetShelf, new YandexBooksApiClient.ApiCallback<Boolean>() {
+        apiClient.updateBookShelfState(book.getUuid(), book.getLibraryCardId(), targetShelf, new YandexBooksApiClient.ApiCallback<Boolean>() {
             @Override
             public void onSuccess(Boolean result) {
                 runOnUiThread(new Runnable() {
@@ -1454,13 +1454,15 @@ public class MainActivity extends Activity {
             }
         }
 
-        apiClient.updateBookShelfState(book.getUuid(), "to_read", new YandexBooksApiClient.ApiCallback<Boolean>() {
+        apiClient.updateBookShelfState(book.getUuid(), book.getLibraryCardId(), "to_read", new YandexBooksApiClient.ApiCallback<Boolean>() {
             @Override
             public void onSuccess(Boolean result) {}
             @Override
             public void onError(String errorMessage) {}
         });
-        apiClient.sendReadingProgress(new ReadingProgress(book.getUuid(), 0.0, 0, 0, 0, System.currentTimeMillis()), new YandexBooksApiClient.ApiCallback<Boolean>() {
+        ReadingProgress resetProg = new ReadingProgress(book.getUuid(), 0.0, 0, 0, 0, System.currentTimeMillis());
+        resetProg.setLibraryCardId(book.getLibraryCardId());
+        apiClient.sendReadingProgress(resetProg, new YandexBooksApiClient.ApiCallback<Boolean>() {
             @Override
             public void onSuccess(Boolean result) {}
             @Override

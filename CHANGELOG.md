@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.10] - 2026-10-31
+
+### Added
+- **Режим «Обратный ландшафт» (Reverse Landscape)**:
+  - Интеграция `ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE` в ядро настроек `AppSettings` и экран `ReaderActivity`.
+  - Циклический переключатель ориентации экрана: «Портрет» $\to$ «Ландшафт» $\to$ «Обр. ландшафт» $\to$ «Портрет».
+  - Поворот на 180° относительно базового ландшафта для комфортного удержания любой рукой и удобного чтения при зарядке.
+- **Debounced автосохранение прогресса**:
+  - Автоматическая отправка прогресса через 2.5 секунды после остановки на странице при листании книги, без задержек UI и без спама облачного API.
+  - Мгновенный сброс очереди и очистка фоновых обработчиков в `onPause`, `onDestroy` и `onBackPressed`.
+
+### Changed
+- **Bookmate v5 API двусторонний протокол синхронизации**:
+  - Полный переход с устаревших эндпоинтов на официальный протокол `PATCH /api/v5/profile/library_cards/bulk` и `POST /api/v5/profile/library_cards`.
+  - Формирование расширенного JSON-пакета позиции (`reading_position`, `last_reading_position`, `position`, `chapter`, `paragraph`, `point`, `percent`, `reading_progress`, ISO-8601 даты `updated_at`, `last_read_at`).
+  - Перегрузка метода смены полки `updateBookShelfState` с прямой передачей `cardIdHint` для минимизации лишних сетевых вызовов.
+
+### Fixed
+- **Двусторонняя синхронизация ридер $\leftrightarrow$ смартфон**:
+  - Устранена ошибка, из-за которой чтение в онлайн-режиме на ридере не обновляло прогресс на смартфоне.
+  - Добавлена автоматическая подгрузка `card_id` из базы данных SQLite для всех локальных объектов `ReadingProgress` и накопленной офлайн-очереди `getPendingSyncQueue`.
+- **Удаление книг с полок («Убрать с полки»)**:
+  - Устранена рассинхронизация полок, при которой снятая с полки на ридере книга оставалась в мобильном приложении смартфона.
+  - Реализован двухэтапный поиск числового `card.id` с последующим удалением через `DELETE /profile/library_cards/{cardId}` и резервным откреплением через `PATCH` со статусом `state: "none"`.
+- **Хранение `card_id` в SQLite**:
+  - Автоматическая миграция схемы таблицы `books` через `ALTER TABLE books ADD COLUMN card_id TEXT`.
+
 ## [v1.5.9] - 2026-10-31
 
 ### Reverse Landscape, Bookmate v5 Cloud Bidirectional Sync & Debounced Progress Auto-Save

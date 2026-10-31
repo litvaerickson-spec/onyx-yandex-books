@@ -33,6 +33,15 @@ public class SyncManager {
      * Сохранение новой позиции чтения с умным решением конфликтов.
      */
     public void saveAndSyncProgress(final ReadingProgress localProgress, boolean isOnline, final ConflictResolutionCallback callback) {
+        if (localProgress.getLibraryCardId() == null || localProgress.getLibraryCardId().isEmpty()) {
+            try {
+                com.onyx.yandexbooks.core.api.models.Book b = dbHelper.getBookByUuid(localProgress.getBookUuid());
+                if (b != null && b.getLibraryCardId() != null && !b.getLibraryCardId().isEmpty()) {
+                    localProgress.setLibraryCardId(b.getLibraryCardId());
+                }
+            } catch (Exception ignored) {}
+        }
+
         // Всегда сохраняем в локальную БД мгновенно
         dbHelper.saveProgress(localProgress);
 

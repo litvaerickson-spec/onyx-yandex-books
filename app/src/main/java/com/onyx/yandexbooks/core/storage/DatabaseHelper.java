@@ -635,6 +635,9 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         bookCv.put("current_chapter", progress.getChapterIndex());
         bookCv.put("current_paragraph", progress.getParagraphIndex());
         bookCv.put("last_read_timestamp", progress.getTimestamp());
+        if (progress.getLibraryCardId() != null && !progress.getLibraryCardId().isEmpty()) {
+            bookCv.put("card_id", progress.getLibraryCardId());
+        }
         db.update("books", bookCv, "uuid = ?", new String[]{progress.getBookUuid()});
     }
 
@@ -654,6 +657,20 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 p.setSyncedWithServer(c.getInt(c.getColumnIndex("is_synced")) == 1);
             }
             c.close();
+        }
+        if (p != null) {
+            try {
+                Cursor bc = db.rawQuery("SELECT card_id FROM books WHERE uuid = ?", new String[]{bookUuid});
+                if (bc != null) {
+                    if (bc.moveToFirst()) {
+                        String cardId = bc.getString(0);
+                        if (cardId != null && !cardId.isEmpty()) {
+                            p.setLibraryCardId(cardId);
+                        }
+                    }
+                    bc.close();
+                }
+            } catch (Exception ignored) {}
         }
         return p;
     }
@@ -681,6 +698,18 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 p.setChapterIndex(c.getInt(c.getColumnIndex("chapter_index")));
                 p.setParagraphIndex(c.getInt(c.getColumnIndex("paragraph_index")));
                 p.setTimestamp(c.getLong(c.getColumnIndex("timestamp")));
+                try {
+                    Cursor bc = db.rawQuery("SELECT card_id FROM books WHERE uuid = ?", new String[]{p.getBookUuid()});
+                    if (bc != null) {
+                        if (bc.moveToFirst()) {
+                            String cardId = bc.getString(0);
+                            if (cardId != null && !cardId.isEmpty()) {
+                                p.setLibraryCardId(cardId);
+                            }
+                        }
+                        bc.close();
+                    }
+                } catch (Exception ignored) {}
                 list.add(p);
             }
             c.close();

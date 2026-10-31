@@ -570,6 +570,14 @@ public class YandexBooksApiClient {
                         JSONObject bObj = card.optJSONObject("book");
                         ParsedProgress pr = extractProgress(card, bObj);
                         final ReadingProgress progress = new ReadingProgress(bookUuid, pr.percent, pr.chapterIndex, pr.paragraphIndex, 0, pr.timestamp);
+                        String cardId = card.optString("id", "");
+                        if (cardId.isEmpty()) {
+                            long numId = card.optLong("id", -1L);
+                            if (numId > 0) cardId = String.valueOf(numId);
+                        }
+                        if (!cardId.isEmpty()) {
+                            progress.setLibraryCardId(cardId);
+                        }
                         progress.setSyncedWithServer(true);
                         postSuccess(callback, progress);
                         return;
@@ -640,6 +648,14 @@ public class YandexBooksApiClient {
                     if (card == null) card = json;
                     ParsedProgress pr = extractProgress(card, card.optJSONObject("book"));
                     final ReadingProgress progress = new ReadingProgress(bookUuid, pr.percent, pr.chapterIndex, pr.paragraphIndex, 0, pr.timestamp);
+                    String cardId = card.optString("id", "");
+                    if (cardId.isEmpty()) {
+                        long numId = card.optLong("id", -1L);
+                        if (numId > 0) cardId = String.valueOf(numId);
+                    }
+                    if (!cardId.isEmpty()) {
+                        progress.setLibraryCardId(cardId);
+                    }
                     progress.setSyncedWithServer(true);
                     postSuccess(callback, progress);
                 } catch (Exception e) {
@@ -1085,6 +1101,11 @@ public class YandexBooksApiClient {
             cardObj.put("id", progress.getLibraryCardId());
         }
         cardObj.put("book_uuid", progress.getBookUuid());
+
+        JSONObject bookInner = new JSONObject();
+        bookInner.put("uuid", progress.getBookUuid());
+        cardObj.put("book", bookInner);
+
         cardObj.put("state", "reading");
         cardObj.put("percent", rawPercent);
         cardObj.put("reading_progress", normalizedFraction);
@@ -1096,6 +1117,12 @@ public class YandexBooksApiClient {
         cardObj.put("point", progress.getParagraphIndex());
         cardObj.put("timestamp", ts);
 
+        SimpleDateFormat isoFmt = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
+        isoFmt.setTimeZone(TimeZone.getTimeZone("UTC"));
+        String isoDate = isoFmt.format(new Date(ts));
+        cardObj.put("updated_at", isoDate);
+        cardObj.put("last_read_at", isoDate);
+
         JSONObject posObj = new JSONObject();
         posObj.put("chapter", progress.getChapterIndex());
         posObj.put("chapter_index", progress.getChapterIndex());
@@ -1105,6 +1132,8 @@ public class YandexBooksApiClient {
         posObj.put("percent", rawPercent);
         posObj.put("reading_progress", normalizedFraction);
         posObj.put("timestamp", ts);
+        posObj.put("updated_at", isoDate);
+        posObj.put("last_read_at", isoDate);
 
         cardObj.put("position", posObj);
         cardObj.put("reading_position", posObj);
@@ -1576,6 +1605,10 @@ public class YandexBooksApiClient {
      * Перемещение книги на заданную полку («reading», «to_read», «finished»).
      */
     public void updateBookShelfState(final String bookUuid, final String shelfState, final ApiCallback<Boolean> callback) {
+        updateBookShelfState(bookUuid, null, shelfState, callback);
+    }
+
+    public void updateBookShelfState(final String bookUuid, final String cardIdHint, final String shelfState, final ApiCallback<Boolean> callback) {
         final String apiState;
         if ("done".equalsIgnoreCase(shelfState) || "finished".equalsIgnoreCase(shelfState) || "read".equalsIgnoreCase(shelfState) || "completed".equalsIgnoreCase(shelfState)) {
             apiState = "finished";
@@ -1585,9 +1618,13 @@ public class YandexBooksApiClient {
             apiState = "to_read";
         }
 
-        String endpoint = BASE_URL + "/profile/library_cards/" + bookUuid;
+        final String targetPathId = (cardIdHint != null && !cardIdHint.isEmpty()) ? cardIdHint : bookUuid;
+        String endpoint = BASE_URL + "/profile/library_cards/" + targetPathId;
         try {
             JSONObject bodyJson = new JSONObject();
+            if (cardIdHint != null && !cardIdHint.isEmpty()) {
+                bodyJson.put("id", cardIdHint);
+            }
             bodyJson.put("book_uuid", bookUuid);
             bodyJson.put("state", apiState);
             RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString());
@@ -1596,7 +1633,7 @@ public class YandexBooksApiClient {
             httpClient.newCall(request).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
-                    updateBookShelfFallbackPut(bookUuid, apiState, callback);
+                    updateBookShelfFallbackPut(targetPathId, bookUuid, apiState, callback);
                 }
 
                 @Override
@@ -1605,7 +1642,7 @@ public class YandexBooksApiClient {
                         if (response.isSuccessful()) {
                             postSuccess(callback, true);
                         } else {
-                            updateBookShelfFallbackPut(bookUuid, apiState, callback);
+                            updateBookShelfFallbackPut(targetPathId, bookUuid, apiState, callback);
                         }
                     } finally {
                         response.close();
@@ -1613,12 +1650,12 @@ public class YandexBooksApiClient {
                 }
             });
         } catch (Exception e) {
-            updateBookShelfFallbackPut(bookUuid, apiState, callback);
+            updateBookShelfFallbackPut(targetPathId, bookUuid, apiState, callback);
         }
     }
 
-    private void updateBookShelfFallbackPut(final String bookUuid, final String apiState, final ApiCallback<Boolean> callback) {
-        String endpoint = BASE_URL + "/profile/library_cards/" + bookUuid;
+    private void updateBookShelfFallbackPut(final String targetPathId, final String bookUuid, final String apiState, final ApiCallback<Boolean> callback) {
+        String endpoint = BASE_URL + "/profile/library_cards/" + targetPathId;
         try {
             JSONObject bodyJson = new JSONObject();
             bodyJson.put("book_uuid", bookUuid);
