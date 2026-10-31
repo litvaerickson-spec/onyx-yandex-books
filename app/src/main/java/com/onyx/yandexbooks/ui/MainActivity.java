@@ -95,11 +95,12 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        appSettings = new com.onyx.yandexbooks.core.storage.AppSettings(this);
+        com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, appSettings.getUiScale());
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
         tokenStorage = new TokenStorage(this);
-        appSettings = new com.onyx.yandexbooks.core.storage.AppSettings(this);
         apiClient = new YandexBooksApiClient(tokenStorage);
         dbHelper = DatabaseHelper.getInstance(this);
         cacheManager = new CacheManager(this, apiClient);
@@ -288,11 +289,39 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 dialog.dismiss();
+                Toast.makeText(MainActivity.this, "Синхронизация прогресса с облаком...", Toast.LENGTH_SHORT).show();
                 loadBooks(currentShelf);
-                syncManager.flushOfflineQueue();
+                syncManager.flushOfflineQueue(new SyncManager.SyncCompleteCallback() {
+                    @Override
+                    public void onSyncFinished(final int count) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (count > 0) {
+                                    Toast.makeText(MainActivity.this, "Синхронизирован прогресс " + count + " книг!", Toast.LENGTH_SHORT).show();
+                                } else {
+                                    Toast.makeText(MainActivity.this, "Прогресс всех книг актуален", Toast.LENGTH_SHORT).show();
+                                }
+                                if (!"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
+                                    currentBooks = dbHelper.getBooksByShelf(currentShelf);
+                                    adapter.notifyDataSetChanged();
+                                }
+                            }
+                        });
+                    }
+                });
             }
         }, density);
         listLayout.addView(btnSync);
+
+        Button btnUiScale = createMenuButton("Масштаб интерфейса: " + getUiScaleLabel(), new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                showUiScaleDialog();
+            }
+        }, density);
+        listLayout.addView(btnUiScale);
 
         Button btnUpdate = createMenuButton("Обновление ПО", new View.OnClickListener() {
             @Override
@@ -322,6 +351,14 @@ public class MainActivity extends Activity {
         listLayout.addView(btnLogoutItem);
 
         root.addView(listLayout);
+
+        TextView tvBetaNotice = new TextView(this);
+        tvBetaNotice.setText("Яндекс Книги Lite v1.5.11-beta (предварительный выпуск)");
+        tvBetaNotice.setTextSize(10);
+        tvBetaNotice.setTextColor(Color.DKGRAY);
+        tvBetaNotice.setGravity(Gravity.CENTER);
+        tvBetaNotice.setPadding(0, (int) (2 * density), 0, (int) (6 * density));
+        root.addView(tvBetaNotice);
 
         Button btnClose = new Button(this);
         btnClose.setText("Закрыть");
@@ -372,6 +409,128 @@ public class MainActivity extends Activity {
             dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
             dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
         }
+    }
+
+    private String getUiScaleLabel() {
+        float scale = appSettings.getUiScale();
+        int pct = Math.round(scale * 100);
+        if (pct >= 155) return pct + "% (Макс)";
+        if (pct >= 140) return pct + "% (Очень крупный)";
+        if (pct >= 125) return pct + "% (Крупный)";
+        if (pct >= 110) return pct + "% (Увеличенный)";
+        return pct + "% (Стандарт)";
+    }
+
+    private void showUiScaleDialog() {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        float density = getResources().getDisplayMetrics().density;
+        final DisplayMetrics dm = getResources().getDisplayMetrics();
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.WHITE);
+        int padH = (int) (14 * density);
+        int padV = (int) (12 * density);
+        root.setPadding(padH, padV, padH, padV);
+
+        TextView titleView = new TextView(this);
+        titleView.setText("Масштаб интерфейса и шрифта");
+        titleView.setTextSize(14);
+        titleView.setTypeface(null, Typeface.BOLD);
+        titleView.setTextColor(Color.BLACK);
+        titleView.setGravity(Gravity.CENTER);
+        titleView.setPadding(0, 0, 0, (int) (6 * density));
+        root.addView(titleView);
+
+        View divider = new View(this);
+        divider.setBackgroundColor(Color.BLACK);
+        root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
+
+        LinearLayout optionsLayout = new LinearLayout(this);
+        optionsLayout.setOrientation(LinearLayout.VERTICAL);
+        optionsLayout.setPadding(0, (int) (6 * density), 0, (int) (6 * density));
+
+        final float[] scales = new float[]{
+                com.onyx.yandexbooks.core.storage.AppSettings.UI_SCALE_DEFAULT,
+                com.onyx.yandexbooks.core.storage.AppSettings.UI_SCALE_MEDIUM,
+                com.onyx.yandexbooks.core.storage.AppSettings.UI_SCALE_LARGE,
+                com.onyx.yandexbooks.core.storage.AppSettings.UI_SCALE_EXTRA_LARGE,
+                com.onyx.yandexbooks.core.storage.AppSettings.UI_SCALE_MAX
+        };
+        final String[] labels = new String[]{
+                "100% — Стандартный",
+                "115% — Увеличенный (комфорт для 6\")",
+                "130% — Крупный (рекомендуется)",
+                "145% — Очень крупный (макс. четкость)",
+                "160% — Огромный"
+        };
+
+        float currentScale = appSettings.getUiScale();
+        for (int i = 0; i < scales.length; i++) {
+            final float s = scales[i];
+            boolean selected = Math.abs(currentScale - s) < 0.05f;
+            String text = (selected ? "• " : "  ") + labels[i];
+            Button btn = createMenuButton(text, new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    dialog.dismiss();
+                    appSettings.setUiScale(s);
+                    com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(MainActivity.this, s);
+                    Toast.makeText(MainActivity.this, "Масштаб интерфейса: " + Math.round(s * 100) + "%", Toast.LENGTH_SHORT).show();
+                    finish();
+                    startActivity(getIntent());
+                    overridePendingTransition(0, 0);
+                }
+            }, density);
+            if (selected) {
+                btn.setBackgroundResource(R.drawable.btn_eink_primary);
+            }
+            optionsLayout.addView(btn);
+        }
+        root.addView(optionsLayout);
+
+        Button btnClose = new Button(this);
+        btnClose.setText("Отмена");
+        btnClose.setTextSize(12);
+        btnClose.setTypeface(null, Typeface.BOLD);
+        btnClose.setTextColor(Color.BLACK);
+        btnClose.setBackgroundResource(R.drawable.btn_eink);
+        btnClose.setPadding(0, 0, 0, 0);
+        btnClose.setSingleLine(true);
+        LinearLayout.LayoutParams lpClose = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (34 * density));
+        btnClose.setLayoutParams(lpClose);
+        btnClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        root.addView(btnClose);
+
+        dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        final int targetW = (int) (dm.widthPixels * 0.88);
+        dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
+            @Override
+            public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
+                return (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+                        || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP);
+            }
+        });
+
+        dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override
+            public void onShow(DialogInterface d) {
+                if (dialog.getWindow() != null) {
+                    dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
+                    dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
+                }
+            }
+        });
+
+        dialog.show();
     }
 
     private Button createMenuButton(String text, View.OnClickListener listener, float density) {
@@ -1185,6 +1344,7 @@ public class MainActivity extends Activity {
                 loadingTextView.setVisibility(View.GONE);
                 if (allBooks != null && !allBooks.isEmpty()) {
                     dbHelper.saveAllBooks(allBooks);
+                    syncManager.flushOfflineQueue();
                 }
                 currentBooks = dbHelper.getBooksByShelf(currentShelf);
                 adapter.notifyDataSetChanged();
@@ -1220,6 +1380,8 @@ public class MainActivity extends Activity {
             }
             updateTabBadges();
             updateShelfFooter();
+            // Автоматическая фоновая отправка прогресса офлайн-чтения в облако Яндекса
+            syncManager.flushOfflineQueue();
         }
         // Очищаем экран при возвращении в библиотеку от возможных остаточных артефактов
         EpdController.requestFullRefresh(this, booksListView);
@@ -1709,7 +1871,10 @@ public class MainActivity extends Activity {
         double pct = book.getPercent();
         TextView progressView = new TextView(this);
         String progStr = pct > 0 ? String.format("%.0f%%", pct) : "0%";
-        progressView.setText("Прогресс: " + progStr + "  •  Статус: " + (isDownloaded ? "В памяти" : "В сети"));
+        final ReadingProgress dbProg = dbHelper.getProgress(book.getUuid());
+        final boolean isSynced = (dbProg == null || dbProg.isSyncedWithServer());
+        String syncNotice = isSynced ? "" : " • Не синхр.";
+        progressView.setText("Прогресс: " + progStr + syncNotice + "  •  Статус: " + (isDownloaded ? "В памяти" : "В сети"));
         progressView.setTextSize(11);
         progressView.setTextColor(Color.BLACK);
         metaLayout.addView(progressView);
@@ -2041,6 +2206,43 @@ public class MainActivity extends Activity {
         });
         actionRow1.addView(btnResetProgress);
         buttonContainer.addView(actionRow1);
+
+        if (!isSynced && dbProg != null) {
+            Button btnSyncDirect = new Button(this);
+            btnSyncDirect.setText("Синхронизировать прогресс с облаком");
+            btnSyncDirect.setTextSize(11);
+            btnSyncDirect.setTypeface(null, Typeface.BOLD);
+            btnSyncDirect.setTextColor(Color.BLACK);
+            btnSyncDirect.setBackgroundResource(R.drawable.btn_eink_primary);
+            btnSyncDirect.setPadding(0, 0, 0, 0);
+            btnSyncDirect.setSingleLine(true);
+            LinearLayout.LayoutParams lpSync = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, row2Height);
+            lpSync.setMargins(0, (int) (4 * density), 0, 0);
+            btnSyncDirect.setLayoutParams(lpSync);
+            final ReadingProgress finalProg = dbProg;
+            btnSyncDirect.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    Toast.makeText(MainActivity.this, "Отправка прогресса в облако...", Toast.LENGTH_SHORT).show();
+                    syncManager.saveAndSyncProgress(finalProg, true, new SyncManager.ConflictResolutionCallback() {
+                        @Override
+                        public void onProgressUpdated(ReadingProgress progress) {
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    Toast.makeText(MainActivity.this, "Прогресс книги «" + book.getTitle() + "» синхронизирован!", Toast.LENGTH_SHORT).show();
+                                    dialog.dismiss();
+                                    loadBooks(currentShelf);
+                                }
+                            });
+                        }
+                        @Override
+                        public void onConflictDetected(ReadingProgress local, ReadingProgress remote) {}
+                    });
+                }
+            });
+            buttonContainer.addView(btnSyncDirect);
+        }
 
         // Строка 4: [ Убрать ] и [ Закрыть ]
         LinearLayout actionRow2 = new LinearLayout(this);

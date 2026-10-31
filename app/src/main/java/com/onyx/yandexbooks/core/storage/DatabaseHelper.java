@@ -293,6 +293,15 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 effectiveChapter = bestLocalCh;
                 effectiveParagraph = bestLocalPar;
                 effectiveTimestamp = Math.max(bestLocalTs, effectiveTimestamp);
+
+                // Если локальный прогресс новее или дальше облачного (пользователь читал офлайн на этом ридере),
+                // гарантированно ставим его в очередь на синхронизацию в облако Яндекса!
+                if (bestLocalTs > 0 && bestLocalPercent > 0.0 && bestLocalPercent > (book.getPercent() + 0.01)) {
+                    ReadingProgress unsynced = new ReadingProgress(book.getUuid(), bestLocalPercent, bestLocalCh, bestLocalPar, 0, bestLocalTs);
+                    unsynced.setSyncedWithServer(false);
+                    unsynced.setLibraryCardId(localCardId != null ? localCardId : book.getLibraryCardId());
+                    enqueueOfflineProgress(unsynced);
+                }
             }
         } else {
             // Локального прогресса нет - защита от ложного 100% при 0 главе
@@ -676,6 +685,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     public synchronized void enqueueOfflineProgress(ReadingProgress p) {
+        if (p == null || p.getBookUuid() == null || p.getBookUuid().isEmpty()) return;
         SQLiteDatabase db = getWritableDatabase();
         ContentValues cv = new ContentValues();
         cv.put("book_uuid", p.getBookUuid());
@@ -683,7 +693,72 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         cv.put("chapter_index", p.getChapterIndex());
         cv.put("paragraph_index", p.getParagraphIndex());
         cv.put("timestamp", p.getTimestamp());
+        // Заменяем старую запись в очереди, сохраняя только свежую позицию
+        db.delete("sync_queue", "book_uuid = ?", new String[]{p.getBookUuid()});
         db.insert("sync_queue", null, cv);
+    }
+
+    public synchronized void removeFromSyncQueue(String bookUuid) {
+        if (bookUuid == null || bookUuid.isEmpty()) return;
+        SQLiteDatabase db = getWritableDatabase();
+        db.delete("sync_queue", "book_uuid = ?", new String[]{bookUuid});
+    }
+
+    public synchronized void markProgressSynced(String bookUuid, long timestamp) {
+        if (bookUuid == null || bookUuid.isEmpty()) return;
+        SQLiteDatabase db = getWritableDatabase();
+        ContentValues cv = new ContentValues();
+        cv.put("is_synced", 1);
+        db.update("progress", cv, "book_uuid = ? AND timestamp <= ?", new String[]{bookUuid, String.valueOf(timestamp)});
+    }
+
+    public synchronized List<ReadingProgress> getUnsyncedProgressList() {
+        List<ReadingProgress> list = new ArrayList<>();
+        SQLiteDatabase db = getReadableDatabase();
+        java.util.Set<String> seenUuids = new java.util.HashSet<>();
+
+        // 1. Очередь sync_queue
+        List<ReadingProgress> queue = getPendingSyncQueue();
+        for (ReadingProgress qp : queue) {
+            list.add(qp);
+            seenUuids.add(qp.getBookUuid());
+        }
+
+        // 2. Несинхронизированные записи из таблицы progress (is_synced == 0)
+        Cursor c = db.rawQuery("SELECT * FROM progress WHERE is_synced = 0", null);
+        if (c != null) {
+            while (c.moveToNext()) {
+                String uuid = c.getString(c.getColumnIndex("book_uuid"));
+                if (!seenUuids.contains(uuid)) {
+                    ReadingProgress p = new ReadingProgress();
+                    p.setBookUuid(uuid);
+                    p.setPercent(c.getDouble(c.getColumnIndex("percent")));
+                    p.setChapterIndex(c.getInt(c.getColumnIndex("chapter_index")));
+                    p.setParagraphIndex(c.getInt(c.getColumnIndex("paragraph_index")));
+                    p.setPageIndex(c.getInt(c.getColumnIndex("page_index")));
+                    p.setTimestamp(c.getLong(c.getColumnIndex("timestamp")));
+                    p.setSyncedWithServer(false);
+
+                    try {
+                        Cursor bc = db.rawQuery("SELECT card_id FROM books WHERE uuid = ?", new String[]{uuid});
+                        if (bc != null) {
+                            if (bc.moveToFirst()) {
+                                String cardId = bc.getString(0);
+                                if (cardId != null && !cardId.isEmpty()) {
+                                    p.setLibraryCardId(cardId);
+                                }
+                            }
+                            bc.close();
+                        }
+                    } catch (Exception ignored) {}
+
+                    list.add(p);
+                    seenUuids.add(uuid);
+                }
+            }
+            c.close();
+        }
+        return list;
     }
 
     public synchronized List<ReadingProgress> getPendingSyncQueue() {

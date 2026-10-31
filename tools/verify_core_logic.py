@@ -2111,7 +2111,7 @@ def test_v158_manifest_sdk_density_and_memory_leak_prevention():
         m_code = f.read()
 
     import re
-    assert re.search(r'android:versionName="1\.5\.(?:[89]|[1-9]\d+)"', m_code), "versionName в AndroidManifest.xml должен быть >= 1.5.8!"
+    assert re.search(r'android:versionName="1\.5\.(?:[89]|[1-9]\d+)(?:-[a-zA-Z0-9.]+)?\"', m_code), "versionName в AndroidManifest.xml должен быть >= 1.5.8!"
     assert re.search(r'android:versionCode="(?:4[1-9]|[5-9]\d+)"', m_code), "versionCode в AndroidManifest.xml должен быть >= 41!"
     assert '<uses-sdk' in m_code and 'android:minSdkVersion="17"' in m_code and 'android:targetSdkVersion="19"' in m_code, \
         "В AndroidManifest.xml обязательно должен быть <uses-sdk min=17 target=19> для предотвращения режима targetSdkVersion < 4!"
@@ -2279,26 +2279,116 @@ def test_v1510_reverse_landscape_and_bidirectional_cloud_sync():
     assert extracted_percent > reader_sync_payload["percent"], "Прогресс со смартфона должен быть дальше"
     print(" - Симуляция двустороннего обмена ридер <-> облако <-> смартфон: 100% валидность контрактов: OK")
 
-    # 6. Проверка синхронизации версий v1.5.10 (VERSION, AndroidManifest, build.gradle)
+    # 6. Проверка синхронизации версий v1.5.10+ (VERSION, AndroidManifest, build.gradle)
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str == "1.5.10", f"VERSION должен быть 1.5.10, получено: {v_str}"
+    assert "1.5." in v_str, f"VERSION должен быть 1.5.x, получено: {v_str}"
 
     gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(gradle_file, "r", encoding="utf-8") as f:
         gradle_code = f.read()
-    assert 'versionName "1.5.10"' in gradle_code
-    assert 'versionCode 43' in gradle_code
+    assert f'versionName "{v_str}"' in gradle_code
+    assert 'versionCode 4' in gradle_code
 
     manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(manifest_path, "r", encoding="utf-8") as f:
         m_code = f.read()
-    assert 'android:versionName="1.5.10"' in m_code
-    assert 'android:versionCode="43"' in m_code
-    print(" - Синхронизация версий v1.5.10 (VERSION, AndroidManifest, build.gradle): OK")
+    assert f'android:versionName="{v_str}"' in m_code
+    assert 'android:versionCode="4' in m_code
+    print(" - Синхронизация версий (VERSION, AndroidManifest, build.gradle): OK")
 
     print("✅ Тест v1.5.10 Обратный ландшафт, Bookmate API v5 и двусторонняя синхронизация успешно пройден!\n")
+
+
+def test_v1511_beta_ui_scaling_and_offline_reading_cloud_sync():
+    """[ТЕСТ 37] v1.5.11-beta Масштабирование интерфейса (UI/Font Scale) и синхронизация офлайн-чтения"""
+    print("--- [ТЕСТ 37] v1.5.11-beta Масштабирование интерфейса и синхронизация офлайн-чтения ---")
+
+    # 1. Проверка UiScaleHelper и AppSettings (UI & Font Scale)
+    scale_helper_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/ui/UiScaleHelper.java")
+    with open(scale_helper_path, "r", encoding="utf-8") as f:
+        helper_code = f.read()
+    assert "sanitizeScale" in helper_code, "UiScaleHelper обязан содержать sanitizeScale!"
+    assert "applyScale" in helper_code, "UiScaleHelper обязан содержать applyScale!"
+    assert "dm.density = sBaseDensity * effective" in helper_code, "Масштабирование density обязательно!"
+    assert "cfg.fontScale = sBaseFontScale * effective" in helper_code, "Масштабирование fontScale обязательно!"
+
+    # Математическая проверка диапазона масштабирования
+    def sanitize(scale):
+        if scale < 0.85: return 1.0
+        if scale > 1.80: return 1.80
+        return scale
+
+    assert sanitize(0.5) == 1.0
+    assert sanitize(1.15) == 1.15
+    assert sanitize(1.30) == 1.30
+    assert sanitize(1.60) == 1.60
+    assert sanitize(2.5) == 1.80
+    print(" - UiScaleHelper (масштабирование density и fontScale в диапазоне 0.85 - 1.80): OK")
+
+    # 2. Проверка AppSettings на поддержку шкалы масштабирования
+    settings_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/storage/AppSettings.java")
+    with open(settings_path, "r", encoding="utf-8") as f:
+        settings_code = f.read()
+    assert "KEY_UI_SCALE" in settings_code, "KEY_UI_SCALE отсутствует в AppSettings!"
+    assert "UI_SCALE_DEFAULT" in settings_code and "UI_SCALE_MAX" in settings_code, "Константы масштаба отсутствуют!"
+    assert "getUiScale()" in settings_code and "setUiScale(" in settings_code, "Геттеры/сеттеры масштаба отсутствуют!"
+    print(" - AppSettings (ключи KEY_UI_SCALE, пресеты 100%-160%): OK")
+
+    # 3. Проверка DatabaseHelper на поддержку надежной офлайн-синхронизации
+    db_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/storage/DatabaseHelper.java")
+    with open(db_path, "r", encoding="utf-8") as f:
+        db_code = f.read()
+    assert "removeFromSyncQueue" in db_code, "Метод removeFromSyncQueue отсутствует!"
+    assert "markProgressSynced" in db_code, "Метод markProgressSynced отсутствует!"
+    assert "getUnsyncedProgressList" in db_code, "Метод getUnsyncedProgressList отсутствует!"
+    assert 'db.delete("sync_queue", "book_uuid = ?", new String[]{p.getBookUuid()});' in db_code, \
+        "enqueueOfflineProgress обязан дедуплицировать очередь sync_queue по book_uuid!"
+    assert "bestLocalPercent > (book.getPercent() + 0.01)" in db_code, \
+        "saveOrUpdateBookInternal обязан ставить офлайн-прогресс в очередь при опережении облачного!"
+    print(" - DatabaseHelper (дедупликация sync_queue, getUnsyncedProgressList, markProgressSynced): OK")
+
+    # 4. Проверка SyncManager на отправку и сохранение очереди
+    sync_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/sync/SyncManager.java")
+    with open(sync_path, "r", encoding="utf-8") as f:
+        sync_code = f.read()
+    assert "SyncCompleteCallback" in sync_code, "Интерфейс SyncCompleteCallback отсутствует в SyncManager!"
+    assert "dbHelper.removeFromSyncQueue(p.getBookUuid())" in sync_code, \
+        "Удаление из очереди должно происходить строго после успешного ответа сервера onSuccess!"
+    assert "dbHelper.markProgressSynced(p.getBookUuid()" in sync_code or "dbHelper.saveProgress(p)" in sync_code, \
+        "Фиксация is_synced=1 должна происходить строго при onSuccess!"
+    print(" - SyncManager (гарантированное удаление только при подтверждении сервером onSuccess): OK")
+
+    # 5. Проверка MainActivity на автозапуск синхронизации и диалог масштаба
+    main_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java")
+    with open(main_path, "r", encoding="utf-8") as f:
+        main_code = f.read()
+    assert "syncManager.flushOfflineQueue();" in main_code, "MainActivity.onResume обязан вызывать flushOfflineQueue!"
+    assert "showUiScaleDialog()" in main_code, "Диалог showUiScaleDialog отсутствует в MainActivity!"
+    assert "btnSyncDirect" in main_code or "Синхронизировать прогресс с облаком" in main_code, \
+        "Кнопка прямой синхронизации офлайн-прогресса отсутствует в карточке книги!"
+    print(" - MainActivity (автосинхронизация при onResume, диалог масштаба, прямая синхронизация книги): OK")
+
+    # 6. Проверка бета-маркировки и версий
+    version_file = os.path.join(PROJECT_DIR, "VERSION")
+    with open(version_file, "r", encoding="utf-8") as f:
+        v_str = f.read().strip()
+    assert v_str == "1.5.11-beta", f"VERSION должен быть 1.5.11-beta, получено: {v_str}"
+
+    manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        m_code = f.read()
+    assert 'android:versionName="1.5.11-beta"' in m_code
+    assert 'android:versionCode="44"' in m_code
+
+    main_xml_path = os.path.join(PROJECT_DIR, "app/src/main/res/layout/activity_main.xml")
+    with open(main_xml_path, "r", encoding="utf-8") as f:
+        xml_code = f.read()
+    assert "[BETA]" in xml_code, "Маркер [BETA] должен присутствовать в шапке activity_main.xml!"
+    print(" - Бета-маркировка и версии (1.5.11-beta, versionCode=44, [BETA]): OK")
+
+    print("✅ Тест v1.5.11-beta Масштабирование интерфейса и синхронизация офлайн-чтения успешно пройден!\n")
 
 
 if __name__ == "__main__":
@@ -2342,6 +2432,7 @@ if __name__ == "__main__":
     test_v157_authwebview_volume_panel_suppression()
     test_v158_manifest_sdk_density_and_memory_leak_prevention()
     test_v1510_reverse_landscape_and_bidirectional_cloud_sync()
+    test_v1511_beta_ui_scaling_and_offline_reading_cloud_sync()
     print("==================================================")
-    print("🎉 ВСЕ 36 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 37 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

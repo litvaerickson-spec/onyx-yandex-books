@@ -192,6 +192,8 @@ public class ReaderActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        com.onyx.yandexbooks.core.storage.AppSettings settings = new com.onyx.yandexbooks.core.storage.AppSettings(this);
+        com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, settings.getUiScale());
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_reader);
 

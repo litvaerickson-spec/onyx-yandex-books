@@ -31,6 +31,11 @@ public class YandexBooksApp extends Application {
 
         // 2. Инициализация базы данных SQLite
         DatabaseHelper.getInstance(this);
+
+        // 3. Инициализация масштабирования интерфейса (UI & Font Scale)
+        com.onyx.yandexbooks.core.ui.UiScaleHelper.init(this);
+        com.onyx.yandexbooks.core.storage.AppSettings settings = new com.onyx.yandexbooks.core.storage.AppSettings(this);
+        com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, settings.getUiScale());
     }
 
     public static YandexBooksApp getInstance() {

@@ -25,6 +25,13 @@ public class AppSettings {
     public static final String ORIENTATION_LANDSCAPE = "landscape";
     public static final String ORIENTATION_REVERSE_LANDSCAPE = "reverse_landscape";
 
+    public static final String KEY_UI_SCALE = "app_ui_scale";
+    public static final float UI_SCALE_DEFAULT = 1.0f;      // 100%
+    public static final float UI_SCALE_MEDIUM = 1.15f;      // 115%
+    public static final float UI_SCALE_LARGE = 1.30f;       // 130%
+    public static final float UI_SCALE_EXTRA_LARGE = 1.45f; // 145%
+    public static final float UI_SCALE_MAX = 1.60f;         // 160%
+
     private final SharedPreferences prefs;
 
     public AppSettings(Context context) {
@@ -112,6 +119,14 @@ public class AppSettings {
 
     public boolean isNightMode() { return prefs.getBoolean(KEY_NIGHT_MODE, false); }
     public void setNightMode(boolean enabled) { prefs.edit().putBoolean(KEY_NIGHT_MODE, enabled).apply(); }
+
+    public float getUiScale() {
+        return prefs.getFloat(KEY_UI_SCALE, UI_SCALE_DEFAULT);
+    }
+
+    public void setUiScale(float scale) {
+        prefs.edit().putFloat(KEY_UI_SCALE, scale).apply();
+    }
 
     public int getInt(String key, int defValue) { return prefs.getInt(key, defValue); }
     public void putInt(String key, int value) { prefs.edit().putInt(key, value).apply(); }

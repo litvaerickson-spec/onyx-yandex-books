@@ -21,6 +21,10 @@ public class SyncManager {
         void onConflictDetected(ReadingProgress localProgress, ReadingProgress remoteProgress);
     }
 
+    public interface SyncCompleteCallback {
+        void onSyncFinished(int count);
+    }
+
     private final DatabaseHelper dbHelper;
     private final YandexBooksApiClient apiClient;
 
@@ -61,6 +65,7 @@ public class SyncManager {
             public void onSuccess(Boolean result) {
                 localProgress.setSyncedWithServer(true);
                 dbHelper.saveProgress(localProgress);
+                dbHelper.removeFromSyncQueue(localProgress.getBookUuid());
                 Log.d(TAG, "Progress successfully synced to Yandex cloud.");
                 if (callback != null) {
                     callback.onProgressUpdated(localProgress);
@@ -114,18 +119,56 @@ public class SyncManager {
      * Отправка накопившейся офлайн-очереди при восстановлении Wi-Fi.
      */
     public void flushOfflineQueue() {
-        List<ReadingProgress> queue = dbHelper.getPendingSyncQueue();
-        if (queue.isEmpty()) return;
+        flushOfflineQueue(null);
+    }
 
-        Log.i(TAG, "Flushing " + queue.size() + " pending offline progress events...");
-        for (ReadingProgress p : queue) {
+    public void flushOfflineQueue(final SyncCompleteCallback onComplete) {
+        List<ReadingProgress> queue = dbHelper.getUnsyncedProgressList();
+        if (queue.isEmpty()) {
+            if (onComplete != null) onComplete.onSyncFinished(0);
+            return;
+        }
+
+        final int total = queue.size();
+        final java.util.concurrent.atomic.AtomicInteger syncedCount = new java.util.concurrent.atomic.AtomicInteger(0);
+        final java.util.concurrent.atomic.AtomicInteger processedCount = new java.util.concurrent.atomic.AtomicInteger(0);
+
+        Log.i(TAG, "Flushing " + total + " pending offline progress events to Yandex cloud...");
+        for (final ReadingProgress p : queue) {
+            if (p.getLibraryCardId() == null || p.getLibraryCardId().isEmpty()) {
+                try {
+                    com.onyx.yandexbooks.core.api.models.Book b = dbHelper.getBookByUuid(p.getBookUuid());
+                    if (b != null && b.getLibraryCardId() != null && !b.getLibraryCardId().isEmpty()) {
+                        p.setLibraryCardId(b.getLibraryCardId());
+                    }
+                } catch (Exception ignored) {}
+            }
+
             apiClient.sendReadingProgress(p, new YandexBooksApiClient.ApiCallback<Boolean>() {
                 @Override
-                public void onSuccess(Boolean result) {}
+                public void onSuccess(Boolean result) {
+                    p.setSyncedWithServer(true);
+                    dbHelper.saveProgress(p);
+                    dbHelper.removeFromSyncQueue(p.getBookUuid());
+                    syncedCount.incrementAndGet();
+                    checkDone();
+                }
+
                 @Override
-                public void onError(String errorMessage) {}
+                public void onError(String errorMessage) {
+                    Log.w(TAG, "Sync retry failed for book " + p.getBookUuid() + ": " + errorMessage + ". Will retry later.");
+                    checkDone();
+                }
+
+                private void checkDone() {
+                    if (processedCount.incrementAndGet() >= total) {
+                        Log.i(TAG, "Flush completed. Successfully synced " + syncedCount.get() + " of " + total + " books.");
+                        if (onComplete != null) {
+                            onComplete.onSyncFinished(syncedCount.get());
+                        }
+                    }
+                }
             });
         }
-        dbHelper.clearSyncQueue();
     }
 }
