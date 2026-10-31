@@ -761,6 +761,15 @@ def run_all_devices_functional_and_ui_audit():
             "prefix": "darwin1_land",
         },
         {
+            "name": "Onyx Boox Darwin 1 (Обратный ландшафт, Android 4.2.2, API 17, RK3026)",
+            "width": 1024,
+            "height": 758,
+            "density": 1.33,
+            "is_landscape": True,
+            "out_dir": OUT_DIR_D1,
+            "prefix": "darwin1_rev_land",
+        },
+        {
             "name": "Onyx Boox Darwin 3 / Darwin 5 (Портрет, Android 4.4.4, API 19, i.MX6)",
             "width": 758,
             "height": 1024,
@@ -779,6 +788,15 @@ def run_all_devices_functional_and_ui_audit():
             "prefix": "darwin3_5_land",
         },
         {
+            "name": "Onyx Boox Darwin 3 / Darwin 5 (Обратный ландшафт, Android 4.4.4, API 19, i.MX6)",
+            "width": 1024,
+            "height": 758,
+            "density": 1.33,
+            "is_landscape": True,
+            "out_dir": OUT_DIR_D1,
+            "prefix": "darwin3_5_rev_land",
+        },
+        {
             "name": "Onyx Boox Darwin 6 (Портрет, Android 4.4.4, API 19, 300 DPI Carta Plus)",
             "width": 1072,
             "height": 1448,
@@ -795,6 +813,15 @@ def run_all_devices_functional_and_ui_audit():
             "is_landscape": True,
             "out_dir": OUT_DIR_D6,
             "prefix": "darwin6_land",
+        },
+        {
+            "name": "Onyx Boox Darwin 6 (Обратный ландшафт, Android 4.4.4, API 19, 300 DPI Carta Plus)",
+            "width": 1448,
+            "height": 1072,
+            "density": 1.88,
+            "is_landscape": True,
+            "out_dir": OUT_DIR_D6,
+            "prefix": "darwin6_rev_land",
         },
     ]
 

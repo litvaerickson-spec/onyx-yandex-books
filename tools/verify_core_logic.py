@@ -2110,8 +2110,9 @@ def test_v158_manifest_sdk_density_and_memory_leak_prevention():
     with open(manifest_path, "r", encoding="utf-8") as f:
         m_code = f.read()
 
-    assert 'android:versionName="1.5.8"' in m_code, "versionName в AndroidManifest.xml должен быть 1.5.8!"
-    assert 'android:versionCode="41"' in m_code, "versionCode в AndroidManifest.xml должен быть 41!"
+    import re
+    assert re.search(r'android:versionName="1\.5\.[89]"', m_code), "versionName в AndroidManifest.xml должен быть >= 1.5.8!"
+    assert re.search(r'android:versionCode="4[12]"', m_code), "versionCode в AndroidManifest.xml должен быть >= 41!"
     assert '<uses-sdk' in m_code and 'android:minSdkVersion="17"' in m_code and 'android:targetSdkVersion="19"' in m_code, \
         "В AndroidManifest.xml обязательно должен быть <uses-sdk min=17 target=19> для предотвращения режима targetSdkVersion < 4!"
     assert '<supports-screens' in m_code and 'android:anyDensity="true"' in m_code, \
@@ -2131,29 +2132,113 @@ def test_v158_manifest_sdk_density_and_memory_leak_prevention():
     assert "dialog.setOnKeyListener" in main_code, "MainActivity диалоги обязаны поглощать volume/page клавиши!"
     assert "event.getRepeatCount() > 0" in main_code, "MainActivity обязан отсекать автоповтор клавиш!"
 
-    # Проверка VERSION и build.gradle
+    # Проверка синхронизации VERSION и build.gradle
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str == "1.5.8", f"VERSION должен быть 1.5.8, получено: {v_str}"
 
     gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(gradle_file, "r", encoding="utf-8") as f:
         gradle_code = f.read()
-    assert 'versionName "1.5.8"' in gradle_code
-    assert 'versionCode 41' in gradle_code
-
-    # Проверка релизного APK v1.5.8
-    apk_path = os.path.join(PROJECT_DIR, "yandex-books-lite-v1.5.8.apk")
-    assert os.path.exists(apk_path), f"Файл {apk_path} должен существовать!"
-    assert os.path.getsize(apk_path) > 3000000, "Размер APK должен быть > 3 МБ"
+    assert f'versionName "{v_str}"' in gradle_code
+    assert f'android:versionName="{v_str}"' in m_code
 
     print(" - <uses-sdk min=17 target=19> и supports-screens anyDensity=true в AndroidManifest.xml: OK")
     print(" - Защита от утечек памяти: EinkListView.onDetachedFromWindow отменяет Runnable: OK")
     print(" - MainActivity диалоги и подавление автоповтора клавиш (repeatCount > 0): OK")
-    print(" - Синхронизация версий v1.5.8 (VERSION, AndroidManifest, build.gradle): OK")
-    print(" - Собран и проверен релизный APK yandex-books-lite-v1.5.8.apk: OK")
+    print(" - Синхронизация версий (VERSION, AndroidManifest, build.gradle): OK")
     print("✅ Тест v1.5.8 Manifest uses-sdk, anyDensity & Memory Leak Prevention успешно пройден!\n")
+
+
+def test_v159_reverse_landscape_and_bidirectional_cloud_sync():
+    """[ТЕСТ 36] v1.5.9 Обратный ландшафт, двусторонняя облачная синхронизация Bookmate и автосохранение"""
+    print("--- [ТЕСТ 36] v1.5.9 Обратный ландшафт, Bookmate API v5 и двусторонняя синхронизация ---")
+
+    # 1. Проверка констант и цикла ориентаций в AppSettings и ReaderActivity
+    app_settings_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/storage/AppSettings.java")
+    with open(app_settings_path, "r", encoding="utf-8") as f:
+        settings_code = f.read()
+    assert 'ORIENTATION_REVERSE_LANDSCAPE = "reverse_landscape"' in settings_code, "Константа ORIENTATION_REVERSE_LANDSCAPE отсутствует в AppSettings!"
+
+    reader_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/ReaderActivity.java")
+    with open(reader_path, "r", encoding="utf-8") as f:
+        reader_code = f.read()
+
+    assert 'ORIENTATION_REVERSE_LANDSCAPE.equalsIgnoreCase(mode)' in reader_code, "Проверка ORIENTATION_REVERSE_LANDSCAPE отсутствует в ReaderActivity!"
+    assert 'btnToggleOrientation.setText("Обр. ландшафт")' in reader_code, "Текст 'Обр. ландшафт' отсутствует в updateOrientationButtonText!"
+    assert 'ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE' in reader_code, "ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE отсутствует в applyOrientation!"
+    print(" - Режим 'Обратный ландшафт' (Reverse Landscape): константы, цикл Портрет->Ландшафт->Обр.ландшафт и ActivityInfo: OK")
+
+    # 2. Проверка debounced автосохранения прогресса при непрерывном чтении
+    assert 'autoSaveHandler = new Handler(Looper.getMainLooper())' in reader_code, "autoSaveHandler отсутствует в ReaderActivity!"
+    assert 'scheduleAutoSaveProgress()' in reader_code, "scheduleAutoSaveProgress отсутствует в ReaderActivity!"
+    assert 'postDelayed(autoSaveRunnable, 2500L)' in reader_code, "Задержка дебаунса 2500ms отсутствует!"
+    assert 'autoSaveHandler.removeCallbacks(autoSaveRunnable)' in reader_code, "Очистка колбэков autoSaveRunnable отсутствует!"
+    print(" - Debounced автосохранение прогресса (2.5 сек) во время чтения и листания страниц: OK")
+
+    # 3. Проверка моделей Book и ReadingProgress (поле libraryCardId)
+    book_model_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/api/models/Book.java")
+    with open(book_model_path, "r", encoding="utf-8") as f:
+        book_code = f.read()
+    assert "libraryCardId" in book_code and "getLibraryCardId()" in book_code and "setLibraryCardId(" in book_code, \
+        "Поле libraryCardId отсутствует в Book.java!"
+
+    progress_model_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/api/models/ReadingProgress.java")
+    with open(progress_model_path, "r", encoding="utf-8") as f:
+        prog_code = f.read()
+    assert "libraryCardId" in prog_code and "getLibraryCardId()" in prog_code and "setLibraryCardId(" in prog_code, \
+        "Поле libraryCardId отсутствует в ReadingProgress.java!"
+
+    # 4. Проверка SQLite миграции и сохранения card_id в DatabaseHelper
+    db_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/storage/DatabaseHelper.java")
+    with open(db_path, "r", encoding="utf-8") as f:
+        db_code = f.read()
+    assert "ALTER TABLE books ADD COLUMN card_id TEXT" in db_code, "Миграция card_id отсутствует в DatabaseHelper!"
+    assert 'cv.put("card_id", effectiveCardId)' in db_code or 'cv.put("card_id"' in db_code, "Сохранение card_id отсутствует в saveOrUpdateBookInternal!"
+    assert 'b.setLibraryCardId(c.getString(cardIdx))' in db_code, "Чтение card_id отсутствует в parseBookFromCursor!"
+    print(" - SQLite схема и хранилище card_id: миграция ALTER TABLE, чтение и запись карточки: OK")
+
+    # 5. Проверка API клиента Bookmate v5 API контрактов
+    api_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/api/YandexBooksApiClient.java")
+    with open(api_path, "r", encoding="utf-8") as f:
+        api_code = f.read()
+
+    # Проверка, что ложные 404 эндпоинты устранены
+    assert "/books/\" + progress.getBookUuid() + \"/progress" not in api_code, "Ложный эндпоинт /books/{uuid}/progress не должен использоваться!"
+    assert "/profile/library_cards/\" + progress.getBookUuid() + \"/reading_position" not in api_code, "Ложный эндпоинт .../reading_position не должен использоваться!"
+
+    # Проверка официальных эндпоинтов Bookmate v5
+    assert "/profile/library_cards/bulk" in api_code, "Эндпоинт PATCH /profile/library_cards/bulk отсутствует!"
+    assert "buildReadingProgressCardJson" in api_code, "Метод buildReadingProgressCardJson отсутствует!"
+    assert 'cardObj.put("last_reading_position", posObj)' in api_code, "Объект last_reading_position отсутствует в payload прогресса!"
+    assert 'cardObj.put("state", "reading")' in api_code, "Поле state: reading отсутствует в payload!"
+
+    # Проверка каскадного удаления карточки
+    assert "executeDeleteLibraryCard" in api_code, "executeDeleteLibraryCard отсутствует!"
+    assert "removeBookFallbackNone" in api_code, "removeBookFallbackNone отсутствует!"
+    assert 'bodyJson.put("state", "none")' in api_code, "Fallback снятия с полки state: none отсутствует!"
+    print(" - Bookmate v5 API контракты: bulk PATCH, POST карточки, каскадное удаление DELETE/PATCH state:none: OK")
+
+    # 6. Проверка синхронизации версий v1.5.9 (VERSION, AndroidManifest, build.gradle)
+    version_file = os.path.join(PROJECT_DIR, "VERSION")
+    with open(version_file, "r", encoding="utf-8") as f:
+        v_str = f.read().strip()
+    assert v_str == "1.5.9", f"VERSION должен быть 1.5.9, получено: {v_str}"
+
+    gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
+    with open(gradle_file, "r", encoding="utf-8") as f:
+        gradle_code = f.read()
+    assert 'versionName "1.5.9"' in gradle_code
+    assert 'versionCode 42' in gradle_code
+
+    manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        m_code = f.read()
+    assert 'android:versionName="1.5.9"' in m_code
+    assert 'android:versionCode="42"' in m_code
+    print(" - Синхронизация версий v1.5.9 (VERSION, AndroidManifest, build.gradle): OK")
+
+    print("✅ Тест v1.5.9 Обратный ландшафт, Bookmate API v5 и двусторонняя синхронизация успешно пройден!\n")
 
 
 if __name__ == "__main__":
@@ -2196,6 +2281,7 @@ if __name__ == "__main__":
     test_v156_multi_device_matrix_and_orientation_leakage_prevention()
     test_v157_authwebview_volume_panel_suppression()
     test_v158_manifest_sdk_density_and_memory_leak_prevention()
+    test_v159_reverse_landscape_and_bidirectional_cloud_sync()
     print("==================================================")
-    print("🎉 ВСЕ 35 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 36 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

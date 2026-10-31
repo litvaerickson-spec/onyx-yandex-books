@@ -388,6 +388,21 @@ public class YandexBooksApiClient {
 
         Book book = new Book();
         book.setUuid(uuid);
+
+        String cardId = "";
+        if (card.has("id")) {
+            cardId = card.optString("id", "");
+        }
+        if (cardId.isEmpty() && card.has("library_card")) {
+            JSONObject innerCard = card.optJSONObject("library_card");
+            if (innerCard != null && innerCard.has("id")) {
+                cardId = innerCard.optString("id", "");
+            }
+        }
+        if (!cardId.isEmpty()) {
+            book.setLibraryCardId(cardId);
+        }
+
         book.setTitle(title);
         book.setAuthor(authorText);
         book.setAnnotation(cleanAnn);
@@ -1058,44 +1073,72 @@ public class YandexBooksApiClient {
     }
 
     /**
+     * Формирование полного объекта карточки библиотеки для синхронизации прогресса Bookmate v5 API.
+     */
+    private JSONObject buildReadingProgressCardJson(ReadingProgress progress) throws Exception {
+        double rawPercent = progress.getPercent();
+        double normalizedFraction = Math.min(1.0, Math.max(0.0, rawPercent / 100.0));
+        long ts = progress.getTimestamp() > 0 ? progress.getTimestamp() : System.currentTimeMillis();
+
+        JSONObject cardObj = new JSONObject();
+        if (progress.getLibraryCardId() != null && !progress.getLibraryCardId().isEmpty()) {
+            cardObj.put("id", progress.getLibraryCardId());
+        }
+        cardObj.put("book_uuid", progress.getBookUuid());
+        cardObj.put("state", "reading");
+        cardObj.put("percent", rawPercent);
+        cardObj.put("reading_progress", normalizedFraction);
+        cardObj.put("percentage", rawPercent);
+        cardObj.put("chapter_index", progress.getChapterIndex());
+        cardObj.put("chapter", progress.getChapterIndex());
+        cardObj.put("paragraph_index", progress.getParagraphIndex());
+        cardObj.put("paragraph", progress.getParagraphIndex());
+        cardObj.put("point", progress.getParagraphIndex());
+        cardObj.put("timestamp", ts);
+
+        JSONObject posObj = new JSONObject();
+        posObj.put("chapter", progress.getChapterIndex());
+        posObj.put("chapter_index", progress.getChapterIndex());
+        posObj.put("paragraph", progress.getParagraphIndex());
+        posObj.put("paragraph_index", progress.getParagraphIndex());
+        posObj.put("point", progress.getParagraphIndex());
+        posObj.put("percent", rawPercent);
+        posObj.put("reading_progress", normalizedFraction);
+        posObj.put("timestamp", ts);
+
+        cardObj.put("position", posObj);
+        cardObj.put("reading_position", posObj);
+        cardObj.put("last_reading_position", posObj);
+
+        return cardObj;
+    }
+
+    /**
      * Отправка позиции чтения в облако Яндекса с поддержкой формата Bookmate.
      */
     public void sendReadingProgress(final ReadingProgress progress, final ApiCallback<Boolean> callback) {
-        String endpoint = BASE_URL + "/books/" + progress.getBookUuid() + "/progress";
+        if (progress == null || progress.getBookUuid() == null || progress.getBookUuid().isEmpty()) {
+            postError(callback, "Некорректные данные прогресса чтения");
+            return;
+        }
 
         try {
-            double rawPercent = progress.getPercent();
-            double normalizedFraction = Math.min(1.0, Math.max(0.0, rawPercent / 100.0));
-            JSONObject bodyJson = new JSONObject();
-            bodyJson.put("percent", rawPercent);
-            bodyJson.put("reading_progress", normalizedFraction);
-            bodyJson.put("percentage", rawPercent);
-            bodyJson.put("chapter_index", progress.getChapterIndex());
-            bodyJson.put("chapter", progress.getChapterIndex());
-            bodyJson.put("paragraph_index", progress.getParagraphIndex());
-            bodyJson.put("paragraph", progress.getParagraphIndex());
-            bodyJson.put("point", progress.getParagraphIndex());
-            bodyJson.put("timestamp", progress.getTimestamp());
+            final JSONObject cardObj = buildReadingProgressCardJson(progress);
 
-            JSONObject posObj = new JSONObject();
-            posObj.put("chapter", progress.getChapterIndex());
-            posObj.put("chapter_index", progress.getChapterIndex());
-            posObj.put("paragraph", progress.getParagraphIndex());
-            posObj.put("paragraph_index", progress.getParagraphIndex());
-            posObj.put("point", progress.getParagraphIndex());
-            posObj.put("percent", rawPercent);
-            posObj.put("reading_progress", normalizedFraction);
-            posObj.put("timestamp", progress.getTimestamp());
-            bodyJson.put("position", posObj);
-            bodyJson.put("reading_position", posObj);
+            // 1. Первичный официальный эндпоинт Bookmate API v5: bulk PATCH
+            String endpointBulk = BASE_URL + "/profile/library_cards/bulk";
+            JSONObject bulkBody = new JSONObject();
+            JSONArray cardsArray = new JSONArray();
+            cardsArray.put(cardObj);
+            bulkBody.put("library_cards", cardsArray);
 
-            RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString());
-            Request request = createAuthRequestBuilder(endpoint).post(body).build();
+            RequestBody bulkReqBody = RequestBody.create(JSON_MEDIA_TYPE, bulkBody.toString());
+            Request requestBulk = createAuthRequestBuilder(endpointBulk).patch(bulkReqBody).build();
 
-            httpClient.newCall(request).enqueue(new Callback() {
+            httpClient.newCall(requestBulk).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
-                    sendReadingProgressFallback(progress, callback);
+                    sendReadingProgressFallbackPost(progress, cardObj, callback);
                 }
 
                 @Override
@@ -1104,7 +1147,7 @@ public class YandexBooksApiClient {
                         if (response.isSuccessful()) {
                             postSuccess(callback, true);
                         } else {
-                            sendReadingProgressFallback(progress, callback);
+                            sendReadingProgressFallbackPost(progress, cardObj, callback);
                         }
                     } finally {
                         response.close();
@@ -1116,28 +1159,52 @@ public class YandexBooksApiClient {
         }
     }
 
-    private void sendReadingProgressFallback(final ReadingProgress progress, final ApiCallback<Boolean> callback) {
-        String endpoint = BASE_URL + "/profile/library_cards/" + progress.getBookUuid() + "/reading_position";
+    private void sendReadingProgressFallbackPost(final ReadingProgress progress, final JSONObject cardObj, final ApiCallback<Boolean> callback) {
+        // 2. Fallback 1: POST /profile/library_cards
+        String endpointPost = BASE_URL + "/profile/library_cards";
         try {
-            double rawPercent = progress.getPercent();
-            double normalizedFraction = Math.min(1.0, Math.max(0.0, rawPercent / 100.0));
-            JSONObject bodyJson = new JSONObject();
-            bodyJson.put("percent", rawPercent);
-            bodyJson.put("reading_progress", normalizedFraction);
-            bodyJson.put("percentage", rawPercent);
-            bodyJson.put("chapter_index", progress.getChapterIndex());
-            bodyJson.put("chapter", progress.getChapterIndex());
-            bodyJson.put("paragraph_index", progress.getParagraphIndex());
-            bodyJson.put("point", progress.getParagraphIndex());
-            bodyJson.put("timestamp", progress.getTimestamp());
+            RequestBody postReqBody = RequestBody.create(JSON_MEDIA_TYPE, cardObj.toString());
+            Request requestPost = createAuthRequestBuilder(endpointPost).post(postReqBody).build();
 
-            RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString());
-            Request request = createAuthRequestBuilder(endpoint).post(body).build();
-
-            httpClient.newCall(request).enqueue(new Callback() {
+            httpClient.newCall(requestPost).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
-                    sendReadingProgressFallbackBooks(progress, callback);
+                    sendReadingProgressFallbackPatchCard(progress, cardObj, callback);
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) {
+                    try {
+                        if (response.isSuccessful() || response.code() == 409 || response.code() == 422) {
+                            postSuccess(callback, true);
+                        } else {
+                            sendReadingProgressFallbackPatchCard(progress, cardObj, callback);
+                        }
+                    } finally {
+                        response.close();
+                    }
+                }
+            });
+        } catch (Exception e) {
+            sendReadingProgressFallbackPatchCard(progress, cardObj, callback);
+        }
+    }
+
+    private void sendReadingProgressFallbackPatchCard(final ReadingProgress progress, final JSONObject cardObj, final ApiCallback<Boolean> callback) {
+        // 3. Fallback 2: PATCH /profile/library_cards/{cardId_or_bookUuid}
+        String targetId = (progress.getLibraryCardId() != null && !progress.getLibraryCardId().isEmpty())
+                ? progress.getLibraryCardId()
+                : progress.getBookUuid();
+        String endpointPatch = BASE_URL + "/profile/library_cards/" + targetId;
+
+        try {
+            RequestBody patchReqBody = RequestBody.create(JSON_MEDIA_TYPE, cardObj.toString());
+            Request requestPatch = createAuthRequestBuilder(endpointPatch).patch(patchReqBody).build();
+
+            httpClient.newCall(requestPatch).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    sendReadingProgressFallbackPutCard(progress, cardObj, callback);
                 }
 
                 @Override
@@ -1146,7 +1213,7 @@ public class YandexBooksApiClient {
                         if (response.isSuccessful()) {
                             postSuccess(callback, true);
                         } else {
-                            sendReadingProgressFallbackBooks(progress, callback);
+                            sendReadingProgressFallbackPutCard(progress, cardObj, callback);
                         }
                     } finally {
                         response.close();
@@ -1154,29 +1221,23 @@ public class YandexBooksApiClient {
                 }
             });
         } catch (Exception e) {
-            sendReadingProgressFallbackBooks(progress, callback);
+            sendReadingProgressFallbackPutCard(progress, cardObj, callback);
         }
     }
 
-    private void sendReadingProgressFallbackBooks(final ReadingProgress progress, final ApiCallback<Boolean> callback) {
-        String endpoint = BASE_URL + "/books/" + progress.getBookUuid() + "/reading_position";
+    private void sendReadingProgressFallbackPutCard(final ReadingProgress progress, final JSONObject cardObj, final ApiCallback<Boolean> callback) {
+        // 4. Fallback 3: PUT /profile/library_cards/bulk
+        String endpointPut = BASE_URL + "/profile/library_cards/bulk";
         try {
-            double rawPercent = progress.getPercent();
-            double normalizedFraction = Math.min(1.0, Math.max(0.0, rawPercent / 100.0));
-            JSONObject bodyJson = new JSONObject();
-            bodyJson.put("percent", rawPercent);
-            bodyJson.put("reading_progress", normalizedFraction);
-            bodyJson.put("percentage", rawPercent);
-            bodyJson.put("chapter_index", progress.getChapterIndex());
-            bodyJson.put("chapter", progress.getChapterIndex());
-            bodyJson.put("paragraph_index", progress.getParagraphIndex());
-            bodyJson.put("point", progress.getParagraphIndex());
-            bodyJson.put("timestamp", progress.getTimestamp());
+            JSONObject bulkBody = new JSONObject();
+            JSONArray cardsArray = new JSONArray();
+            cardsArray.put(cardObj);
+            bulkBody.put("library_cards", cardsArray);
 
-            RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString());
-            Request request = createAuthRequestBuilder(endpoint).post(body).build();
+            RequestBody putReqBody = RequestBody.create(JSON_MEDIA_TYPE, bulkBody.toString());
+            Request requestPut = createAuthRequestBuilder(endpointPut).put(putReqBody).build();
 
-            httpClient.newCall(request).enqueue(new Callback() {
+            httpClient.newCall(requestPut).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
                     postError(callback, "Ошибка отправки прогресса: " + e.getMessage());
@@ -1626,13 +1687,69 @@ public class YandexBooksApiClient {
      * Удаление книги из личной библиотеки («Убрать с полки»).
      */
     public void removeBookFromLibrary(final String bookUuid, final ApiCallback<Boolean> callback) {
-        String endpoint = BASE_URL + "/profile/library_cards/" + bookUuid;
+        removeBookFromLibrary(bookUuid, null, callback);
+    }
+
+    public void removeBookFromLibrary(final String bookUuid, final String cardIdHint, final ApiCallback<Boolean> callback) {
+        if (cardIdHint != null && !cardIdHint.isEmpty()) {
+            executeDeleteLibraryCard(cardIdHint, null, bookUuid, callback);
+            return;
+        }
+
+        // Запрашиваем карточку книги для точного определения cardId
+        String queryEndpoint = BASE_URL + "/profile/library_cards?book_uuid=" + bookUuid;
+        Request queryRequest = createAuthRequestBuilder(queryEndpoint).get().build();
+
+        httpClient.newCall(queryRequest).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                // Если запрос упал по сети, пробуем прямое удаление по UUID книги
+                executeDeleteLibraryCard(bookUuid, null, bookUuid, callback);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                if (!response.isSuccessful()) {
+                    response.close();
+                    executeDeleteLibraryCard(bookUuid, null, bookUuid, callback);
+                    return;
+                }
+
+                try {
+                    String body = response.body().string();
+                    JSONObject json = new JSONObject(body);
+                    JSONArray arr = json.optJSONArray("library_cards");
+                    if (arr == null || arr.length() == 0) {
+                        // Карточки нет на сервере — книга уже убрана
+                        postSuccess(callback, true);
+                        return;
+                    }
+
+                    JSONObject card = arr.getJSONObject(0);
+                    String cardId = card.optString("id", "");
+                    if (cardId.isEmpty()) {
+                        long numId = card.optLong("id", -1L);
+                        if (numId > 0) cardId = String.valueOf(numId);
+                    }
+                    String cardUuid = card.optString("uuid", "");
+
+                    executeDeleteLibraryCard(cardId, cardUuid, bookUuid, callback);
+                } catch (Exception e) {
+                    executeDeleteLibraryCard(bookUuid, null, bookUuid, callback);
+                }
+            }
+        });
+    }
+
+    private void executeDeleteLibraryCard(final String cardId, final String cardUuid, final String bookUuid, final ApiCallback<Boolean> callback) {
+        final String targetPathId = (cardId != null && !cardId.isEmpty()) ? cardId : bookUuid;
+        String endpoint = BASE_URL + "/profile/library_cards/" + targetPathId;
         Request request = createAuthRequestBuilder(endpoint).delete().build();
 
         httpClient.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-                removeBookFallback(bookUuid, callback);
+                removeBookFallbackNone(targetPathId, cardUuid, bookUuid, callback);
             }
 
             @Override
@@ -1641,7 +1758,7 @@ public class YandexBooksApiClient {
                     if (response.isSuccessful() || response.code() == 404) {
                         postSuccess(callback, true);
                     } else {
-                        removeBookFallback(bookUuid, callback);
+                        removeBookFallbackNone(targetPathId, cardUuid, bookUuid, callback);
                     }
                 } finally {
                     response.close();
@@ -1650,29 +1767,102 @@ public class YandexBooksApiClient {
         });
     }
 
-    private void removeBookFallback(final String bookUuid, final ApiCallback<Boolean> callback) {
-        String endpoint = BASE_URL + "/profile/library_cards?book_uuid=" + bookUuid;
-        Request request = createAuthRequestBuilder(endpoint).delete().build();
-
-        httpClient.newCall(request).enqueue(new Callback() {
-            @Override
-            public void onFailure(Call call, IOException e) {
-                postError(callback, "Ошибка сети: " + e.getMessage());
-            }
-
-            @Override
-            public void onResponse(Call call, Response response) {
-                try {
-                    if (response.isSuccessful() || response.code() == 404) {
-                        postSuccess(callback, true);
-                    } else {
-                        postError(callback, "Ошибка сервера при удалении: HTTP " + response.code());
-                    }
-                } finally {
-                    response.close();
+    private void removeBookFallbackNone(final String targetPathId, final String cardUuid, final String bookUuid, final ApiCallback<Boolean> callback) {
+        // Fallback 1: DELETE по cardUuid если он отличается
+        if (cardUuid != null && !cardUuid.isEmpty() && !cardUuid.equals(targetPathId)) {
+            String uuidEndpoint = BASE_URL + "/profile/library_cards/" + cardUuid;
+            Request uuidRequest = createAuthRequestBuilder(uuidEndpoint).delete().build();
+            httpClient.newCall(uuidRequest).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    removeBookFallbackPatchNone(targetPathId, bookUuid, callback);
                 }
-            }
-        });
+
+                @Override
+                public void onResponse(Call call, Response response) {
+                    try {
+                        if (response.isSuccessful() || response.code() == 404) {
+                            postSuccess(callback, true);
+                        } else {
+                            removeBookFallbackPatchNone(targetPathId, bookUuid, callback);
+                        }
+                    } finally {
+                        response.close();
+                    }
+                }
+            });
+            return;
+        }
+
+        removeBookFallbackPatchNone(targetPathId, bookUuid, callback);
+    }
+
+    private void removeBookFallbackPatchNone(final String targetPathId, final String bookUuid, final ApiCallback<Boolean> callback) {
+        // Fallback 2: PATCH с состоянием "none" (открепление книги от полок пользователя в Bookmate)
+        String endpoint = BASE_URL + "/profile/library_cards/" + targetPathId;
+        try {
+            JSONObject bodyJson = new JSONObject();
+            bodyJson.put("book_uuid", bookUuid);
+            bodyJson.put("state", "none");
+            RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString());
+            Request request = createAuthRequestBuilder(endpoint).patch(body).build();
+
+            httpClient.newCall(request).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    removeBookFallbackPostNone(bookUuid, callback);
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) {
+                    try {
+                        if (response.isSuccessful() || response.code() == 404) {
+                            postSuccess(callback, true);
+                        } else {
+                            removeBookFallbackPostNone(bookUuid, callback);
+                        }
+                    } finally {
+                        response.close();
+                    }
+                }
+            });
+        } catch (Exception e) {
+            removeBookFallbackPostNone(bookUuid, callback);
+        }
+    }
+
+    private void removeBookFallbackPostNone(final String bookUuid, final ApiCallback<Boolean> callback) {
+        // Fallback 3: POST /profile/library_cards со state: "none"
+        String endpoint = BASE_URL + "/profile/library_cards";
+        try {
+            JSONObject bodyJson = new JSONObject();
+            bodyJson.put("book_uuid", bookUuid);
+            bodyJson.put("state", "none");
+            RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString());
+            Request request = createAuthRequestBuilder(endpoint).post(body).build();
+
+            httpClient.newCall(request).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    postError(callback, "Ошибка сети: " + e.getMessage());
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) {
+                    try {
+                        if (response.isSuccessful() || response.code() == 404 || response.code() == 409 || response.code() == 422) {
+                            postSuccess(callback, true);
+                        } else {
+                            postError(callback, "Ошибка сервера при удалении: HTTP " + response.code());
+                        }
+                    } finally {
+                        response.close();
+                    }
+                }
+            });
+        } catch (Exception e) {
+            postError(callback, e.getMessage());
+        }
     }
 
     private <T> void postSuccess(final ApiCallback<T> callback, final T result) {

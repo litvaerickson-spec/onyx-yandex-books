@@ -1397,7 +1397,7 @@ public class MainActivity extends Activity {
             updateShelfFooter();
         }
 
-        apiClient.removeBookFromLibrary(book.getUuid(), new YandexBooksApiClient.ApiCallback<Boolean>() {
+        apiClient.removeBookFromLibrary(book.getUuid(), book.getLibraryCardId(), new YandexBooksApiClient.ApiCallback<Boolean>() {
             @Override
             public void onSuccess(Boolean result) {
                 runOnUiThread(new Runnable() {

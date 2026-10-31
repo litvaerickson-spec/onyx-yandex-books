@@ -174,6 +174,22 @@ public class ReaderActivity extends Activity {
     private YandexBooksApiClient apiClient;
     private com.onyx.yandexbooks.core.storage.AppSettings appSettings;
 
+    // Debounced автосохранение прогресса в облако во время непрерывного чтения
+    private final Handler autoSaveHandler = new Handler(Looper.getMainLooper());
+    private final Runnable autoSaveRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (userHasInteracted) {
+                saveProgress();
+            }
+        }
+    };
+
+    private void scheduleAutoSaveProgress() {
+        autoSaveHandler.removeCallbacks(autoSaveRunnable);
+        autoSaveHandler.postDelayed(autoSaveRunnable, 2500L);
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -1162,7 +1178,9 @@ public class ReaderActivity extends Activity {
     private void updateOrientationButtonText() {
         if (btnToggleOrientation == null) return;
         String mode = appSettings.getReaderOrientation();
-        if (com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_LANDSCAPE.equalsIgnoreCase(mode)) {
+        if (com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_REVERSE_LANDSCAPE.equalsIgnoreCase(mode)) {
+            btnToggleOrientation.setText("Обр. ландшафт");
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_LANDSCAPE.equalsIgnoreCase(mode)) {
             btnToggleOrientation.setText("Ландшафт");
         } else {
             btnToggleOrientation.setText("Портрет");
@@ -1171,9 +1189,14 @@ public class ReaderActivity extends Activity {
 
     private void cycleOrientation() {
         String current = appSettings.getReaderOrientation();
-        String next = com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_LANDSCAPE.equalsIgnoreCase(current)
-                ? com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_PORTRAIT
-                : com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_LANDSCAPE;
+        String next;
+        if (com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_PORTRAIT.equalsIgnoreCase(current)) {
+            next = com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_LANDSCAPE;
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_LANDSCAPE.equalsIgnoreCase(current)) {
+            next = com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_REVERSE_LANDSCAPE;
+        } else {
+            next = com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_PORTRAIT;
+        }
         appSettings.setReaderOrientation(next);
         updateOrientationButtonText();
         applyOrientation();
@@ -1181,7 +1204,9 @@ public class ReaderActivity extends Activity {
 
     private void applyOrientation() {
         String mode = appSettings.getReaderOrientation();
-        if (com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_LANDSCAPE.equalsIgnoreCase(mode)) {
+        if (com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_REVERSE_LANDSCAPE.equalsIgnoreCase(mode)) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE);
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.ORIENTATION_LANDSCAPE.equalsIgnoreCase(mode)) {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
         } else {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
@@ -2724,10 +2749,12 @@ public class ReaderActivity extends Activity {
             currentPageIndex++;
             renderCurrentPage();
             updateMenuControls();
+            scheduleAutoSaveProgress();
         } else if (chapters != null && currentChapterIndex + 1 < chapters.size()) {
             currentChapterIndex++;
             currentPageIndex = 0;
             loadChapter(currentChapterIndex, 0);
+            scheduleAutoSaveProgress();
         } else {
             Toast.makeText(this, "Конец книги", Toast.LENGTH_SHORT).show();
         }
@@ -2743,9 +2770,11 @@ public class ReaderActivity extends Activity {
             currentPageIndex--;
             renderCurrentPage();
             updateMenuControls();
+            scheduleAutoSaveProgress();
         } else if (chapters != null && currentChapterIndex > 0) {
             currentChapterIndex--;
             loadChapter(currentChapterIndex, -999);
+            scheduleAutoSaveProgress();
         } else {
             Toast.makeText(this, "Начало книги", Toast.LENGTH_SHORT).show();
         }
@@ -2768,6 +2797,13 @@ public class ReaderActivity extends Activity {
                 now
         );
 
+        try {
+            Book b = dbHelper.getBookByUuid(bookUuid);
+            if (b != null && b.getLibraryCardId() != null && !b.getLibraryCardId().isEmpty()) {
+                progress.setLibraryCardId(b.getLibraryCardId());
+            }
+        } catch (Exception ignored) {}
+
         // Мгновенно сохраняем в локальную SQLite базу ридера
         dbHelper.saveProgress(progress);
 
@@ -2784,6 +2820,7 @@ public class ReaderActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        autoSaveHandler.removeCallbacks(autoSaveRunnable);
         if (userHasInteracted) {
             saveProgress();
             syncManager.flushOfflineQueue();
@@ -2793,6 +2830,7 @@ public class ReaderActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        autoSaveHandler.removeCallbacks(autoSaveRunnable);
         paginationExecutor.shutdownNow();
     }
 
@@ -2802,6 +2840,7 @@ public class ReaderActivity extends Activity {
             hideMenuOverlay();
             return;
         }
+        autoSaveHandler.removeCallbacks(autoSaveRunnable);
         if (userHasInteracted) {
             saveProgress();
             syncManager.flushOfflineQueue();

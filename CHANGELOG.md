@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.9] - 2026-10-31
+
+### Reverse Landscape, Bookmate v5 Cloud Bidirectional Sync & Debounced Progress Auto-Save
+
+- **Режим «Обратный ландшафт» (Reverse Landscape)**:
+  - Добавлена ориентация экрана «Обратный ландшафт» (`ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE`, альбомная ориентация с поворотом на 180°).
+  - Позволяет комфортно держать ридер любой рукой (как левой, так и правой) без перекрытия кнопок корпуса, а также читать во время зарядки устройства.
+  - Реализовано циклическое переключение ориентаций в меню настроек ридера: «Портрет» $\to$ «Ландшафт» $\to$ «Обр. ландшафт» $\to$ «Портрет».
+  - Автоматическое адаптивное репагинирование и полноэкранная очистка E-Ink артефактов при любом повороте.
+- **Двусторонняя синхронизация прогресса чтения (Bookmate v5 API)**:
+  - Устранена критическая проблема, из-за которой позиция чтения на ридере не обновлялась на смартфоне в мобильном приложении Яндекс Книги.
+  - Взамен устаревших эндпоинтов `/books/{uuid}/progress`, которые сервер Bookmate отклонял с кодом HTTP 404, внедрены официальные спецификации Bookmate v5 API:
+    - Первичная отправка через `PATCH /api/v5/profile/library_cards/bulk` с полным массивом параметров позиции (`last_reading_position`, `reading_position`, `position`, `chapter`, `paragraph`, `point`, `percent`, `reading_progress`).
+    - Многоуровневый каскад fallback: `POST /api/v5/profile/library_cards` $\to$ `PATCH /api/v5/profile/library_cards/{id}` $\to$ `PUT /api/v5/profile/library_cards/bulk`.
+  - Внедрено debounced автосохранение прогресса во встроенном ридере: при листании страниц через 2.5 секунды после остановки на странице позиция автоматически отправляется в облако Яндекс Книг без спама сервера при быстром пролистывании.
+  - Корректная отмена таймеров автосохранения при выходе или переходе в фон (`onPause`, `onDestroy`, `onBackPressed`) с мгновенным сбросом очереди в сеть.
+- **Исправление удаления книг с полок («Убрать с полки» синхронно со смартфоном)**:
+  - Устранена ошибка, при которой книги, убранные с полки на ридере, оставались в мобильном приложении на смартфоне.
+  - Ранее запрос на удаление отправлялся на `DELETE /api/v5/profile/library_cards/{bookUuid}`, где сервер ожидал числовой ID карточки библиотеки (`card.id`), возвращая HTTP 404, который старый код ошибочно считал успешным.
+  - Реализован двухэтапный безопасный механизм: определение числового `card.id` из локальной SQLite базы или предварительного запроса `GET /api/v5/profile/library_cards?book_uuid={uuid}`, после чего вызывается `DELETE /api/v5/profile/library_cards/{cardId}` с fallback на открепление книги от полок через `PATCH` со статусом `state: "none"`.
+  - При удалении книги на ридере она гарантированно исчезает из полок в приложении на смартфоне.
+- **Хранение `card_id` в SQLite и моделях данных**:
+  - В таблицу `books` добавлена колонка `card_id TEXT` с автоматической миграцией `ALTER TABLE`.
+  - Модели данных `Book` и `ReadingProgress` расширены методами `getLibraryCardId()` и `setLibraryCardId()`.
+  - При парсинге карточек из Bookmate API числовой ID карточки сохраняется в локальной базе и передается в запросы синхронизации и удаления.
+
 ## [v1.5.8] - 2026-10-24
 
 ### Manifest uses-sdk & supports-screens Isolation, Memory Leak Prevention & Universal Dialog Key Suppression

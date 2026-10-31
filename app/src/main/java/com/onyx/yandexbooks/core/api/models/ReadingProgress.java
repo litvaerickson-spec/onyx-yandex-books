@@ -13,6 +13,7 @@ public class ReadingProgress implements Serializable {
     private int pageIndex;
     private long timestamp;
     private boolean isSyncedWithServer;
+    private String libraryCardId;
 
     public ReadingProgress() {}
 
@@ -46,4 +47,7 @@ public class ReadingProgress implements Serializable {
 
     public boolean isSyncedWithServer() { return isSyncedWithServer; }
     public void setSyncedWithServer(boolean syncedWithServer) { isSyncedWithServer = syncedWithServer; }
+
+    public String getLibraryCardId() { return libraryCardId; }
+    public void setLibraryCardId(String libraryCardId) { this.libraryCardId = libraryCardId; }
 }

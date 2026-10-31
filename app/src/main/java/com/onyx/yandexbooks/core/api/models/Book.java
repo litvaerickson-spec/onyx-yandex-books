@@ -20,6 +20,7 @@ public class Book implements Serializable {
     private String shelfType; // reading, to_read, done
     private boolean isDownloaded;
     private long lastReadTimestamp;
+    private String libraryCardId;
 
     public Book() {
     }
@@ -74,4 +75,7 @@ public class Book implements Serializable {
 
     public long getLastReadTimestamp() { return lastReadTimestamp; }
     public void setLastReadTimestamp(long lastReadTimestamp) { this.lastReadTimestamp = lastReadTimestamp; }
+
+    public String getLibraryCardId() { return libraryCardId; }
+    public void setLibraryCardId(String libraryCardId) { this.libraryCardId = libraryCardId; }
 }

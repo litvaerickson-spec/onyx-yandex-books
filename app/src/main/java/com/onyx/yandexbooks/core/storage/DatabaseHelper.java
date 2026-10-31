@@ -44,6 +44,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         // Таблица книг
         db.execSQL("CREATE TABLE IF NOT EXISTS books (" +
                 "uuid TEXT PRIMARY KEY," +
+                "card_id TEXT," +
                 "title TEXT," +
                 "author TEXT," +
                 "annotation TEXT," +
@@ -58,7 +59,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 "last_read_timestamp INTEGER" +
                 ")");
 
-        // Миграция колонки annotation для существующих баз
+        // Миграция колонок card_id и annotation для существующих баз
+        try {
+            db.execSQL("ALTER TABLE books ADD COLUMN card_id TEXT");
+        } catch (Exception ignored) {}
         try {
             db.execSQL("ALTER TABLE books ADD COLUMN annotation TEXT");
         } catch (Exception ignored) {}
@@ -208,10 +212,11 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         int bestLocalPar = 0;
         boolean hasLocalRecord = false;
         String localShelfType = null;
+        String localCardId = null;
 
         try {
             // 1. Проверяем локальную запись в таблице books
-            Cursor c = db.rawQuery("SELECT percent, is_downloaded, last_read_timestamp, current_chapter, current_paragraph, shelf_type FROM books WHERE uuid = ?", new String[]{book.getUuid()});
+            Cursor c = db.rawQuery("SELECT percent, is_downloaded, last_read_timestamp, current_chapter, current_paragraph, shelf_type, card_id FROM books WHERE uuid = ?", new String[]{book.getUuid()});
             if (c != null) {
                 if (c.moveToFirst()) {
                     hasLocalRecord = true;
@@ -221,6 +226,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     int localCh = c.getInt(3);
                     int localPar = c.getInt(4);
                     localShelfType = c.getString(5);
+                    int cardIdx = c.getColumnIndex("card_id");
+                    if (cardIdx >= 0) {
+                        localCardId = c.getString(cardIdx);
+                    }
 
                     if (localDown == 1) {
                         effectiveDownloaded = true;
@@ -314,6 +323,16 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
         ContentValues cv = new ContentValues();
         cv.put("uuid", book.getUuid());
+
+        String effectiveCardId = book.getLibraryCardId();
+        if ((effectiveCardId == null || effectiveCardId.isEmpty()) && localCardId != null && !localCardId.isEmpty()) {
+            effectiveCardId = localCardId;
+            book.setLibraryCardId(effectiveCardId);
+        }
+        if (effectiveCardId != null && !effectiveCardId.isEmpty()) {
+            cv.put("card_id", effectiveCardId);
+        }
+
         cv.put("title", book.getTitle());
         cv.put("author", book.getAuthor());
         cv.put("annotation", book.getAnnotation());
@@ -551,6 +570,12 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         b.setShelfType(c.getString(c.getColumnIndex("shelf_type")));
         b.setDownloaded(c.getInt(c.getColumnIndex("is_downloaded")) == 1);
         b.setLastReadTimestamp(c.getLong(c.getColumnIndex("last_read_timestamp")));
+
+        int cardIdx = c.getColumnIndex("card_id");
+        if (cardIdx >= 0) {
+            b.setLibraryCardId(c.getString(cardIdx));
+        }
+
         return b;
     }
 

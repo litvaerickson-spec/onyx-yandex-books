@@ -38,3 +38,15 @@ docs/release_notes_*.md
 # Design proposals drafts
 docs/icon_proposals/
 
+
+# === Antigravity Security Vault Rules ===
+.env
+.env.*
+!.env.example
+keys.env
+secrets.yaml
+secrets.json
+*credentials*.md
+!*credentials.example.md
+*.key
+*.pem

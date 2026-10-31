@@ -23,6 +23,7 @@ public class AppSettings {
     public static final String KEY_ORIENTATION = "reader_orientation";
     public static final String ORIENTATION_PORTRAIT = "portrait";
     public static final String ORIENTATION_LANDSCAPE = "landscape";
+    public static final String ORIENTATION_REVERSE_LANDSCAPE = "reverse_landscape";
 
     private final SharedPreferences prefs;
 
