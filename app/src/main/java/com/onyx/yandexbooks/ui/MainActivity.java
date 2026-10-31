@@ -361,7 +361,7 @@ public class MainActivity extends Activity {
         root.addView(listLayout);
 
         TextView tvBetaNotice = new TextView(this);
-        tvBetaNotice.setText("Яндекс Книги Lite v1.5.12-beta (предварительный выпуск)");
+        tvBetaNotice.setText("Яндекс Книги Lite v1.5.13-beta (предварительный выпуск)");
         tvBetaNotice.setTextSize(10);
         tvBetaNotice.setTextColor(Color.DKGRAY);
         tvBetaNotice.setGravity(Gravity.CENTER);
@@ -1508,34 +1508,45 @@ public class MainActivity extends Activity {
     private void ensureBookOnReadingShelf(final Book book, final Runnable onReady) {
         dbHelper.unhideBook(book.getUuid());
         Book existing = dbHelper.getBookByUuid(book.getUuid());
-        boolean needsShelfUpdate = (existing == null || !"reading".equals(existing.getShelfType()));
+        long nowTs = System.currentTimeMillis();
 
         book.setShelfType("reading");
+        book.setLastReadTimestamp(nowTs);
+        if (existing != null && (book.getLibraryCardId() == null || book.getLibraryCardId().isEmpty())) {
+            book.setLibraryCardId(existing.getLibraryCardId());
+        }
         if (existing == null) {
             dbHelper.saveBooks(java.util.Collections.singletonList(book), "reading");
         } else {
             dbHelper.updateBookShelf(book.getUuid(), "reading");
         }
+
+        // Немедленно переключаем активную вкладку и список книг на раздел «Читаю»,
+        // чтобы книга отображалась в «Читаю» при любом способе открытия (из списка или из карточки «О книге»)
+        currentShelf = "reading";
+        updateTabStyles();
         updateTabBadges();
+        currentBooks = dbHelper.getBooksByShelf(currentShelf);
+        adapter.notifyDataSetChanged();
+        updateEmptyState();
+        updateShelfFooter();
 
         // Автоматическая полусинхронизация: если есть облачный прогресс, гарантируем создание закладки
         if (book.getPercent() > 0.0 && book.getPercent() < 99.0) {
             dbHelper.ensureCloudSyncBookmark(book.getUuid(), book.getCurrentChapterIndex(), 0, book.getPercent());
         }
 
-        if (needsShelfUpdate) {
-            apiClient.updateBookShelfState(book.getUuid(), book.getLibraryCardId(), "reading", new YandexBooksApiClient.ApiCallback<Boolean>() {
-                @Override
-                public void onSuccess(Boolean result) {
-                    // Полка на сервере успешно синхронизирована в фоне
-                }
+        apiClient.updateBookShelfState(book.getUuid(), book.getLibraryCardId(), "reading", new YandexBooksApiClient.ApiCallback<Boolean>() {
+            @Override
+            public void onSuccess(Boolean result) {
+                // Полка на сервере успешно синхронизирована в фоне
+            }
 
-                @Override
-                public void onError(String errorMessage) {
-                    // Локальное состояние уже сохранено в SQLite, сбой сети не блокирует чтение
-                }
-            });
-        }
+            @Override
+            public void onError(String errorMessage) {
+                // Локальное состояние уже сохранено в SQLite, сбой сети не блокирует чтение
+            }
+        });
         if (onReady != null) {
             onReady.run();
         }

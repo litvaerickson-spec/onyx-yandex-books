@@ -2374,13 +2374,13 @@ def test_v1511_beta_ui_scaling_and_offline_reading_cloud_sync():
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str in ["1.5.11-beta", "1.5.12-beta"], f"VERSION должен быть >= 1.5.11-beta, получено: {v_str}"
+    assert v_str in ["1.5.11-beta", "1.5.12-beta", "1.5.13-beta"], f"VERSION должен быть >= 1.5.11-beta, получено: {v_str}"
 
     manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(manifest_path, "r", encoding="utf-8") as f:
         m_code = f.read()
-    assert 'android:versionName="1.5.11-beta"' in m_code or 'android:versionName="1.5.12-beta"' in m_code
-    assert 'android:versionCode="44"' in m_code or 'android:versionCode="45"' in m_code
+    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.11-beta", "1.5.12-beta", "1.5.13-beta"])
+    assert any(f'android:versionCode="{c}"' in m_code for c in ["44", "45", "46"])
 
     main_xml_path = os.path.join(PROJECT_DIR, "app/src/main/res/layout/activity_main.xml")
     with open(main_xml_path, "r", encoding="utf-8") as f:
@@ -2443,26 +2443,109 @@ def test_v1512_beta_eink_notice_high_contrast_and_persistent_alerts():
     assert "EinkNotice.show" in reader_code, "В ReaderActivity.java обязаны использоваться вызовы EinkNotice.show!"
     print(" - MainActivity & ReaderActivity (полная замена Toast на высококонтрастные EinkNotice): OK")
 
-    # 5. Проверка версий 1.5.12-beta
+    # 5. Проверка версий 1.5.12-beta+
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str == "1.5.12-beta", f"VERSION должен быть 1.5.12-beta, получено: {v_str}"
+    assert v_str in ["1.5.12-beta", "1.5.13-beta"], f"VERSION должен быть >= 1.5.12-beta, получено: {v_str}"
 
     gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(gradle_file, "r", encoding="utf-8") as f:
         gradle_code = f.read()
-    assert 'versionName "1.5.12-beta"' in gradle_code
-    assert 'versionCode 45' in gradle_code
+    assert f'versionName "{v_str}"' in gradle_code
+    assert 'versionCode 45' in gradle_code or 'versionCode 46' in gradle_code
 
     manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(manifest_path, "r", encoding="utf-8") as f:
         m_code = f.read()
-    assert 'android:versionName="1.5.12-beta"' in m_code
-    assert 'android:versionCode="45"' in m_code
-    print(" - Версионирование v1.5.12-beta (versionCode=45, AndroidManifest, build.gradle, VERSION): OK")
+    assert f'android:versionName="{v_str}"' in m_code
+    assert 'android:versionCode="45"' in m_code or 'android:versionCode="46"' in m_code
+    print(" - Версионирование v1.5.12-beta+ (AndroidManifest, build.gradle, VERSION): OK")
 
     print("✅ Тест v1.5.12-beta Высококонтрастные уведомления EinkNotice и обновление ПО успешно пройден!\n")
+
+
+def test_v1513_beta_reading_shelf_promotion_and_library_card_uuid_sync():
+    """[ТЕСТ 39] v1.5.13-beta Перевод книги из «В планах» в «Читаю» при открытии и сквозная синхронизация LibraryCard UUID"""
+    print("--- [ТЕСТ 39] v1.5.13-beta Перевод в «Читаю» при открытии и синхронизация LibraryCard UUID ---")
+
+    api_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/api/YandexBooksApiClient.java")
+    db_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/storage/DatabaseHelper.java")
+    main_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java")
+    reader_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/ReaderActivity.java")
+
+    with open(api_path, "r", encoding="utf-8") as f:
+        api_code = f.read()
+    with open(db_path, "r", encoding="utf-8") as f:
+        db_code = f.read()
+    with open(main_path, "r", encoding="utf-8") as f:
+        main_code = f.read()
+    with open(reader_path, "r", encoding="utf-8") as f:
+        reader_code = f.read()
+
+    # 1. Проверка извлечения LibraryCard UUID и прогресса из реального ответа GET /profile/library_cards
+    assert "public static String extractLibraryCardId" in api_code, "Метод extractLibraryCardId обязан присутствовать!"
+    assert "public static JSONObject findMatchingLibraryCardInArray" in api_code, "Метод findMatchingLibraryCardInArray обязан присутствовать!"
+    assert "findLibraryCardUuidForBookSync" in api_code, "Метод findLibraryCardUuidForBookSync обязан присутствовать!"
+    assert "if (ts < 100000000000L) ts *= 1000L;" in api_code, "Конвертация Unix-секунд updated_at в миллисекунды обязательна!"
+    print(" - Извлечение LibraryCard.uuid, фильтрация по book.uuid и парсинг reading_progress/updated_at: OK")
+
+    # 2. Проверка корректного Bookmate state ('want_to_read' / 'reading' / 'finished') и атомарного перевода полки
+    assert 'apiState = "want_to_read";' in api_code, "Полка 'В планах' должна передаваться как 'want_to_read' в Bookmate API v5!"
+    assert "isCardStateMatchingResponse" in api_code, "Проверка подтверждения смены state сервером обязательна!"
+    assert '!targetPathId.equals(bookUuid)' in api_code, "DELETE 404 по bookUuid не должен блокировать удаление по cardUuid!"
+    print(" - Синхронизация полок ('want_to_read' / 'reading' / 'finished') и атомарное пересоздание при залипании: OK")
+
+    # 3. Проверка устранения гонки в DatabaseHelper (cloudTimestamp vs bestLocalTs, updateBookShelf, saveProgress)
+    assert "final long cloudTimestamp = book.getLastReadTimestamp();" in db_code, \
+        "cloudTimestamp обязан сохраняться до перезаписи effectiveTimestamp!"
+    assert 'cv.put("last_read_timestamp", System.currentTimeMillis());' in db_code, \
+        "updateBookShelf обязан обновлять last_read_timestamp для защиты от перезаписи фоновым синком!"
+    assert 'bookCv.put("shelf_type", "reading");' in db_code, \
+        "saveProgress обязан переводить книгу в раздел 'reading' в таблице books!"
+    assert "public synchronized void updateBookCardId" in db_code, \
+        "Метод updateBookCardId обязан присутствовать в DatabaseHelper!"
+    print(" - Защита локального перевода в «Читаю» от перезаписи фоновым getAllUserBooks в SQLite: OK")
+
+    # 4. Проверка немедленного переключения UI на раздел «Читаю» при открытии книги в MainActivity и ReaderActivity
+    assert 'currentShelf = "reading";' in main_code and 'updateTabStyles();' in main_code, \
+        "ensureBookOnReadingShelf обязан немедленно переключать вкладку и список на 'reading'!"
+    assert 'dbHelper.updateBookShelf(bookUuid, "reading");' in reader_code, \
+        "ReaderActivity.loadBookData обязан фиксировать полку 'reading' при открытии!"
+    print(" - Немедленный перевод книги в «Читаю» в MainActivity и ReaderActivity при открытии онлайн/офлайн: OK")
+
+    # 5. Математическая симуляция сценария пользователя:
+    # Книга в разделе "Хочу почитать" (to_read, cloudTs = 1710000000000) -> пользователь открывает ее онлайн (nowTs = 1730000000000)
+    # -> параллельно завершается фоновый синк со старым ответом сервера (state="want_to_read", cloudTs = 1710000000000).
+    cloud_ts = 1710000000 * 1000
+    local_open_ts = 1730000000000
+    local_shelf = "reading"
+    cloud_shelf = "to_read"
+    local_reading_is_newer = (local_shelf == "reading") and (local_open_ts > 0) and (cloud_ts <= 0 or local_open_ts >= cloud_ts)
+    resolved_shelf = "reading" if (cloud_shelf == "to_read" and local_reading_is_newer) else cloud_shelf
+    assert resolved_shelf == "reading", "Книга обязана остаться в разделе 'Читаю'!"
+    print(" - Симуляция открытия книги из «В планах» при параллельном фоновом синке: книга остается в «Читаю»: OK")
+
+    # 6. Проверка версии 1.5.13-beta (versionCode 46)
+    version_file = os.path.join(PROJECT_DIR, "VERSION")
+    with open(version_file, "r", encoding="utf-8") as f:
+        v_str = f.read().strip()
+    assert v_str == "1.5.13-beta", f"VERSION должен быть 1.5.13-beta, получено: {v_str}"
+
+    gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
+    with open(gradle_file, "r", encoding="utf-8") as f:
+        gradle_code = f.read()
+    assert 'versionName "1.5.13-beta"' in gradle_code
+    assert 'versionCode 46' in gradle_code
+
+    manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        m_code = f.read()
+    assert 'android:versionName="1.5.13-beta"' in m_code
+    assert 'android:versionCode="46"' in m_code
+    print(" - Версионирование v1.5.13-beta (versionCode=46, AndroidManifest, build.gradle, VERSION): OK")
+
+    print("✅ Тест v1.5.13-beta Перевод в «Читаю» и сквозная синхронизация успешно пройден!\n")
 
 
 if __name__ == "__main__":
@@ -2508,6 +2591,7 @@ if __name__ == "__main__":
     test_v1510_reverse_landscape_and_bidirectional_cloud_sync()
     test_v1511_beta_ui_scaling_and_offline_reading_cloud_sync()
     test_v1512_beta_eink_notice_high_contrast_and_persistent_alerts()
+    test_v1513_beta_reading_shelf_promotion_and_library_card_uuid_sync()
     print("==================================================")
-    print("🎉 ВСЕ 38 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 39 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

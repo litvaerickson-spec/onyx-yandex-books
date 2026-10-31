@@ -202,7 +202,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
         double effectivePercent = book.getPercent();
         boolean effectiveDownloaded = book.isDownloaded();
-        long effectiveTimestamp = book.getLastReadTimestamp();
+        final long cloudTimestamp = book.getLastReadTimestamp();
+        long effectiveTimestamp = cloudTimestamp;
         int effectiveChapter = book.getCurrentChapterIndex();
         int effectiveParagraph = book.getCurrentParagraphIndex();
 
@@ -276,7 +277,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
         if (hasLocalProgress) {
             // Если на сервере есть реальный валидный таймштамп, он новее локального и прочитано больше:
-            boolean serverIsNewerAndFurther = (effectiveTimestamp > bestLocalTs && effectiveTimestamp > 0 && book.getPercent() > bestLocalPercent + 0.5);
+            boolean serverIsNewerAndFurther = (cloudTimestamp > bestLocalTs && cloudTimestamp > 0 && book.getPercent() > bestLocalPercent + 0.5);
 
             if (serverIsNewerAndFurther) {
                 effectivePercent = book.getPercent();
@@ -295,9 +296,13 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 effectiveTimestamp = Math.max(bestLocalTs, effectiveTimestamp);
 
                 // Если локальный прогресс новее или дальше облачного (пользователь читал офлайн на этом ридере),
+                // или локальная полка переведена в "reading" вразрез со старой облачной "to_read",
                 // гарантированно ставим его в очередь на синхронизацию в облако Яндекса!
-                if (bestLocalTs > 0 && bestLocalPercent > 0.0 && bestLocalPercent > (book.getPercent() + 0.01)) {
-                    ReadingProgress unsynced = new ReadingProgress(book.getUuid(), bestLocalPercent, bestLocalCh, bestLocalPar, 0, bestLocalTs);
+                boolean shelfPromotedLocally = ("reading".equals(localShelfType) && "to_read".equals(book.getShelfType()) && (bestLocalTs >= cloudTimestamp || cloudTimestamp <= 0));
+                if ((bestLocalTs > 0 && bestLocalPercent > 0.0 && bestLocalPercent > (book.getPercent() + 0.01)) || shelfPromotedLocally) {
+                    double syncPct = Math.max(bestLocalPercent, 0.01);
+                    long syncTs = bestLocalTs > 0 ? bestLocalTs : System.currentTimeMillis();
+                    ReadingProgress unsynced = new ReadingProgress(book.getUuid(), syncPct, bestLocalCh, bestLocalPar, 0, syncTs);
                     unsynced.setSyncedWithServer(false);
                     unsynced.setLibraryCardId(localCardId != null ? localCardId : book.getLibraryCardId());
                     enqueueOfflineProgress(unsynced);
@@ -315,10 +320,15 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         if (overrideShelfType != null) {
             targetShelf = overrideShelfType;
         } else if (book.getShelfType() != null && ("reading".equals(book.getShelfType()) || "to_read".equals(book.getShelfType()) || "done".equals(book.getShelfType()))) {
-            // Облачная карточка содержит актуальный статус полки
-            if ("to_read".equals(book.getShelfType()) && "reading".equals(localShelfType) && hasLocalProgress && bestLocalTs > effectiveTimestamp) {
-                // Если локально пользователь только что читал книгу на ридере, сохраняем "Читаю"
+            // Облачная карточка содержит актуальный статус полки, но если локально пользователь только что
+            // открыл или перенес книгу в "Читаю" (timestamp локального действия >= облачного или еще нет прогресса на сервере),
+            // сохраняем локальный статус "reading" и не даем фоновому синку откатить книгу обратно в "to_read"!
+            boolean localReadingIsNewer = "reading".equals(localShelfType) && (hasLocalProgress || bestLocalTs > 0) && (cloudTimestamp <= 0 || bestLocalTs >= cloudTimestamp);
+            boolean localToReadIsNewer = "to_read".equals(localShelfType) && bestLocalTs > 0 && (cloudTimestamp <= 0 || bestLocalTs > cloudTimestamp);
+            if ("to_read".equals(book.getShelfType()) && ("reading".equals(localShelfType) && (localReadingIsNewer || hasLocalProgress))) {
                 targetShelf = "reading";
+            } else if ("reading".equals(book.getShelfType()) && localToReadIsNewer) {
+                targetShelf = "to_read";
             } else if ("done".equals(book.getShelfType()) || (effectivePercent >= 99.0 && effectiveChapter > 0)) {
                 targetShelf = "done";
             } else {
@@ -453,6 +463,15 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         db.delete("hidden_books", "uuid = ?", new String[]{uuid});
         ContentValues cv = new ContentValues();
         cv.put("shelf_type", shelfType);
+        cv.put("last_read_timestamp", System.currentTimeMillis());
+        db.update("books", cv, "uuid = ?", new String[]{uuid});
+    }
+
+    public synchronized void updateBookCardId(String uuid, String cardId) {
+        if (uuid == null || uuid.isEmpty() || cardId == null || cardId.isEmpty()) return;
+        SQLiteDatabase db = getWritableDatabase();
+        ContentValues cv = new ContentValues();
+        cv.put("card_id", cardId);
         db.update("books", cv, "uuid = ?", new String[]{uuid});
     }
 
@@ -638,12 +657,17 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         cv.put("is_synced", progress.isSyncedWithServer() ? 1 : 0);
         db.insertWithOnConflict("progress", null, cv, SQLiteDatabase.CONFLICT_REPLACE);
 
-        // Также обновляем процент, главы и таймштамп в таблице books
+        // Также обновляем процент, главы, полку и таймштамп в таблице books
         ContentValues bookCv = new ContentValues();
         bookCv.put("percent", progress.getPercent());
         bookCv.put("current_chapter", progress.getChapterIndex());
         bookCv.put("current_paragraph", progress.getParagraphIndex());
         bookCv.put("last_read_timestamp", progress.getTimestamp());
+        if (progress.getPercent() >= 99.0 && progress.getChapterIndex() > 0) {
+            bookCv.put("shelf_type", "done");
+        } else {
+            bookCv.put("shelf_type", "reading");
+        }
         if (progress.getLibraryCardId() != null && !progress.getLibraryCardId().isEmpty()) {
             bookCv.put("card_id", progress.getLibraryCardId());
         }

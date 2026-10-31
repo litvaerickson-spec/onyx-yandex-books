@@ -176,15 +176,75 @@ public class YandexBooksApiClient {
         public long timestamp = 0L;
     }
 
+    public static String extractLibraryCardId(JSONObject card, JSONObject bObj, String bookUuid) {
+        if (card == null) return "";
+        String resolvedBookUuid = bookUuid;
+        if ((resolvedBookUuid == null || resolvedBookUuid.isEmpty()) && bObj != null && bObj != card) {
+            resolvedBookUuid = bObj.optString("uuid", "");
+        }
+
+        // 1. Проверяем вложенные обертки library_card / lc
+        JSONObject[] wrappers = new JSONObject[] {
+            card.optJSONObject("library_card"),
+            card.optJSONObject("lc"),
+            card
+        };
+        boolean hasNestedBookObject = card.has("book") || card.has("audiobook") || card.has("comicbook") || card.has("text_book");
+
+        for (JSONObject obj : wrappers) {
+            if (obj == null) continue;
+            for (String key : new String[]{"library_card_uuid", "library_card_id", "card_uuid", "card_id"}) {
+                String v = obj.optString(key, "");
+                if (!v.isEmpty() && !"null".equalsIgnoreCase(v)) {
+                    return v;
+                }
+            }
+            if (obj != card || hasNestedBookObject) {
+                String u = obj.optString("uuid", "");
+                if (!u.isEmpty() && !"null".equalsIgnoreCase(u)) {
+                    return u;
+                }
+            } else {
+                String u = obj.optString("uuid", "");
+                if (!u.isEmpty() && !"null".equalsIgnoreCase(u) && resolvedBookUuid != null && !resolvedBookUuid.isEmpty() && !u.equals(resolvedBookUuid)) {
+                    return u;
+                }
+            }
+            String idStr = obj.optString("id", "");
+            if (idStr.isEmpty() || "null".equalsIgnoreCase(idStr)) {
+                long numId = obj.optLong("id", -1L);
+                if (numId > 0) idStr = String.valueOf(numId);
+            }
+            if (!idStr.isEmpty() && !"null".equalsIgnoreCase(idStr)) {
+                if (obj != card || hasNestedBookObject || resolvedBookUuid == null || resolvedBookUuid.isEmpty() || !idStr.equals(resolvedBookUuid)) {
+                    return idStr;
+                }
+            }
+        }
+        return "";
+    }
+
     public static ParsedProgress extractProgress(JSONObject card, JSONObject bObj) {
         ParsedProgress result = new ParsedProgress();
         if (card == null) return result;
 
+        JSONObject lcObj = card.optJSONObject("library_card");
+        if (lcObj == null) lcObj = card.optJSONObject("lc");
+
         String state = card.optString("state", "");
+        if ((state.isEmpty() || "null".equalsIgnoreCase(state)) && lcObj != null) {
+            state = lcObj.optString("state", "");
+        }
+
         String lastReadAt = card.optString("last_read_at", "");
         boolean hasLastRead = !lastReadAt.isEmpty() && !"null".equalsIgnoreCase(lastReadAt);
-        boolean hasPosObject = card.has("last_reading_position") || card.has("reading_position") || card.has("position");
-        boolean isUserCard = hasLastRead || hasPosObject || card.has("library_card")
+        boolean hasUpdatedOrAdded = card.has("updated_at") || card.has("added_at")
+                || (lcObj != null && (lcObj.has("updated_at") || lcObj.has("added_at")));
+        boolean hasPosObject = card.has("last_reading_position") || card.has("reading_position") || card.has("position")
+                || (lcObj != null && (lcObj.has("last_reading_position") || lcObj.has("reading_position") || lcObj.has("position")));
+        boolean hasNestedBook = card.has("book") || card.has("audiobook") || card.has("comicbook") || card.has("text_book");
+        boolean isUserCard = hasLastRead || hasPosObject || card.has("library_card") || card.has("lc")
+                || (hasNestedBook && (hasUpdatedOrAdded || card.has("reading_progress")))
                 || (!state.isEmpty() && !"null".equalsIgnoreCase(state) && !"catalog".equalsIgnoreCase(state) && !"search".equalsIgnoreCase(state));
 
         // Если это не карточка пользователя (а элемент каталога или публичной полки), прогресс строго нулевой
@@ -192,16 +252,14 @@ public class YandexBooksApiClient {
             return result;
         }
 
-        // Если книга только в планах (to_read / want_to_read) и нет объекта позиции, прогресс строго 0
-        if (("to_read".equalsIgnoreCase(state) || "want_to_read".equalsIgnoreCase(state)) && !hasPosObject) {
-            return result;
-        }
-
         // 1. Приоритетные вложенные объекты позиции чтения (как в мобильном приложении на телефоне)
         JSONObject[] positionObjects = new JSONObject[] {
             card.optJSONObject("last_reading_position"),
             card.optJSONObject("reading_position"),
-            card.optJSONObject("position")
+            card.optJSONObject("position"),
+            lcObj != null ? lcObj.optJSONObject("last_reading_position") : null,
+            lcObj != null ? lcObj.optJSONObject("reading_position") : null,
+            lcObj != null ? lcObj.optJSONObject("position") : null
         };
 
         // 1. Поиск процента прочитанного в специализированных объектах позиции
@@ -230,26 +288,32 @@ public class YandexBooksApiClient {
             }
         }
 
-        // 2. Если во вложенных объектах процент не найден, проверяем свойства самой пользовательской карточки
-        // ВАЖНО: только при явном наличии last_read_at или library_card (исключаем скидочные проценты каталога)
-        if (result.percent <= 0.0 && (hasLastRead || card.has("library_card"))) {
-            double p = -1.0;
-            if (card.has("percent")) p = card.optDouble("percent", -1.0);
-            else if (card.has("reading_progress")) p = card.optDouble("reading_progress", -1.0);
-            else if (card.has("progress_percent")) p = card.optDouble("progress_percent", -1.0);
-            else if (card.has("progress")) p = card.optDouble("progress", -1.0);
+        // 2. Если во вложенных объектах процент не найден, проверяем свойства самой пользовательской карточки LibraryCard
+        // В Bookmate API v5 GET /profile/library_cards возвращает карточки с полем reading_progress (0.0..1.0) и updated_at (unix sec) без last_read_at!
+        boolean isPlannedOnly = ("to_read".equalsIgnoreCase(state) || "want_to_read".equalsIgnoreCase(state) || "planned".equalsIgnoreCase(state));
+        if (result.percent <= 0.0 && (!isPlannedOnly || hasPosObject)) {
+            JSONObject[] cardCandidates = new JSONObject[] { lcObj, card };
+            for (JSONObject cObj : cardCandidates) {
+                if (cObj == null) continue;
+                double p = -1.0;
+                if (cObj.has("reading_progress") && !cObj.isNull("reading_progress")) p = cObj.optDouble("reading_progress", -1.0);
+                else if (cObj.has("percent") && !cObj.isNull("percent")) p = cObj.optDouble("percent", -1.0);
+                else if (cObj.has("progress_percent") && !cObj.isNull("progress_percent")) p = cObj.optDouble("progress_percent", -1.0);
+                else if (cObj.has("progress") && !cObj.isNull("progress")) p = cObj.optDouble("progress", -1.0);
 
-            if (p > 0.0) {
-                if (p < 1.0) {
-                    result.percent = p * 100.0;
-                } else if (p == 1.0) {
-                    if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state) || "completed".equalsIgnoreCase(state) || "done".equalsIgnoreCase(state)) {
-                        result.percent = 100.0;
+                if (p > 0.0) {
+                    if (p < 1.0) {
+                        result.percent = p * 100.0;
+                    } else if (p == 1.0) {
+                        if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state) || "completed".equalsIgnoreCase(state) || "done".equalsIgnoreCase(state)) {
+                            result.percent = 100.0;
+                        } else {
+                            result.percent = 1.0;
+                        }
                     } else {
-                        result.percent = 1.0;
+                        result.percent = Math.min(100.0, p);
                     }
-                } else {
-                    result.percent = Math.min(100.0, p);
+                    break;
                 }
             }
         }
@@ -261,9 +325,11 @@ public class YandexBooksApiClient {
             }
         }
 
-        // 4. Поиск индекса главы СТРОГО в объектах позиции чтения (никогда не в метаданных книги bObj!)
+        // 4. Поиск индекса главы в объектах позиции чтения и самой карточке (но никогда не в метаданных книги bObj!)
         JSONObject[] allCandidates = new JSONObject[] {
-            positionObjects[0], positionObjects[1], positionObjects[2]
+            positionObjects[0], positionObjects[1], positionObjects[2],
+            positionObjects[3], positionObjects[4], positionObjects[5],
+            lcObj, (card != bObj ? card : null)
         };
 
         for (JSONObject obj : allCandidates) {
@@ -295,23 +361,34 @@ public class YandexBooksApiClient {
             }
         }
 
-        // 6. Поиск временной метки (long timestamp или ISO-8601 строка)
-        for (JSONObject obj : allCandidates) {
+        // 6. Поиск временной метки (long timestamp, unix seconds или ISO-8601 строка) в объектах позиции и самой карточке
+        JSONObject[] tsCandidates = new JSONObject[] {
+            positionObjects[0], positionObjects[1], positionObjects[2],
+            positionObjects[3], positionObjects[4], positionObjects[5],
+            lcObj, card
+        };
+        for (JSONObject obj : tsCandidates) {
             if (obj == null) continue;
             long ts = 0L;
-            if (obj.has("timestamp")) {
+            if (obj.has("timestamp") && !obj.isNull("timestamp")) {
                 ts = obj.optLong("timestamp", 0L);
                 if (ts == 0L) ts = parseIsoTimestamp(obj.optString("timestamp", null));
-            } else if (obj.has("updated_at")) {
-                ts = obj.optLong("updated_at", 0L);
-                if (ts == 0L) ts = parseIsoTimestamp(obj.optString("updated_at", null));
-            } else if (obj.has("last_read_at")) {
+            }
+            if (ts <= 0L && obj.has("last_read_at") && !obj.isNull("last_read_at")) {
                 ts = obj.optLong("last_read_at", 0L);
                 if (ts == 0L) ts = parseIsoTimestamp(obj.optString("last_read_at", null));
             }
+            if (ts <= 0L && obj.has("updated_at") && !obj.isNull("updated_at")) {
+                ts = obj.optLong("updated_at", 0L);
+                if (ts == 0L) ts = parseIsoTimestamp(obj.optString("updated_at", null));
+            }
+            if (ts <= 0L && obj.has("added_at") && !obj.isNull("added_at")) {
+                ts = obj.optLong("added_at", 0L);
+                if (ts == 0L) ts = parseIsoTimestamp(obj.optString("added_at", null));
+            }
 
             if (ts > 0) {
-                if (ts < 10000000000L) ts *= 1000L;
+                if (ts < 100000000000L) ts *= 1000L;
                 result.timestamp = ts;
                 break;
             }
@@ -336,9 +413,10 @@ public class YandexBooksApiClient {
         JSONObject bObj = card.optJSONObject("book");
         if (bObj == null) bObj = card.optJSONObject("audiobook");
         if (bObj == null) bObj = card.optJSONObject("comicbook");
+        if (bObj == null) bObj = card.optJSONObject("text_book");
         if (bObj == null) bObj = card;
 
-        String uuid = bObj.optString("uuid", card.optString("uuid", ""));
+        String uuid = bObj.optString("uuid", card.optString("book_uuid", card.optString("uuid", "")));
         if (uuid == null || uuid.isEmpty()) return null;
 
         String title = bObj.optString("title", bObj.optString("name", "Без названия"));
@@ -361,6 +439,10 @@ public class YandexBooksApiClient {
 
         // Определение полки по состоянию Bookmate
         String state = card.optString("state", "");
+        if (state.isEmpty() && card.has("library_card")) {
+            JSONObject lc = card.optJSONObject("library_card");
+            if (lc != null) state = lc.optString("state", "");
+        }
         String mappedShelf;
         if ("reading".equalsIgnoreCase(state)) {
             mappedShelf = "reading";
@@ -389,16 +471,7 @@ public class YandexBooksApiClient {
         Book book = new Book();
         book.setUuid(uuid);
 
-        String cardId = "";
-        if (card.has("id")) {
-            cardId = card.optString("id", "");
-        }
-        if (cardId.isEmpty() && card.has("library_card")) {
-            JSONObject innerCard = card.optJSONObject("library_card");
-            if (innerCard != null && innerCard.has("id")) {
-                cardId = innerCard.optString("id", "");
-            }
-        }
+        String cardId = extractLibraryCardId(card, bObj, uuid);
         if (!cardId.isEmpty()) {
             book.setLibraryCardId(cardId);
         }
@@ -542,10 +615,89 @@ public class YandexBooksApiClient {
     }
 
     /**
+     * Ищет в массиве library_cards карточку, принадлежащую конкретной книге bookUuid.
+     * В Bookmate API v5 GET /profile/library_cards?book_uuid=... может вернуть общий список всех карточек,
+     * поэтому брать arr.getJSONObject(0) без сверки book.uuid нельзя!
+     */
+    public static JSONObject findMatchingLibraryCardInArray(JSONArray arr, String bookUuid) {
+        if (arr == null || arr.length() == 0) return null;
+        if (bookUuid == null || bookUuid.isEmpty()) return arr.optJSONObject(0);
+
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject card = arr.optJSONObject(i);
+            if (card == null) continue;
+            JSONObject bObj = card.optJSONObject("book");
+            if (bObj == null) bObj = card.optJSONObject("audiobook");
+            if (bObj == null) bObj = card.optJSONObject("comicbook");
+            if (bObj == null) bObj = card.optJSONObject("text_book");
+
+            String candidateBookUuid = bObj != null ? bObj.optString("uuid", "") : "";
+            if (candidateBookUuid.isEmpty()) {
+                candidateBookUuid = card.optString("book_uuid", "");
+            }
+            if (bookUuid.equals(candidateBookUuid)) {
+                return card;
+            }
+            // На случай если сама карточка индексирована по bookUuid
+            if (bObj == null && bookUuid.equals(card.optString("uuid", ""))) {
+                return card;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Синхронный поиск UUID карточки библиотеки (library_card.uuid) для заданной книги.
+     */
+    private String findLibraryCardUuidForBookSync(String bookUuid) {
+        if (bookUuid == null || bookUuid.isEmpty()) return "";
+        String[] urls = new String[] {
+            BASE_URL + "/profile/library_cards?book_uuid=" + bookUuid + "&per_page=100",
+            BASE_URL + "/profile/library_cards?per_page=100&page=1",
+            BASE_URL + "/profile/library_cards?per_page=100&page=2"
+        };
+        for (int uIdx = 0; uIdx < urls.length; uIdx++) {
+            Response resp = null;
+            try {
+                Request req = createAuthRequestBuilder(urls[uIdx]).get().build();
+                resp = httpClient.newCall(req).execute();
+                if (!resp.isSuccessful()) {
+                    continue;
+                }
+                String body = resp.body() != null ? resp.body().string() : "";
+                if (body.isEmpty()) continue;
+                JSONObject json = new JSONObject(body);
+                JSONArray arr = json.optJSONArray("library_cards");
+                if (arr == null) arr = json.optJSONArray("objects");
+                if (arr == null) arr = json.optJSONArray("items");
+                if (arr == null || arr.length() == 0) {
+                    break;
+                }
+                JSONObject matched = findMatchingLibraryCardInArray(arr, bookUuid);
+                if (matched != null) {
+                    String resolved = extractLibraryCardId(matched, matched.optJSONObject("book"), bookUuid);
+                    if (!resolved.isEmpty()) {
+                        return resolved;
+                    }
+                }
+                if (arr.length() < 100) {
+                    break;
+                }
+            } catch (Exception ignored) {
+            } finally {
+                if (resp != null) {
+                    try { resp.close(); } catch (Exception ignored) {}
+                }
+            }
+        }
+        return "";
+    }
+
+    /**
      * Запрос актуальной позиции чтения из облака Яндекса.
      */
     public void getReadingProgress(final String bookUuid, final ApiCallback<ReadingProgress> callback) {
-        String endpoint = BASE_URL + "/profile/library_cards?book_uuid=" + bookUuid;
+        String endpoint = BASE_URL + "/profile/library_cards?book_uuid=" + bookUuid + "&per_page=100";
         Request request = createAuthRequestBuilder(endpoint).get().build();
 
         httpClient.newCall(request).enqueue(new Callback() {
@@ -566,32 +718,32 @@ public class YandexBooksApiClient {
                     JSONObject json = new JSONObject(body);
                     JSONArray arr = json.optJSONArray("library_cards");
                     if (arr != null && arr.length() > 0) {
-                        JSONObject card = arr.getJSONObject(0);
-                        JSONObject bObj = card.optJSONObject("book");
-                        ParsedProgress pr = extractProgress(card, bObj);
-                        final ReadingProgress progress = new ReadingProgress(bookUuid, pr.percent, pr.chapterIndex, pr.paragraphIndex, 0, pr.timestamp);
-                        String cardId = card.optString("id", "");
-                        if (cardId.isEmpty()) {
-                            long numId = card.optLong("id", -1L);
-                            if (numId > 0) cardId = String.valueOf(numId);
+                        JSONObject card = findMatchingLibraryCardInArray(arr, bookUuid);
+                        if (card != null) {
+                            JSONObject bObj = card.optJSONObject("book");
+                            ParsedProgress pr = extractProgress(card, bObj);
+                            final ReadingProgress progress = new ReadingProgress(bookUuid, pr.percent, pr.chapterIndex, pr.paragraphIndex, 0, pr.timestamp);
+                            String cardId = extractLibraryCardId(card, bObj, bookUuid);
+                            if (!cardId.isEmpty()) {
+                                progress.setLibraryCardId(cardId);
+                            }
+                            progress.setSyncedWithServer(true);
+                            postSuccess(callback, progress);
+                            return;
                         }
-                        if (!cardId.isEmpty()) {
-                            progress.setLibraryCardId(cardId);
-                        }
-                        progress.setSyncedWithServer(true);
-                        postSuccess(callback, progress);
-                        return;
                     }
                     getReadingProgressFallback(bookUuid, callback);
                 } catch (Exception e) {
                     getReadingProgressFallback(bookUuid, callback);
+                } finally {
+                    try { response.close(); } catch (Exception ignored) {}
                 }
             }
         });
     }
 
     private void getReadingProgressFallback(final String bookUuid, final ApiCallback<ReadingProgress> callback) {
-        String endpoint = BASE_URL + "/books/" + bookUuid + "/reading_position";
+        String endpoint = BASE_URL + "/books/" + bookUuid + "/state";
         Request request = createAuthRequestBuilder(endpoint).get().build();
 
         httpClient.newCall(request).enqueue(new Callback() {
@@ -610,8 +762,14 @@ public class YandexBooksApiClient {
                 try {
                     String body = response.body().string();
                     JSONObject json = new JSONObject(body);
-                    ParsedProgress pr = extractProgress(json, json.optJSONObject("book"));
+                    JSONObject card = json.optJSONObject("library_card");
+                    if (card == null) card = json;
+                    ParsedProgress pr = extractProgress(card, card.optJSONObject("book"));
                     final ReadingProgress progress = new ReadingProgress(bookUuid, pr.percent, pr.chapterIndex, pr.paragraphIndex, 0, pr.timestamp);
+                    String cardId = extractLibraryCardId(card, card.optJSONObject("book"), bookUuid);
+                    if (!cardId.isEmpty()) {
+                        progress.setLibraryCardId(cardId);
+                    }
                     progress.setSyncedWithServer(true);
                     postSuccess(callback, progress);
                 } catch (Exception e) {
@@ -648,11 +806,7 @@ public class YandexBooksApiClient {
                     if (card == null) card = json;
                     ParsedProgress pr = extractProgress(card, card.optJSONObject("book"));
                     final ReadingProgress progress = new ReadingProgress(bookUuid, pr.percent, pr.chapterIndex, pr.paragraphIndex, 0, pr.timestamp);
-                    String cardId = card.optString("id", "");
-                    if (cardId.isEmpty()) {
-                        long numId = card.optLong("id", -1L);
-                        if (numId > 0) cardId = String.valueOf(numId);
-                    }
+                    String cardId = extractLibraryCardId(card, card.optJSONObject("book"), bookUuid);
                     if (!cardId.isEmpty()) {
                         progress.setLibraryCardId(cardId);
                     }
@@ -1099,6 +1253,7 @@ public class YandexBooksApiClient {
         JSONObject cardObj = new JSONObject();
         if (progress.getLibraryCardId() != null && !progress.getLibraryCardId().isEmpty()) {
             cardObj.put("id", progress.getLibraryCardId());
+            cardObj.put("uuid", progress.getLibraryCardId());
         }
         cardObj.put("book_uuid", progress.getBookUuid());
 
@@ -1107,6 +1262,9 @@ public class YandexBooksApiClient {
         cardObj.put("book", bookInner);
 
         cardObj.put("state", "reading");
+        if (rawPercent >= 99.0 && progress.getChapterIndex() > 0) {
+            cardObj.put("state", "finished");
+        }
         cardObj.put("percent", rawPercent);
         cardObj.put("reading_progress", normalizedFraction);
         cardObj.put("percentage", rawPercent);
@@ -1139,7 +1297,30 @@ public class YandexBooksApiClient {
         cardObj.put("reading_position", posObj);
         cardObj.put("last_reading_position", posObj);
 
+        JSONObject lcInner = new JSONObject(cardObj.toString());
+        cardObj.put("lc", lcInner);
+        cardObj.put("library_card", new JSONObject(lcInner.toString()));
+
         return cardObj;
+    }
+
+    private boolean isCardStateMatchingResponse(String respBody, String expectedState) {
+        if (respBody == null || respBody.isEmpty() || expectedState == null) return false;
+        try {
+            JSONObject json = new JSONObject(respBody);
+            JSONObject card = json.optJSONObject("library_card");
+            if (card == null) card = json.optJSONObject("lc");
+            if (card == null) card = json;
+            String actualState = card.optString("state", "");
+            if (actualState.isEmpty()) return true;
+            if (expectedState.equalsIgnoreCase(actualState)) return true;
+            if ("want_to_read".equalsIgnoreCase(expectedState) && "to_read".equalsIgnoreCase(actualState)) return true;
+            if ("to_read".equalsIgnoreCase(expectedState) && "want_to_read".equalsIgnoreCase(actualState)) return true;
+            if ("finished".equalsIgnoreCase(expectedState) && ("done".equalsIgnoreCase(actualState) || "read".equalsIgnoreCase(actualState))) return true;
+            return false;
+        } catch (Exception e) {
+            return true;
+        }
     }
 
     /**
@@ -1151,41 +1332,173 @@ public class YandexBooksApiClient {
             return;
         }
 
-        try {
-            final JSONObject cardObj = buildReadingProgressCardJson(progress);
-
-            // 1. Первичный официальный эндпоинт Bookmate API v5: bulk PATCH
-            String endpointBulk = BASE_URL + "/profile/library_cards/bulk";
-            JSONObject bulkBody = new JSONObject();
-            JSONArray cardsArray = new JSONArray();
-            cardsArray.put(cardObj);
-            bulkBody.put("library_cards", cardsArray);
-
-            RequestBody bulkReqBody = RequestBody.create(JSON_MEDIA_TYPE, bulkBody.toString());
-            Request requestBulk = createAuthRequestBuilder(endpointBulk).patch(bulkReqBody).build();
-
-            httpClient.newCall(requestBulk).enqueue(new Callback() {
-                @Override
-                public void onFailure(Call call, IOException e) {
-                    sendReadingProgressFallbackPost(progress, cardObj, callback);
-                }
-
-                @Override
-                public void onResponse(Call call, Response response) {
-                    try {
-                        if (response.isSuccessful()) {
-                            postSuccess(callback, true);
-                        } else {
-                            sendReadingProgressFallbackPost(progress, cardObj, callback);
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String bookUuid = progress.getBookUuid();
+                    String cardId = progress.getLibraryCardId();
+                    if (cardId == null || cardId.isEmpty() || cardId.equals(bookUuid)) {
+                        String resolved = findLibraryCardUuidForBookSync(bookUuid);
+                        if (resolved != null && !resolved.isEmpty()) {
+                            cardId = resolved;
+                            progress.setLibraryCardId(cardId);
                         }
-                    } finally {
-                        response.close();
                     }
+
+                    final String targetState = (progress.getPercent() >= 99.0 && progress.getChapterIndex() > 0)
+                            ? "finished" : "reading";
+
+                    // Если карточка еще не создана в облаке, создаем ее через POST /profile/library_cards
+                    if (cardId == null || cardId.isEmpty() || cardId.equals(bookUuid)) {
+                        Response postInitResp = null;
+                        try {
+                            JSONObject initBody = new JSONObject();
+                            initBody.put("book_uuid", bookUuid);
+                            initBody.put("state", targetState);
+                            Request reqInit = createAuthRequestBuilder(BASE_URL + "/profile/library_cards")
+                                    .post(RequestBody.create(JSON_MEDIA_TYPE, initBody.toString()))
+                                    .build();
+                            postInitResp = httpClient.newCall(reqInit).execute();
+                            if (postInitResp.body() != null) {
+                                String initStr = postInitResp.body().string();
+                                JSONObject initJson = new JSONObject(initStr);
+                                String extracted = extractLibraryCardId(initJson, initJson.optJSONObject("book"), bookUuid);
+                                if (!extracted.isEmpty()) {
+                                    cardId = extracted;
+                                    progress.setLibraryCardId(cardId);
+                                }
+                            }
+                        } catch (Exception ignored) {
+                        } finally {
+                            if (postInitResp != null) {
+                                try { postInitResp.close(); } catch (Exception ignored) {}
+                            }
+                        }
+                    }
+
+                    final JSONObject cardObj = buildReadingProgressCardJson(progress);
+                    boolean anySuccess = false;
+                    boolean stateConfirmed = false;
+
+                    // 1. Обновление конкретной карточки по ее настоящему UUID (PUT и PATCH /profile/library_cards/{cardUuid})
+                    if (cardId != null && !cardId.isEmpty() && !cardId.equals(bookUuid)) {
+                        String cardUrl = BASE_URL + "/profile/library_cards/" + cardId;
+                        Response putResp = null;
+                        try {
+                            Request reqPut = createAuthRequestBuilder(cardUrl)
+                                    .put(RequestBody.create(JSON_MEDIA_TYPE, cardObj.toString()))
+                                    .build();
+                            putResp = httpClient.newCall(reqPut).execute();
+                            if (putResp.isSuccessful()) {
+                                anySuccess = true;
+                                String rb = putResp.body() != null ? putResp.body().string() : "";
+                                if (isCardStateMatchingResponse(rb, targetState)) {
+                                    stateConfirmed = true;
+                                }
+                            }
+                        } catch (Exception ignored) {
+                        } finally {
+                            if (putResp != null) {
+                                try { putResp.close(); } catch (Exception ignored) {}
+                            }
+                        }
+
+                        Response patchResp = null;
+                        try {
+                            Request reqPatch = createAuthRequestBuilder(cardUrl)
+                                    .patch(RequestBody.create(JSON_MEDIA_TYPE, cardObj.toString()))
+                                    .build();
+                            patchResp = httpClient.newCall(reqPatch).execute();
+                            if (patchResp.isSuccessful()) {
+                                anySuccess = true;
+                                String rb = patchResp.body() != null ? patchResp.body().string() : "";
+                                if (isCardStateMatchingResponse(rb, targetState)) {
+                                    stateConfirmed = true;
+                                }
+                            }
+                        } catch (Exception ignored) {
+                        } finally {
+                            if (patchResp != null) {
+                                try { patchResp.close(); } catch (Exception ignored) {}
+                            }
+                        }
+
+                        // Если карточка на сервере застряла в "want_to_read" и PUT/PATCH не переключили ее в "reading",
+                        // выполняем атомарное пересоздание карточки со статусом "reading" и актуальным прогрессом!
+                        if (!stateConfirmed) {
+                            Response delResp = null;
+                            try {
+                                Request reqDel = createAuthRequestBuilder(cardUrl).delete().build();
+                                delResp = httpClient.newCall(reqDel).execute();
+                            } catch (Exception ignored) {
+                            } finally {
+                                if (delResp != null) {
+                                    try { delResp.close(); } catch (Exception ignored) {}
+                                }
+                            }
+
+                            Response recreateResp = null;
+                            try {
+                                Request reqRecreate = createAuthRequestBuilder(BASE_URL + "/profile/library_cards")
+                                        .post(RequestBody.create(JSON_MEDIA_TYPE, cardObj.toString()))
+                                        .build();
+                                recreateResp = httpClient.newCall(reqRecreate).execute();
+                                if (recreateResp.isSuccessful()) {
+                                    anySuccess = true;
+                                    String rb = recreateResp.body() != null ? recreateResp.body().string() : "";
+                                    if (!rb.isEmpty()) {
+                                        JSONObject rj = new JSONObject(rb);
+                                        String newCardUuid = extractLibraryCardId(rj, rj.optJSONObject("book"), bookUuid);
+                                        if (!newCardUuid.isEmpty()) {
+                                            cardId = newCardUuid;
+                                            progress.setLibraryCardId(newCardUuid);
+                                            cardObj.put("id", newCardUuid);
+                                            cardObj.put("uuid", newCardUuid);
+                                        }
+                                    }
+                                }
+                            } catch (Exception ignored) {
+                            } finally {
+                                if (recreateResp != null) {
+                                    try { recreateResp.close(); } catch (Exception ignored) {}
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. Официальный эндпоинт Bookmate API v5: bulk PATCH
+                    String endpointBulk = BASE_URL + "/profile/library_cards/bulk";
+                    JSONObject bulkBody = new JSONObject();
+                    JSONArray cardsArray = new JSONArray();
+                    cardsArray.put(cardObj);
+                    bulkBody.put("library_cards", cardsArray);
+
+                    Response bulkResp = null;
+                    try {
+                        RequestBody bulkReqBody = RequestBody.create(JSON_MEDIA_TYPE, bulkBody.toString());
+                        Request requestBulk = createAuthRequestBuilder(endpointBulk).patch(bulkReqBody).build();
+                        bulkResp = httpClient.newCall(requestBulk).execute();
+                        if (bulkResp.isSuccessful()) {
+                            anySuccess = true;
+                        }
+                    } catch (Exception ignored) {
+                    } finally {
+                        if (bulkResp != null) {
+                            try { bulkResp.close(); } catch (Exception ignored) {}
+                        }
+                    }
+
+                    if (anySuccess) {
+                        postSuccess(callback, true);
+                    } else {
+                        sendReadingProgressFallbackPost(progress, cardObj, callback);
+                    }
+                } catch (Exception e) {
+                    postError(callback, e.getMessage());
                 }
-            });
-        } catch (Exception e) {
-            postError(callback, e.getMessage());
-        }
+            }
+        }).start();
     }
 
     private void sendReadingProgressFallbackPost(final ReadingProgress progress, final JSONObject cardObj, final ApiCallback<Boolean> callback) {
@@ -1615,43 +1928,189 @@ public class YandexBooksApiClient {
         } else if ("reading".equalsIgnoreCase(shelfState)) {
             apiState = "reading";
         } else {
-            apiState = "to_read";
+            apiState = "want_to_read";
         }
 
-        final String targetPathId = (cardIdHint != null && !cardIdHint.isEmpty()) ? cardIdHint : bookUuid;
-        String endpoint = BASE_URL + "/profile/library_cards/" + targetPathId;
-        try {
-            JSONObject bodyJson = new JSONObject();
-            if (cardIdHint != null && !cardIdHint.isEmpty()) {
-                bodyJson.put("id", cardIdHint);
-            }
-            bodyJson.put("book_uuid", bookUuid);
-            bodyJson.put("state", apiState);
-            RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString());
-            Request request = createAuthRequestBuilder(endpoint).patch(body).build();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String resolvedCardId = (cardIdHint != null && !cardIdHint.isEmpty() && !cardIdHint.equals(bookUuid))
+                            ? cardIdHint : findLibraryCardUuidForBookSync(bookUuid);
 
-            httpClient.newCall(request).enqueue(new Callback() {
-                @Override
-                public void onFailure(Call call, IOException e) {
-                    updateBookShelfFallbackPut(targetPathId, bookUuid, apiState, callback);
-                }
-
-                @Override
-                public void onResponse(Call call, Response response) {
-                    try {
-                        if (response.isSuccessful()) {
-                            postSuccess(callback, true);
-                        } else {
-                            updateBookShelfFallbackPut(targetPathId, bookUuid, apiState, callback);
-                        }
-                    } finally {
-                        response.close();
+                    JSONObject bodyJson = new JSONObject();
+                    if (resolvedCardId != null && !resolvedCardId.isEmpty()) {
+                        bodyJson.put("id", resolvedCardId);
+                        bodyJson.put("uuid", resolvedCardId);
                     }
+                    bodyJson.put("book_uuid", bookUuid);
+                    bodyJson.put("state", apiState);
+                    JSONObject innerLc = new JSONObject();
+                    if (resolvedCardId != null && !resolvedCardId.isEmpty()) {
+                        innerLc.put("id", resolvedCardId);
+                        innerLc.put("uuid", resolvedCardId);
+                    }
+                    innerLc.put("book_uuid", bookUuid);
+                    innerLc.put("state", apiState);
+                    bodyJson.put("lc", innerLc);
+                    bodyJson.put("library_card", new JSONObject(innerLc.toString()));
+
+                    boolean stateConfirmed = false;
+                    boolean anyHttpSuccess = false;
+
+                    if (resolvedCardId != null && !resolvedCardId.isEmpty() && !resolvedCardId.equals(bookUuid)) {
+                        String cardEndpoint = BASE_URL + "/profile/library_cards/" + resolvedCardId;
+
+                        Response putResp = null;
+                        try {
+                            Request putReq = createAuthRequestBuilder(cardEndpoint)
+                                    .put(RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString()))
+                                    .build();
+                            putResp = httpClient.newCall(putReq).execute();
+                            if (putResp.isSuccessful()) {
+                                anyHttpSuccess = true;
+                                String rb = putResp.body() != null ? putResp.body().string() : "";
+                                if (isCardStateMatchingResponse(rb, apiState)) {
+                                    stateConfirmed = true;
+                                }
+                            }
+                        } catch (Exception ignored) {
+                        } finally {
+                            if (putResp != null) {
+                                try { putResp.close(); } catch (Exception ignored) {}
+                            }
+                        }
+
+                        if (!stateConfirmed) {
+                            Response patchResp = null;
+                            try {
+                                Request patchReq = createAuthRequestBuilder(cardEndpoint)
+                                        .patch(RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString()))
+                                        .build();
+                                patchResp = httpClient.newCall(patchReq).execute();
+                                if (patchResp.isSuccessful()) {
+                                    anyHttpSuccess = true;
+                                    String rb = patchResp.body() != null ? patchResp.body().string() : "";
+                                    if (isCardStateMatchingResponse(rb, apiState)) {
+                                        stateConfirmed = true;
+                                    }
+                                }
+                            } catch (Exception ignored) {
+                            } finally {
+                                if (patchResp != null) {
+                                    try { patchResp.close(); } catch (Exception ignored) {}
+                                }
+                            }
+                        }
+
+                        // Если существующая карточка не сменила state через PUT/PATCH, пересоздаем карточку с нужным state
+                        if (!stateConfirmed) {
+                            Response delResp = null;
+                            try {
+                                Request delReq = createAuthRequestBuilder(cardEndpoint).delete().build();
+                                delResp = httpClient.newCall(delReq).execute();
+                            } catch (Exception ignored) {
+                            } finally {
+                                if (delResp != null) {
+                                    try { delResp.close(); } catch (Exception ignored) {}
+                                }
+                            }
+
+                            Response postResp = null;
+                            try {
+                                JSONObject postBody = new JSONObject();
+                                postBody.put("book_uuid", bookUuid);
+                                postBody.put("state", apiState);
+                                Request postReq = createAuthRequestBuilder(BASE_URL + "/profile/library_cards")
+                                        .post(RequestBody.create(JSON_MEDIA_TYPE, postBody.toString()))
+                                        .build();
+                                postResp = httpClient.newCall(postReq).execute();
+                                if (postResp.isSuccessful()) {
+                                    anyHttpSuccess = true;
+                                    stateConfirmed = true;
+                                }
+                            } catch (Exception ignored) {
+                            } finally {
+                                if (postResp != null) {
+                                    try { postResp.close(); } catch (Exception ignored) {}
+                                }
+                            }
+                        }
+                    } else {
+                        // Карточки еще не было или ее UUID не был найден заранее — вызываем POST /profile/library_cards
+                        Response postResp = null;
+                        String postBodyStr = "";
+                        try {
+                            JSONObject postJson = new JSONObject();
+                            postJson.put("book_uuid", bookUuid);
+                            postJson.put("state", apiState);
+                            Request postReq = createAuthRequestBuilder(BASE_URL + "/profile/library_cards")
+                                    .post(RequestBody.create(JSON_MEDIA_TYPE, postJson.toString()))
+                                    .build();
+                            postResp = httpClient.newCall(postReq).execute();
+                            if (postResp.isSuccessful()) {
+                                anyHttpSuccess = true;
+                                postBodyStr = postResp.body() != null ? postResp.body().string() : "";
+                                if (isCardStateMatchingResponse(postBodyStr, apiState)) {
+                                    stateConfirmed = true;
+                                }
+                            }
+                        } catch (Exception ignored) {
+                        } finally {
+                            if (postResp != null) {
+                                try { postResp.close(); } catch (Exception ignored) {}
+                            }
+                        }
+
+                        // Если POST вернул уже существовавшую карточку со старым статусом (например want_to_read вместо reading)
+                        if (!stateConfirmed && !postBodyStr.isEmpty()) {
+                            try {
+                                JSONObject rj = new JSONObject(postBodyStr);
+                                String existingCardId = extractLibraryCardId(rj, rj.optJSONObject("book"), bookUuid);
+                                if (!existingCardId.isEmpty() && !existingCardId.equals(bookUuid)) {
+                                    Response delResp = null;
+                                    try {
+                                        Request delReq = createAuthRequestBuilder(BASE_URL + "/profile/library_cards/" + existingCardId).delete().build();
+                                        delResp = httpClient.newCall(delReq).execute();
+                                    } finally {
+                                        if (delResp != null) {
+                                            try { delResp.close(); } catch (Exception ignored) {}
+                                        }
+                                    }
+                                    Response recreateResp = null;
+                                    try {
+                                        JSONObject recreateJson = new JSONObject();
+                                        recreateJson.put("book_uuid", bookUuid);
+                                        recreateJson.put("state", apiState);
+                                        Request recreateReq = createAuthRequestBuilder(BASE_URL + "/profile/library_cards")
+                                                .post(RequestBody.create(JSON_MEDIA_TYPE, recreateJson.toString()))
+                                                .build();
+                                        recreateResp = httpClient.newCall(recreateReq).execute();
+                                        if (recreateResp.isSuccessful()) {
+                                            anyHttpSuccess = true;
+                                            stateConfirmed = true;
+                                        }
+                                    } finally {
+                                        if (recreateResp != null) {
+                                            try { recreateResp.close(); } catch (Exception ignored) {}
+                                        }
+                                    }
+                                }
+                            } catch (Exception ignored) {}
+                        }
+                    }
+
+                    if (stateConfirmed || anyHttpSuccess) {
+                        postSuccess(callback, true);
+                    } else {
+                        final String targetPathId = (resolvedCardId != null && !resolvedCardId.isEmpty()) ? resolvedCardId : bookUuid;
+                        updateBookShelfFallbackPut(targetPathId, bookUuid, apiState, callback);
+                    }
+                } catch (Exception e) {
+                    updateBookShelfFallbackPost(bookUuid, apiState, callback);
                 }
-            });
-        } catch (Exception e) {
-            updateBookShelfFallbackPut(targetPathId, bookUuid, apiState, callback);
-        }
+            }
+        }).start();
     }
 
     private void updateBookShelfFallbackPut(final String targetPathId, final String bookUuid, final String apiState, final ApiCallback<Boolean> callback) {
@@ -1728,58 +2187,32 @@ public class YandexBooksApiClient {
     }
 
     public void removeBookFromLibrary(final String bookUuid, final String cardIdHint, final ApiCallback<Boolean> callback) {
-        if (cardIdHint != null && !cardIdHint.isEmpty()) {
-            executeDeleteLibraryCard(cardIdHint, null, bookUuid, callback);
+        if (cardIdHint != null && !cardIdHint.isEmpty() && !cardIdHint.equals(bookUuid)) {
+            executeDeleteLibraryCard(cardIdHint, cardIdHint, bookUuid, callback);
             return;
         }
 
-        // Запрашиваем карточку книги для точного определения cardId
-        String queryEndpoint = BASE_URL + "/profile/library_cards?book_uuid=" + bookUuid;
-        Request queryRequest = createAuthRequestBuilder(queryEndpoint).get().build();
-
-        httpClient.newCall(queryRequest).enqueue(new Callback() {
+        // Запрашиваем карточку книги для точного определения cardUuid (с фильтрацией по book.uuid!)
+        new Thread(new Runnable() {
             @Override
-            public void onFailure(Call call, IOException e) {
-                // Если запрос упал по сети, пробуем прямое удаление по UUID книги
-                executeDeleteLibraryCard(bookUuid, null, bookUuid, callback);
-            }
-
-            @Override
-            public void onResponse(Call call, Response response) throws IOException {
-                if (!response.isSuccessful()) {
-                    response.close();
-                    executeDeleteLibraryCard(bookUuid, null, bookUuid, callback);
-                    return;
-                }
-
+            public void run() {
                 try {
-                    String body = response.body().string();
-                    JSONObject json = new JSONObject(body);
-                    JSONArray arr = json.optJSONArray("library_cards");
-                    if (arr == null || arr.length() == 0) {
-                        // Карточки нет на сервере — книга уже убрана
-                        postSuccess(callback, true);
-                        return;
+                    String resolvedCardUuid = findLibraryCardUuidForBookSync(bookUuid);
+                    if (resolvedCardUuid != null && !resolvedCardUuid.isEmpty()) {
+                        executeDeleteLibraryCard(resolvedCardUuid, resolvedCardUuid, bookUuid, callback);
+                    } else {
+                        executeDeleteLibraryCard(bookUuid, null, bookUuid, callback);
                     }
-
-                    JSONObject card = arr.getJSONObject(0);
-                    String cardId = card.optString("id", "");
-                    if (cardId.isEmpty()) {
-                        long numId = card.optLong("id", -1L);
-                        if (numId > 0) cardId = String.valueOf(numId);
-                    }
-                    String cardUuid = card.optString("uuid", "");
-
-                    executeDeleteLibraryCard(cardId, cardUuid, bookUuid, callback);
                 } catch (Exception e) {
                     executeDeleteLibraryCard(bookUuid, null, bookUuid, callback);
                 }
             }
-        });
+        }).start();
     }
 
     private void executeDeleteLibraryCard(final String cardId, final String cardUuid, final String bookUuid, final ApiCallback<Boolean> callback) {
-        final String targetPathId = (cardId != null && !cardId.isEmpty()) ? cardId : bookUuid;
+        final String preferredCardId = (cardUuid != null && !cardUuid.isEmpty()) ? cardUuid : cardId;
+        final String targetPathId = (preferredCardId != null && !preferredCardId.isEmpty()) ? preferredCardId : bookUuid;
         String endpoint = BASE_URL + "/profile/library_cards/" + targetPathId;
         Request request = createAuthRequestBuilder(endpoint).delete().build();
 
@@ -1792,7 +2225,7 @@ public class YandexBooksApiClient {
             @Override
             public void onResponse(Call call, Response response) {
                 try {
-                    if (response.isSuccessful() || response.code() == 404) {
+                    if (response.isSuccessful() || (response.code() == 404 && !targetPathId.equals(bookUuid))) {
                         postSuccess(callback, true);
                     } else {
                         removeBookFallbackNone(targetPathId, cardUuid, bookUuid, callback);

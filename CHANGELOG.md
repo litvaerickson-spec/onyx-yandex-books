@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.13-beta] - 2026-10-31
+
+### Added
+- **Извлечение и привязка `LibraryCard.uuid` (`extractLibraryCardId`, `findMatchingLibraryCardInArray`, `findLibraryCardUuidForBookSync`)**:
+  - Автоматическое извлечение реального идентификатора карточки библиотеки (`card.optString("uuid")`) из ответов `GET /api/v5/profile/library_cards` и сохранение в колонку `books.card_id` (`DatabaseHelper.updateBookCardId`).
+  - Строгая фильтрация массива `library_cards` по совпадению `book.uuid == bookUuid` вместо слепого выбора `arr.getJSONObject(0)`.
+- **Автотест `[ТЕСТ 39]` в `tools/verify_core_logic.py`**:
+  - Проверка сквозной синхронизации `LibraryCard.uuid`, перевода книги из раздела «В планах» в «Читаю» при открытии, защиты от отката полки фоновым синком и конвертации Unix-секунд `updated_at` в миллисекунды.
+
+### Changed
+- **Атомарный перевод книги в раздел «Читаю» в облаке и на ридере**:
+  - В `YandexBooksApiClient.updateBookShelfState` полка «В планах» маппится в канонический статус Bookmate API v5 `"want_to_read"`.
+  - При переводе книги между полками (`updateBookShelfState`) и при отправке прогресса чтения (`sendReadingProgress`) выполняется обновление карточки по её `cardUuid` (`PUT`/`PATCH /profile/library_cards/{cardUuid}`), а если сервер оставил старый статус `"want_to_read"`, автоматически выполняется пересоздание карточки (`DELETE /profile/library_cards/{cardUuid}` + `POST /profile/library_cards` со `state: "reading"`).
+  - В `MainActivity.ensureBookOnReadingShelf` при открытии книги (как из списка, так и из окна «О книге») активная вкладка и список немедленно переключаются на раздел «Читаю».
+  - В `ReaderActivity` при первом открытии книги сразу фиксируется статус `"reading"` в БД и сохраняется стартовая точка чтения.
+
+### Fixed
+- **Полное устранение блокировки синхронизации и неперемещения книг в раздел «Читаю»**:
+  - Исправлен баг в `YandexBooksApiClient.extractProgress`, из-за которого условие `(hasLastRead || card.has("library_card"))` блокировало чтение `reading_progress` (`0.0..1.0`) и `updated_at` (Unix-секунды) у 100% карточек из `GET /profile/library_cards`.
+  - Исправлена гонка и недостижимое условие `bestLocalTs > effectiveTimestamp` в `DatabaseHelper.saveOrUpdateBookInternal`, из-за которых фоновый `getAllUserBooks()` перезаписывал только что открытую книгу обратно из `"reading"` в `"to_read"`.
+  - Исправлен `DatabaseHelper.updateBookShelf` (теперь обновляет `last_read_timestamp`) и `DatabaseHelper.saveProgress` (автоматически переводит `shelf_type` книги в `"reading"` или `"done"`).
+  - Исправлен `removeBookFromLibrary` / `executeDeleteLibraryCard`: удаление выполняется по `cardUuid`, а `404` при попытке удаления по `bookUuid` больше не считается ложным успехом.
+
 ## [v1.5.12-beta] - 2026-10-31
 
 ### Added

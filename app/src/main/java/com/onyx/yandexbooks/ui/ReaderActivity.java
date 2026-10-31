@@ -2013,6 +2013,9 @@ public class ReaderActivity extends Activity {
     }
 
     private void loadBookData() {
+        if (bookUuid != null && !bookUuid.isEmpty()) {
+            dbHelper.updateBookShelf(bookUuid, "reading");
+        }
         // Проверяем, есть ли уже главы в локальной БД
         List<Chapter> localChapters = dbHelper.getChapters(bookUuid);
         boolean isCacheValid = false;
@@ -2059,7 +2062,11 @@ public class ReaderActivity extends Activity {
         apiClient.getReadingProgress(bookUuid, new YandexBooksApiClient.ApiCallback<ReadingProgress>() {
             @Override
             public void onSuccess(final ReadingProgress cloudProgress) {
-                if (cloudProgress == null || cloudProgress.getPercent() <= 0) return;
+                if (cloudProgress == null) return;
+                if (cloudProgress.getLibraryCardId() != null && !cloudProgress.getLibraryCardId().isEmpty()) {
+                    dbHelper.updateBookCardId(bookUuid, cloudProgress.getLibraryCardId());
+                }
+                if (cloudProgress.getPercent() <= 0) return;
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
@@ -2741,6 +2748,11 @@ public class ReaderActivity extends Activity {
         if (!hasPerformedInitialRefresh) {
             hasPerformedInitialRefresh = true;
             forceEpdRefresh();
+            // При первом открытии книги фиксируем стартовую запись чтения в БД и облаке,
+            // чтобы книга гарантированно числилась в разделе «Читаю» даже без листания страниц
+            if (dbHelper.getProgress(bookUuid) == null) {
+                saveProgress();
+            }
         }
 
         pageTurnCounter++;
