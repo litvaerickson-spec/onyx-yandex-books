@@ -11,6 +11,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Environment;
+import android.graphics.drawable.ColorDrawable;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
@@ -21,15 +22,16 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import com.onyx.yandexbooks.R;
 import com.onyx.yandexbooks.core.eink.EinkScrollView;
 import com.onyx.yandexbooks.core.eink.EpdController;
 import com.onyx.yandexbooks.core.network.HttpClientFactory;
+import com.onyx.yandexbooks.core.ui.EinkNotice;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -228,20 +230,26 @@ public class AppUpdateManager {
         final Dialog dialog = new Dialog(activity);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
 
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setWindowAnimations(0);
+        }
+
         DisplayMetrics dm = activity.getResources().getDisplayMetrics();
         float density = dm.density;
 
         final LinearLayout root = new LinearLayout(activity);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.WHITE);
-        int padH = (int) (14 * density);
-        int padV = (int) (12 * density);
+        root.setBackgroundResource(R.drawable.dialog_notice_bg);
+        int padH = (int) (16 * density);
+        int padV = (int) (14 * density);
         root.setPadding(padH, padV, padH, padV);
 
         // Заголовок
         TextView titleView = new TextView(activity);
-        titleView.setText("Обновление " + release.tagName);
-        titleView.setTextSize(14);
+        titleView.setText("Вышла новая версия: " + release.tagName);
+        titleView.setTextSize(15);
         titleView.setTypeface(null, Typeface.BOLD);
         titleView.setTextColor(Color.BLACK);
         titleView.setSingleLine(true);
@@ -253,52 +261,53 @@ public class AppUpdateManager {
         String sizeMb = String.format(java.util.Locale.US, "%.1f МБ", release.apkSize / (1024.0 * 1024.0));
         TextView infoView = new TextView(activity);
         infoView.setText("Текущая: v" + currentVer + "  •  Новая: " + release.tagName + " (" + sizeMb + ")");
-        infoView.setTextSize(11);
+        infoView.setTextSize(12);
+        infoView.setTypeface(null, Typeface.BOLD);
         infoView.setTextColor(Color.BLACK);
         infoView.setSingleLine(true);
-        infoView.setPadding(0, (int) (2 * density), 0, (int) (4 * density));
+        infoView.setPadding(0, (int) (3 * density), 0, (int) (5 * density));
         root.addView(infoView);
 
         // Разделитель
         View divider = new View(activity);
         divider.setBackgroundColor(Color.BLACK);
-        root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
+        root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(2, 2 * density)));
 
         // Описание изменений (Scrollable)
         final EinkScrollView scrollView = new EinkScrollView(activity);
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
-        scrollLp.setMargins(0, (int) (4 * density), 0, (int) (4 * density));
+        scrollLp.setMargins(0, (int) (6 * density), 0, (int) (6 * density));
         scrollView.setLayoutParams(scrollLp);
 
         TextView notesView = new TextView(activity);
         notesView.setText(cleanReleaseNotes(release.body));
-        notesView.setTextSize(12);
+        notesView.setTextSize(13);
         notesView.setTextColor(Color.BLACK);
-        notesView.setLineSpacing(3f, 1.15f);
+        notesView.setLineSpacing(3f, 1.25f);
         scrollView.addView(notesView);
         root.addView(scrollView);
 
         // Разделитель
         View divider2 = new View(activity);
         divider2.setBackgroundColor(Color.BLACK);
-        root.addView(divider2, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
+        root.addView(divider2, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(2, 2 * density)));
 
         // Кнопки действий
         LinearLayout btnRow = new LinearLayout(activity);
         btnRow.setOrientation(LinearLayout.HORIZONTAL);
-        btnRow.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (36 * density)));
-        btnRow.setPadding(0, (int) (4 * density), 0, 0);
+        btnRow.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (40 * density)));
+        btnRow.setPadding(0, (int) (6 * density), 0, 0);
 
         Button btnInstall = new Button(activity);
         btnInstall.setText("Обновить");
-        btnInstall.setTextSize(11);
+        btnInstall.setTextSize(12.5f);
         btnInstall.setTypeface(null, Typeface.BOLD);
         btnInstall.setTextColor(Color.BLACK);
         btnInstall.setBackgroundResource(R.drawable.btn_eink_primary);
         btnInstall.setPadding(0, 0, 0, 0);
         btnInstall.setSingleLine(true);
         LinearLayout.LayoutParams lpInst = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
-        lpInst.setMargins(0, 0, (int) (4 * density), 0);
+        lpInst.setMargins(0, 0, (int) (5 * density), 0);
         btnInstall.setLayoutParams(lpInst);
         btnInstall.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -310,15 +319,15 @@ public class AppUpdateManager {
         btnRow.addView(btnInstall);
 
         Button btnCancel = new Button(activity);
-        btnCancel.setText("Позже");
-        btnCancel.setTextSize(11);
+        btnCancel.setText("Ознакомился");
+        btnCancel.setTextSize(12.5f);
         btnCancel.setTypeface(null, Typeface.BOLD);
         btnCancel.setTextColor(Color.BLACK);
         btnCancel.setBackgroundResource(R.drawable.btn_eink);
         btnCancel.setPadding(0, 0, 0, 0);
         btnCancel.setSingleLine(true);
-        LinearLayout.LayoutParams lpCancel = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 0.8f);
-        lpCancel.setMargins((int) (4 * density), 0, 0, 0);
+        LinearLayout.LayoutParams lpCancel = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
+        lpCancel.setMargins((int) (5 * density), 0, 0, 0);
         btnCancel.setLayoutParams(lpCancel);
         btnCancel.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -355,17 +364,22 @@ public class AppUpdateManager {
             @Override
             public void onShow(DialogInterface d) {
                 if (dialog.getWindow() != null) {
-                    dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
                     dialog.getWindow().setLayout(targetW, targetH);
                 }
                 EpdController.requestFullRefresh(activity, root);
             }
         });
 
+        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface d) {
+                EpdController.requestFullRefresh(activity, null);
+            }
+        });
+
         dialog.show();
 
         if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
             dialog.getWindow().setLayout(targetW, targetH);
         }
     }
@@ -469,7 +483,7 @@ public class AppUpdateManager {
                         @Override
                         public void run() {
                             if (progressDialog.isShowing()) progressDialog.dismiss();
-                            Toast.makeText(activity, "Сбой загрузки обновления: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                            EinkNotice.show(activity, "Сбой обновления", "Сбой загрузки обновления:\n" + e.getMessage());
                         }
                     });
                 }
@@ -484,7 +498,7 @@ public class AppUpdateManager {
      */
     public static void installApk(Context context, File apkFile) {
         if (apkFile == null || !apkFile.exists()) {
-            Toast.makeText(context, "Файл APK не найден", Toast.LENGTH_SHORT).show();
+            EinkNotice.show(context, "Установка обновления", "Файл APK обновления не найден.");
             return;
         }
 
@@ -496,7 +510,7 @@ public class AppUpdateManager {
             context.startActivity(intent);
         } catch (Exception e) {
             Log.e(TAG, "Error launching package installer", e);
-            Toast.makeText(context, "Не удалось запустить установщик: " + e.getMessage() + "\nФайл сохранен: " + apkFile.getAbsolutePath(), Toast.LENGTH_LONG).show();
+            EinkNotice.show(context, "Установка обновления", "Не удалось запустить установщик:\n" + e.getMessage() + "\n\nФайл сохранен:\n" + apkFile.getAbsolutePath());
         }
     }
 }

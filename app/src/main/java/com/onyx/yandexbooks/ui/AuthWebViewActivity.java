@@ -20,7 +20,6 @@ import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import com.onyx.yandexbooks.R;
 import com.onyx.yandexbooks.core.auth.TokenStorage;
@@ -126,7 +125,6 @@ public class AuthWebViewActivity extends Activity {
             imm.showSoftInput(webView, InputMethodManager.SHOW_FORCED);
             imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0);
         }
-        Toast.makeText(this, "Клавиатура вызвана", Toast.LENGTH_SHORT).show();
     }
 
     private void showNativeInputDialog() {
@@ -209,7 +207,6 @@ public class AuthWebViewActivity extends Activity {
 
         executeJavascript(webView, js);
         EpdController.requestFullRefresh(this, webView);
-        Toast.makeText(this, "Значение вставлено в форму Яндекса", Toast.LENGTH_SHORT).show();
     }
 
     private void setupWebView() {
@@ -309,7 +306,6 @@ public class AuthWebViewActivity extends Activity {
             String token = matcher.group();
             Log.i(TAG, "Found OAuth access token in URL redirect!");
             tokenStorage.saveTokens(token, "", 31536000L);
-            Toast.makeText(this, "Авторизация успешно выполнена!", Toast.LENGTH_SHORT).show();
             setResult(RESULT_OK);
             finish();
             return true;

@@ -26,10 +26,11 @@ public final class R {
         public static final int btn_eink=0x7f020001;
         public static final int btn_eink_primary=0x7f020002;
         public static final int cover_border=0x7f020003;
-        public static final int ic_launcher=0x7f020004;
-        public static final int progress_eink_bar=0x7f020005;
-        public static final int tab_eink_active=0x7f020006;
-        public static final int tab_eink_inactive=0x7f020007;
+        public static final int dialog_notice_bg=0x7f020004;
+        public static final int ic_launcher=0x7f020005;
+        public static final int progress_eink_bar=0x7f020006;
+        public static final int tab_eink_active=0x7f020007;
+        public static final int tab_eink_inactive=0x7f020008;
     }
     public static final class id {
         public static final int auth_scroll_view=0x7f070000;

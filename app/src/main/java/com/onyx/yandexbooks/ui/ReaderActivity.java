@@ -21,6 +21,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.WindowManager;
 import android.widget.AdapterView;
 import android.widget.BaseAdapter;
 import android.widget.Button;
@@ -28,7 +29,6 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.SeekBar;
 import android.widget.TextView;
-import android.widget.Toast;
 import android.text.TextUtils;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -48,6 +48,7 @@ import com.onyx.yandexbooks.core.storage.CacheManager;
 import com.onyx.yandexbooks.core.storage.DatabaseHelper;
 import com.onyx.yandexbooks.core.sync.SyncManager;
 import com.onyx.yandexbooks.core.typography.FontHelper;
+import com.onyx.yandexbooks.core.ui.EinkNotice;
 import com.onyx.yandexbooks.core.typography.TextPaginator;
 import com.onyx.yandexbooks.core.typography.TypographyConfig;
 
@@ -449,7 +450,7 @@ public class ReaderActivity extends Activity {
                         userHasInteracted = true;
                         loadChapter(currentChapterIndex);
                     } else {
-                        Toast.makeText(ReaderActivity.this, "Это первая глава книги", Toast.LENGTH_SHORT).show();
+                        EinkNotice.show(ReaderActivity.this, "Главы книги", "Это первая глава книги.");
                     }
                 }
             });
@@ -467,7 +468,7 @@ public class ReaderActivity extends Activity {
                         userHasInteracted = true;
                         loadChapter(currentChapterIndex);
                     } else {
-                        Toast.makeText(ReaderActivity.this, "Это последняя глава книги", Toast.LENGTH_SHORT).show();
+                        EinkNotice.show(ReaderActivity.this, "Главы книги", "Это последняя глава книги.");
                     }
                 }
             });
@@ -1297,19 +1298,25 @@ public class ReaderActivity extends Activity {
     private void showTableOfContentsDialog() {
         try {
             if (chapters == null || chapters.isEmpty()) {
-                Toast.makeText(this, "Оглавление недоступно", Toast.LENGTH_SHORT).show();
+                EinkNotice.show(this, "Оглавление", "Оглавление недоступно для этой книги.");
                 return;
             }
 
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
 
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setWindowAnimations(0);
+        }
+
         final float density = getResources().getDisplayMetrics().density;
         DisplayMetrics dm = getResources().getDisplayMetrics();
 
         final LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.WHITE);
+        root.setBackgroundResource(R.drawable.dialog_notice_bg);
         int pad = (int) (12 * density);
         root.setPadding(pad, pad, pad, pad);
 
@@ -1608,7 +1615,7 @@ public class ReaderActivity extends Activity {
                             emptyBookmarksView.setVisibility(View.VISIBLE);
                         }
                         EpdController.requestFullRefresh(ReaderActivity.this, root);
-                        Toast.makeText(ReaderActivity.this, "Закладка удалена", Toast.LENGTH_SHORT).show();
+                        EinkNotice.show(ReaderActivity.this, "Закладки", "Закладка удалена.");
                     }
                 });
 
@@ -1685,7 +1692,7 @@ public class ReaderActivity extends Activity {
                 btnTabBookmarks.setText("Закладки (" + bookmarksList.size() + ")");
                 updateBookmarksVisibility.run();
                 EpdController.requestFullRefresh(ReaderActivity.this, root);
-                Toast.makeText(ReaderActivity.this, "Закладка сохранена: " + title, Toast.LENGTH_SHORT).show();
+                EinkNotice.show(ReaderActivity.this, "Закладки", "Закладка сохранена:\n" + title);
             }
         });
 
@@ -1786,7 +1793,7 @@ public class ReaderActivity extends Activity {
         forceEpdRefresh();
         } catch (Throwable t) {
             Log.e(TAG, "Error displaying TOC dialog", t);
-            Toast.makeText(this, "Ошибка отображения оглавления", Toast.LENGTH_SHORT).show();
+            EinkNotice.show(this, "Оглавление", "Ошибка отображения оглавления книги.");
         }
     }
 
@@ -1794,12 +1801,18 @@ public class ReaderActivity extends Activity {
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
 
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setWindowAnimations(0);
+        }
+
         float density = getResources().getDisplayMetrics().density;
         DisplayMetrics dm = getResources().getDisplayMetrics();
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.WHITE);
+        root.setBackgroundResource(R.drawable.dialog_notice_bg);
         int pad = (int) (16 * density);
         root.setPadding(pad, pad, pad, pad);
 
@@ -1852,7 +1865,7 @@ public class ReaderActivity extends Activity {
                     @Override
                     public void run() {
                         btnSyncNow.setText("Синхронизировано");
-                        Toast.makeText(ReaderActivity.this, "Прогресс отправлен в облако Яндекс Книг", Toast.LENGTH_SHORT).show();
+                        EinkNotice.show(ReaderActivity.this, "Синхронизация", "Прогресс отправлен в облако Яндекс Книг.");
                     }
                 }, 1000);
             }
@@ -2024,7 +2037,7 @@ public class ReaderActivity extends Activity {
                     if (!chapters.isEmpty()) {
                         resolveInitialPositionAndOpen();
                     } else {
-                        Toast.makeText(ReaderActivity.this, "Главы книги не найдены", Toast.LENGTH_SHORT).show();
+                        EinkNotice.show(ReaderActivity.this, "Ошибка книги", "Главы книги не найдены.");
                     }
                 }
 
@@ -2036,7 +2049,7 @@ public class ReaderActivity extends Activity {
                     if (chapters != null && !chapters.isEmpty()) {
                         resolveInitialPositionAndOpen();
                     } else {
-                        Toast.makeText(ReaderActivity.this, "Книга не готова к чтению: " + errorMessage, Toast.LENGTH_LONG).show();
+                        EinkNotice.show(ReaderActivity.this, "Ошибка книги", "Книга не готова к чтению:\n" + errorMessage);
                     }
                 }
             });
@@ -2203,7 +2216,7 @@ public class ReaderActivity extends Activity {
                     loadChapter(currentChapterIndex, currentPageIndex);
                     dbHelper.saveProgress(cloudProgress);
                     dbHelper.ensureCloudSyncBookmark(bookUuid, currentChapterIndex, currentPageIndex, (float) cloudPercent);
-                    Toast.makeText(ReaderActivity.this, String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d) [Закладка создана]", cloudPercent, currentChapterIndex + 1), Toast.LENGTH_SHORT).show();
+                    EinkNotice.show(ReaderActivity.this, "Синхронизация", String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)\n[Закладка создана]", cloudPercent, currentChapterIndex + 1));
                 }
             } else if (cloudPercent > 0 && cloudPercent < 99.0 && totalBookLength > 0) {
                 // Если номер главы не указан (или 0 при высоком проценте) – маппинг по общей длине
@@ -2231,7 +2244,7 @@ public class ReaderActivity extends Activity {
                     loadChapterWithFraction(currentChapterIndex, chapterFraction);
                     dbHelper.saveProgress(cloudProgress);
                     dbHelper.ensureCloudSyncBookmark(bookUuid, currentChapterIndex, currentPageIndex, (float) cloudPercent);
-                    Toast.makeText(ReaderActivity.this, String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d) [Закладка создана]", cloudPercent, currentChapterIndex + 1), Toast.LENGTH_SHORT).show();
+                    EinkNotice.show(ReaderActivity.this, "Синхронизация", String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)\n[Закладка создана]", cloudPercent, currentChapterIndex + 1));
                 }
             }
         }
@@ -2758,7 +2771,7 @@ public class ReaderActivity extends Activity {
             loadChapter(currentChapterIndex, 0);
             scheduleAutoSaveProgress();
         } else {
-            Toast.makeText(this, "Конец книги", Toast.LENGTH_SHORT).show();
+            EinkNotice.show(this, "Чтение", "Конец книги.");
         }
     }
 
@@ -2778,7 +2791,7 @@ public class ReaderActivity extends Activity {
             loadChapter(currentChapterIndex, -999);
             scheduleAutoSaveProgress();
         } else {
-            Toast.makeText(this, "Начало книги", Toast.LENGTH_SHORT).show();
+            EinkNotice.show(this, "Чтение", "Начало книги.");
         }
     }
 

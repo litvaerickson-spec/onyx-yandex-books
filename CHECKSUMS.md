@@ -2,7 +2,8 @@
 
 | Версия         | Файл                                    | Размер       | SHA-256                                                          |
 |----------------|-----------------------------------------|--------------|------------------------------------------------------------------|
-| v1.5.11-beta   | yandex-books-lite-v1.5.11-beta.apk      | 3348758 байт | 724cdc9593356ff617da47acf3b09927204f7c26f4617e4396ffca50828d7442 |
+| v1.5.12-beta   | yandex-books-lite-v1.5.12-beta.apk      | 3352933 байт | eb5a014b79f0f017bf00d4234bb38e2c678ba1871c2b913f9e9e749b53729170 |
+| v1.5.11-beta   | yandex-books-lite-v1.5.11-beta.apk      | -            | archived                                                         |
 | v1.5.10        | yandex-books-lite-v1.5.10.apk           | 3340566 байт | c995499c9ebcf0ba1accf765b5a8ddb153de6edff7c19f1741ae4377ebfd0860 |
 | v1.5.9         | yandex-books-lite-v1.5.9.apk            | 3340566 байт | 30ce03bef3050465cedd42a5f7878c89a1e93530ca826fa49912779cd065f951 |
 | v1.5.8         | yandex-books-lite-v1.5.8.apk            | 3340566 байт | 509af450045bdec0e1830f51ad7b32a4b2e58935f19d39aca31101e327e6b8ce |

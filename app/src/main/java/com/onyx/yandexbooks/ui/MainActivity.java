@@ -20,6 +20,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.WindowManager;
 import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -29,7 +30,6 @@ import android.widget.ListView;
 import com.onyx.yandexbooks.core.eink.EinkListView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import com.onyx.yandexbooks.R;
 import com.onyx.yandexbooks.core.api.YandexBooksApiClient;
@@ -43,6 +43,7 @@ import com.onyx.yandexbooks.core.storage.CacheManager;
 import com.onyx.yandexbooks.core.storage.DatabaseHelper;
 import com.onyx.yandexbooks.core.sync.SyncManager;
 import com.onyx.yandexbooks.core.ui.CoverLoader;
+import com.onyx.yandexbooks.core.ui.EinkNotice;
 import com.onyx.yandexbooks.core.update.AppUpdateManager;
 
 import android.util.Log;
@@ -92,6 +93,8 @@ public class MainActivity extends Activity {
     private Button btnShelfPrevPage;
     private Button btnShelfNextPage;
     private TextView shelfPageIndicator;
+
+    private static boolean sUpdateNotifiedThisSession = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -173,7 +176,7 @@ public class MainActivity extends Activity {
                 String msg = appSettings.isOnyxReaderPreferred() 
                         ? "Основной ридер: Системный Onyx (NeoReader/AlReader)" 
                         : "Основной ридер: Встроенный (с синхронизацией)";
-                Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show();
+                EinkNotice.show(MainActivity.this, "Режим чтения", msg);
             }
         });
 
@@ -239,12 +242,18 @@ public class MainActivity extends Activity {
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
 
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setWindowAnimations(0);
+        }
+
         float density = getResources().getDisplayMetrics().density;
         final DisplayMetrics dm = getResources().getDisplayMetrics();
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.WHITE);
+        root.setBackgroundResource(R.drawable.dialog_notice_bg);
         int padH = (int) (14 * density);
         int padV = (int) (12 * density);
         root.setPadding(padH, padV, padH, padV);
@@ -289,7 +298,6 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 dialog.dismiss();
-                Toast.makeText(MainActivity.this, "Синхронизация прогресса с облаком...", Toast.LENGTH_SHORT).show();
                 loadBooks(currentShelf);
                 syncManager.flushOfflineQueue(new SyncManager.SyncCompleteCallback() {
                     @Override
@@ -298,9 +306,9 @@ public class MainActivity extends Activity {
                             @Override
                             public void run() {
                                 if (count > 0) {
-                                    Toast.makeText(MainActivity.this, "Синхронизирован прогресс " + count + " книг!", Toast.LENGTH_SHORT).show();
+                                    EinkNotice.show(MainActivity.this, "Синхронизация", "Синхронизирован прогресс " + count + " книг с облаком!");
                                 } else {
-                                    Toast.makeText(MainActivity.this, "Прогресс всех книг актуален", Toast.LENGTH_SHORT).show();
+                                    EinkNotice.show(MainActivity.this, "Синхронизация", "Прогресс всех книг актуален.");
                                 }
                                 if (!"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
                                     currentBooks = dbHelper.getBooksByShelf(currentShelf);
@@ -353,7 +361,7 @@ public class MainActivity extends Activity {
         root.addView(listLayout);
 
         TextView tvBetaNotice = new TextView(this);
-        tvBetaNotice.setText("Яндекс Книги Lite v1.5.11-beta (предварительный выпуск)");
+        tvBetaNotice.setText("Яндекс Книги Lite v1.5.12-beta (предварительный выпуск)");
         tvBetaNotice.setTextSize(10);
         tvBetaNotice.setTextColor(Color.DKGRAY);
         tvBetaNotice.setGravity(Gravity.CENTER);
@@ -397,16 +405,22 @@ public class MainActivity extends Activity {
             @Override
             public void onShow(DialogInterface d) {
                 if (dialog.getWindow() != null) {
-                    dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
                     dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
                 }
+                EpdController.requestFullRefresh(MainActivity.this, root);
+            }
+        });
+
+        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface d) {
+                EpdController.requestFullRefresh(MainActivity.this, null);
             }
         });
 
         dialog.show();
 
         if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
             dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
         }
     }
@@ -425,12 +439,18 @@ public class MainActivity extends Activity {
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
 
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setWindowAnimations(0);
+        }
+
         float density = getResources().getDisplayMetrics().density;
         final DisplayMetrics dm = getResources().getDisplayMetrics();
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.WHITE);
+        root.setBackgroundResource(R.drawable.dialog_notice_bg);
         int padH = (int) (14 * density);
         int padV = (int) (12 * density);
         root.setPadding(padH, padV, padH, padV);
@@ -478,7 +498,6 @@ public class MainActivity extends Activity {
                     dialog.dismiss();
                     appSettings.setUiScale(s);
                     com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(MainActivity.this, s);
-                    Toast.makeText(MainActivity.this, "Масштаб интерфейса: " + Math.round(s * 100) + "%", Toast.LENGTH_SHORT).show();
                     finish();
                     startActivity(getIntent());
                     overridePendingTransition(0, 0);
@@ -524,13 +543,24 @@ public class MainActivity extends Activity {
             @Override
             public void onShow(DialogInterface d) {
                 if (dialog.getWindow() != null) {
-                    dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
                     dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
                 }
+                EpdController.requestFullRefresh(MainActivity.this, root);
+            }
+        });
+
+        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface d) {
+                EpdController.requestFullRefresh(MainActivity.this, null);
             }
         });
 
         dialog.show();
+
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
     }
 
     private Button createMenuButton(String text, View.OnClickListener listener, float density) {
@@ -552,7 +582,7 @@ public class MainActivity extends Activity {
 
     private void startBatchDownloadCurrentShelf() {
         if ("catalog".equals(currentShelf) || "search".equals(currentShelf)) {
-            Toast.makeText(MainActivity.this, "Пакетное скачивание доступно на полках: «Читаю», «В планах» или «Прочитано»", Toast.LENGTH_LONG).show();
+            EinkNotice.show(MainActivity.this, "Пакетное скачивание", "Пакетное скачивание доступно на полках: «Читаю», «В планах» или «Прочитано».");
             return;
         }
 
@@ -560,7 +590,7 @@ public class MainActivity extends Activity {
         List<Book> shelfBooks = dbHelper.getBooksByShelf(currentShelf);
 
         if (shelfBooks == null || shelfBooks.isEmpty()) {
-            Toast.makeText(MainActivity.this, "На этой полке нет книг для скачивания", Toast.LENGTH_SHORT).show();
+            EinkNotice.show(MainActivity.this, "Пакетное скачивание", "На этой полке нет книг для скачивания.");
             return;
         }
 
@@ -570,6 +600,12 @@ public class MainActivity extends Activity {
     private void showBatchDownloadDialog(final List<Book> allShelfBooks) {
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setWindowAnimations(0);
+        }
 
         float density = getResources().getDisplayMetrics().density;
         final DisplayMetrics dm = getResources().getDisplayMetrics();
@@ -590,7 +626,7 @@ public class MainActivity extends Activity {
 
         final LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.WHITE);
+        root.setBackgroundResource(R.drawable.dialog_notice_bg);
         int padH = (int) (14 * density);
         int padV = (int) (12 * density);
         root.setPadding(padH, padV, padH, padV);
@@ -726,15 +762,21 @@ public class MainActivity extends Activity {
             @Override
             public void onShow(DialogInterface d) {
                 if (dialog.getWindow() != null) {
-                    dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
                     dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
                 }
+                EpdController.requestFullRefresh(MainActivity.this, root);
+            }
+        });
+
+        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface d) {
+                EpdController.requestFullRefresh(MainActivity.this, null);
             }
         });
 
         dialog.show();
         if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
             dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
         }
     }
@@ -909,6 +951,9 @@ public class MainActivity extends Activity {
             }
         });
         final AlertDialog dialog = builder.create();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        }
         dialog.show();
 
         // 25-секундный предохранитель для защиты от зависаний
@@ -919,7 +964,7 @@ public class MainActivity extends Activity {
                     try {
                         dialog.dismiss();
                     } catch (Exception ignored) {}
-                    Toast.makeText(MainActivity.this, "Превышено время ожидания загрузки книги. Попробуйте еще раз или режим Onyx.", Toast.LENGTH_LONG).show();
+                    EinkNotice.show(MainActivity.this, "Загрузка книги", "Превышено время ожидания загрузки книги. Попробуйте еще раз или режим Onyx.");
                     EpdController.requestFullRefresh(MainActivity.this, null);
                 }
             }
@@ -957,15 +1002,18 @@ public class MainActivity extends Activity {
                         btnCheckUpdate.setBackgroundResource(R.drawable.btn_eink_primary);
                         btnCheckUpdate.setTextColor(Color.BLACK);
                     }
-                    if (userTriggered) {
+                    if (userTriggered || !sUpdateNotifiedThisSession) {
+                        sUpdateNotifiedThisSession = true;
                         AppUpdateManager.getInstance().showUpdateDialog(MainActivity.this, release);
-                    } else {
-                        Toast.makeText(MainActivity.this, "Доступно обновление " + release.tagName, Toast.LENGTH_LONG).show();
                     }
                 } else {
                     if (userTriggered) {
-                        String cur = AppUpdateManager.getInstance().getCurrentVersionName(MainActivity.this);
-                        Toast.makeText(MainActivity.this, "У вас последняя версия (v" + cur + ")", Toast.LENGTH_SHORT).show();
+                        if (message != null && message.startsWith("Сбой")) {
+                            EinkNotice.show(MainActivity.this, "Обновление ПО", "Не удалось проверить обновления.\n" + message);
+                        } else {
+                            String cur = AppUpdateManager.getInstance().getCurrentVersionName(MainActivity.this);
+                            EinkNotice.show(MainActivity.this, "Обновление ПО", "У вас установлена последняя версия (v" + cur + ").\nОбновлений на GitHub не требуется.");
+                        }
                     }
                 }
             }
@@ -1120,7 +1168,7 @@ public class MainActivity extends Activity {
 
     private void executeSearch(final String query) {
         if (query == null || query.trim().isEmpty()) {
-            Toast.makeText(this, "Введите поисковый запрос", Toast.LENGTH_SHORT).show();
+            EinkNotice.show(this, "Поиск", "Введите поисковый запрос.");
             return;
         }
 
@@ -1162,7 +1210,7 @@ public class MainActivity extends Activity {
                 updateEmptyState();
                 updateShelfFooter();
                 if (currentBooks.isEmpty()) {
-                    Toast.makeText(MainActivity.this, "По запросу ничего не найдено", Toast.LENGTH_SHORT).show();
+                    EinkNotice.show(MainActivity.this, "Поиск", "По запросу «" + query.trim() + "» ничего не найдено.");
                 }
                 EpdController.requestFullRefresh(MainActivity.this, booksListView);
             }
@@ -1359,11 +1407,15 @@ public class MainActivity extends Activity {
                 updateEmptyState();
                 updateShelfFooter();
                 if (errorMessage != null && (errorMessage.contains("401") || errorMessage.contains("not_authenticated"))) {
-                    Toast.makeText(MainActivity.this, "Сессия истекла (401). Пожалуйста, войдите снова.", Toast.LENGTH_SHORT).show();
                     tokenStorage.clear();
-                    startActivityForResult(new Intent(MainActivity.this, AuthActivity.class), REQUEST_AUTH);
+                    EinkNotice.show(MainActivity.this, "Сессия истекла", "Сессия авторизации истекла (401).\nПожалуйста, войдите снова.", "ОК", new Runnable() {
+                        @Override
+                        public void run() {
+                            startActivityForResult(new Intent(MainActivity.this, AuthActivity.class), REQUEST_AUTH);
+                        }
+                    });
                 } else if (currentBooks.isEmpty()) {
-                    Toast.makeText(MainActivity.this, "Ошибка сети: " + errorMessage, Toast.LENGTH_SHORT).show();
+                    EinkNotice.show(MainActivity.this, "Ошибка сети", "Не удалось загрузить книги: " + errorMessage);
                 }
             }
         });
@@ -1565,7 +1617,7 @@ public class MainActivity extends Activity {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        Toast.makeText(MainActivity.this, "«" + book.getTitle() + "» убрана с полки", Toast.LENGTH_SHORT).show();
+                        EinkNotice.show(MainActivity.this, "Полка", "Книга «" + book.getTitle() + "» убрана с полки.");
                         if (onDone != null) onDone.run();
                     }
                 });
@@ -1576,7 +1628,7 @@ public class MainActivity extends Activity {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        Toast.makeText(MainActivity.this, "Удалено с устройства (сервер: " + errorMessage + ")", Toast.LENGTH_SHORT).show();
+                        EinkNotice.show(MainActivity.this, "Полка", "Удалено с устройства (сервер: " + errorMessage + ")");
                         if (onDone != null) onDone.run();
                     }
                 });
@@ -1631,7 +1683,7 @@ public class MainActivity extends Activity {
             public void onError(String errorMessage) {}
         });
 
-        Toast.makeText(MainActivity.this, "Прогресс «" + book.getTitle() + "» сброшен", Toast.LENGTH_SHORT).show();
+        EinkNotice.show(MainActivity.this, "Прогресс", "Прогресс книги «" + book.getTitle() + "» сброшен.");
         if (onDone != null) {
             onDone.run();
         }
@@ -1673,10 +1725,8 @@ public class MainActivity extends Activity {
             }
             boolean ok = CacheManager.openInSystemReader(this, epub, book.getPercent(), book.getCurrentChapterIndex());
             if (!ok) {
-                Toast.makeText(this, "Внешний ридер не найден. Открываем во встроенном ридере...", Toast.LENGTH_SHORT).show();
+                EinkNotice.show(this, "Ридер", "Внешний ридер не найден. Открываем во встроенном ридере...");
                 openInLiteReader(book);
-            } else if (book.getPercent() > 0.0) {
-                Toast.makeText(this, String.format(java.util.Locale.getDefault(), "Позиция в облаке: %.0f%% (Гл. %d)", book.getPercent(), book.getCurrentChapterIndex() + 1), Toast.LENGTH_LONG).show();
             }
             return;
         }
@@ -1699,8 +1749,6 @@ public class MainActivity extends Activity {
                     boolean ok = CacheManager.openInSystemReader(MainActivity.this, readyEpub, book.getPercent(), book.getCurrentChapterIndex());
                     if (!ok) {
                         openInLiteReader(book);
-                    } else if (book.getPercent() > 0.0) {
-                        Toast.makeText(MainActivity.this, String.format(java.util.Locale.getDefault(), "Позиция в облаке: %.0f%% (Гл. %d)", book.getPercent(), book.getCurrentChapterIndex() + 1), Toast.LENGTH_LONG).show();
                     }
                 } else {
                     openInLiteReader(book);
@@ -1710,7 +1758,7 @@ public class MainActivity extends Activity {
             @Override
             public void onError(String message) {
                 dismissEinkLoadingDialog(dialog);
-                Toast.makeText(MainActivity.this, "Ошибка скачивания: " + message + ". Открываем во встроенном ридере.", Toast.LENGTH_LONG).show();
+                EinkNotice.show(MainActivity.this, "Ошибка скачивания", "Ошибка скачивания: " + message + ".\nОткрываем во встроенном ридере.");
                 openInLiteReader(book);
             }
         });
@@ -1735,7 +1783,7 @@ public class MainActivity extends Activity {
             @Override
             public void onError(String message) {
                 dismissEinkLoadingDialog(dialog);
-                Toast.makeText(MainActivity.this, "Не удалось открыть книгу: " + message, Toast.LENGTH_LONG).show();
+                EinkNotice.show(MainActivity.this, "Ошибка книги", "Не удалось открыть книгу: " + message);
             }
         });
     }
@@ -1837,13 +1885,19 @@ public class MainActivity extends Activity {
         final Dialog dialog = new Dialog(this);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
 
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setWindowAnimations(0);
+        }
+
         float density = getResources().getDisplayMetrics().density;
         int screenWidth = getResources().getDisplayMetrics().widthPixels;
         int screenHeight = getResources().getDisplayMetrics().heightPixels;
 
         final LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.WHITE);
+        root.setBackgroundResource(R.drawable.dialog_notice_bg);
         int padH = (int) (14 * density);
         int padV = (int) (12 * density);
         root.setPadding(padH, padV, padH, padV);
@@ -2020,7 +2074,7 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 if ("reading".equals(curShelfRef[0])) {
-                    Toast.makeText(MainActivity.this, "Книга уже в разделе «Читаю»", Toast.LENGTH_SHORT).show();
+                    EinkNotice.show(MainActivity.this, "Полка", "Книга уже в разделе «Читаю».");
                     return;
                 }
                 btnShelfReading.setEnabled(false);
@@ -2030,7 +2084,7 @@ public class MainActivity extends Activity {
                         btnShelfReading.setEnabled(true);
                         curShelfRef[0] = "reading";
                         updateShelfButtonStyles(btnShelfReading, btnShelfToRead, btnShelfDone, "reading");
-                        Toast.makeText(MainActivity.this, "«" + book.getTitle() + "» перенесена в «Читаю»", Toast.LENGTH_SHORT).show();
+                        EinkNotice.show(MainActivity.this, "Полка", "«" + book.getTitle() + "» перенесена в раздел «Читаю».");
                         adapter.notifyDataSetChanged();
                     }
                 });
@@ -2041,7 +2095,7 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 if ("to_read".equals(curShelfRef[0])) {
-                    Toast.makeText(MainActivity.this, "Книга уже в разделе «В планах»", Toast.LENGTH_SHORT).show();
+                    EinkNotice.show(MainActivity.this, "Полка", "Книга уже в разделе «В планах».");
                     return;
                 }
                 btnShelfToRead.setEnabled(false);
@@ -2051,7 +2105,7 @@ public class MainActivity extends Activity {
                         btnShelfToRead.setEnabled(true);
                         curShelfRef[0] = "to_read";
                         updateShelfButtonStyles(btnShelfReading, btnShelfToRead, btnShelfDone, "to_read");
-                        Toast.makeText(MainActivity.this, "«" + book.getTitle() + "» перенесена в «В планы»", Toast.LENGTH_SHORT).show();
+                        EinkNotice.show(MainActivity.this, "Полка", "«" + book.getTitle() + "» перенесена в раздел «В планах».");
                         adapter.notifyDataSetChanged();
                     }
                 });
@@ -2062,7 +2116,7 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 if ("done".equals(curShelfRef[0])) {
-                    Toast.makeText(MainActivity.this, "Книга уже в разделе «Прочитано»", Toast.LENGTH_SHORT).show();
+                    EinkNotice.show(MainActivity.this, "Полка", "Книга уже в разделе «Прочитано».");
                     return;
                 }
                 btnShelfDone.setEnabled(false);
@@ -2072,7 +2126,7 @@ public class MainActivity extends Activity {
                         btnShelfDone.setEnabled(true);
                         curShelfRef[0] = "done";
                         updateShelfButtonStyles(btnShelfReading, btnShelfToRead, btnShelfDone, "done");
-                        Toast.makeText(MainActivity.this, "«" + book.getTitle() + "» перенесена в «Прочитано»", Toast.LENGTH_SHORT).show();
+                        EinkNotice.show(MainActivity.this, "Полка", "«" + book.getTitle() + "» перенесена в раздел «Прочитано».");
                         adapter.notifyDataSetChanged();
                     }
                 });
@@ -2110,7 +2164,6 @@ public class MainActivity extends Activity {
                 public void onClick(View v) {
                     btnDownloadOrDelete.setEnabled(false);
                     btnDownloadOrDelete.setText("Загрузка...");
-                    Toast.makeText(MainActivity.this, "Загрузка книги «" + book.getTitle() + "»...", Toast.LENGTH_SHORT).show();
                     ensureBookOnReadingShelf(book, new Runnable() {
                         @Override
                         public void run() {
@@ -2123,7 +2176,7 @@ public class MainActivity extends Activity {
                                     runOnUiThread(new Runnable() {
                                         @Override
                                         public void run() {
-                                            Toast.makeText(MainActivity.this, "«" + book.getTitle() + "» сохранена в памяти!", Toast.LENGTH_SHORT).show();
+                                            EinkNotice.show(MainActivity.this, "Память", "Книга «" + book.getTitle() + "» успешно сохранена в памяти устройства!");
                                             adapter.notifyDataSetChanged();
                                             dialog.dismiss();
                                         }
@@ -2135,7 +2188,7 @@ public class MainActivity extends Activity {
                                     runOnUiThread(new Runnable() {
                                         @Override
                                         public void run() {
-                                            Toast.makeText(MainActivity.this, "Ошибка скачивания: " + message, Toast.LENGTH_LONG).show();
+                                            EinkNotice.show(MainActivity.this, "Ошибка скачивания", "Ошибка скачивания: " + message);
                                             btnDownloadOrDelete.setEnabled(true);
                                             btnDownloadOrDelete.setText("Скачать");
                                         }
@@ -2159,7 +2212,7 @@ public class MainActivity extends Activity {
                                 public void onClick(DialogInterface d, int which) {
                                     cacheManager.deleteBookCache(book.getUuid(), book.getTitle());
                                     adapter.notifyDataSetChanged();
-                                    Toast.makeText(MainActivity.this, "Файл книги удален из памяти", Toast.LENGTH_SHORT).show();
+                                    EinkNotice.show(MainActivity.this, "Память", "Файл книги «" + book.getTitle() + "» удален из памяти устройства.");
                                     dialog.dismiss();
                                     EpdController.requestFullRefresh(MainActivity.this, booksListView);
                                 }
@@ -2223,14 +2276,13 @@ public class MainActivity extends Activity {
             btnSyncDirect.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    Toast.makeText(MainActivity.this, "Отправка прогресса в облако...", Toast.LENGTH_SHORT).show();
                     syncManager.saveAndSyncProgress(finalProg, true, new SyncManager.ConflictResolutionCallback() {
                         @Override
                         public void onProgressUpdated(ReadingProgress progress) {
                             runOnUiThread(new Runnable() {
                                 @Override
                                 public void run() {
-                                    Toast.makeText(MainActivity.this, "Прогресс книги «" + book.getTitle() + "» синхронизирован!", Toast.LENGTH_SHORT).show();
+                                    EinkNotice.show(MainActivity.this, "Синхронизация", "Прогресс книги «" + book.getTitle() + "» синхронизирован с облаком!");
                                     dialog.dismiss();
                                     loadBooks(currentShelf);
                                 }
@@ -2334,10 +2386,16 @@ public class MainActivity extends Activity {
             @Override
             public void onShow(DialogInterface d) {
                 if (dialog.getWindow() != null) {
-                    dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
                     dialog.getWindow().setLayout(targetW, targetH);
                 }
                 EpdController.requestFullRefresh(MainActivity.this, root);
+            }
+        });
+
+        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface d) {
+                EpdController.requestFullRefresh(MainActivity.this, null);
             }
         });
 
@@ -2345,7 +2403,6 @@ public class MainActivity extends Activity {
 
         // Гарантируем размер окна диалога 92% ширины и 85% высоты дисплея
         if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
             dialog.getWindow().setLayout(targetW, targetH);
         }
     }

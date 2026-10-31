@@ -2374,21 +2374,95 @@ def test_v1511_beta_ui_scaling_and_offline_reading_cloud_sync():
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str == "1.5.11-beta", f"VERSION должен быть 1.5.11-beta, получено: {v_str}"
+    assert v_str in ["1.5.11-beta", "1.5.12-beta"], f"VERSION должен быть >= 1.5.11-beta, получено: {v_str}"
 
     manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(manifest_path, "r", encoding="utf-8") as f:
         m_code = f.read()
-    assert 'android:versionName="1.5.11-beta"' in m_code
-    assert 'android:versionCode="44"' in m_code
+    assert 'android:versionName="1.5.11-beta"' in m_code or 'android:versionName="1.5.12-beta"' in m_code
+    assert 'android:versionCode="44"' in m_code or 'android:versionCode="45"' in m_code
 
     main_xml_path = os.path.join(PROJECT_DIR, "app/src/main/res/layout/activity_main.xml")
     with open(main_xml_path, "r", encoding="utf-8") as f:
         xml_code = f.read()
     assert "[BETA]" in xml_code, "Маркер [BETA] должен присутствовать в шапке activity_main.xml!"
-    print(" - Бета-маркировка и версии (1.5.11-beta, versionCode=44, [BETA]): OK")
+    print(" - Бета-маркировка и версии (1.5.11-beta / 1.5.12-beta, [BETA]): OK")
 
     print("✅ Тест v1.5.11-beta Масштабирование интерфейса и синхронизация офлайн-чтения успешно пройден!\n")
+
+
+def test_v1512_beta_eink_notice_high_contrast_and_persistent_alerts():
+    """[ТЕСТ 38] v1.5.12-beta Высококонтрастные E-Ink уведомления (EinkNotice), диалог обновления ПО без дизеринга и подтверждение «ОК»"""
+    print("--- [ТЕСТ 38] v1.5.12-beta Высококонтрастные уведомления EinkNotice и обновление ПО ---")
+
+    # 1. Проверка наличия и атрибутов dialog_notice_bg.xml
+    notice_bg_path = os.path.join(PROJECT_DIR, "app/src/main/res/drawable/dialog_notice_bg.xml")
+    assert os.path.exists(notice_bg_path), "Файл dialog_notice_bg.xml обязан существовать!"
+    with open(notice_bg_path, "r", encoding="utf-8") as f:
+        bg_xml = f.read()
+    assert "#FFFFFF" in bg_xml, "Фон уведомления обязан быть чисто белым (#FFFFFF)!"
+    assert "#000000" in bg_xml, "Рамка уведомления обязана быть чисто черной (#000000)!"
+    assert "stroke" in bg_xml and "2.5dp" in bg_xml, "Толщина рамки должна быть 2.5dp для четкости E-Ink!"
+    print(" - Drawable dialog_notice_bg (белый фон, 2.5dp черная рамка): OK")
+
+    # 2. Проверка EinkNotice.java
+    notice_java_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/ui/EinkNotice.java")
+    assert os.path.exists(notice_java_path), "Класс EinkNotice.java обязан существовать!"
+    with open(notice_java_path, "r", encoding="utf-8") as f:
+        notice_code = f.read()
+    assert "public static void show" in notice_code, "Метод show обязан присутствовать в EinkNotice!"
+    assert "FLAG_DIM_BEHIND" in notice_code, "EinkNotice обязан отключать затемнение FLAG_DIM_BEHIND!"
+    assert "Color.TRANSPARENT" in notice_code, "Окно EinkNotice обязано иметь прозрачный фон окна!"
+    assert "R.drawable.dialog_notice_bg" in notice_code, "EinkNotice обязан использовать dialog_notice_bg!"
+    assert "EpdController.requestFullRefresh" in notice_code, "EinkNotice обязан вызывать EpdController.requestFullRefresh!"
+    assert "btnOk" in notice_code and "ОК" in notice_code, "Кнопка ОК обязательна в EinkNotice!"
+    assert "EinkScrollView" in notice_code, "EinkNotice обязан использовать EinkScrollView для предотвращения артефактов прокрутки!"
+    print(" - EinkNotice.java (отключение FLAG_DIM_BEHIND, кнопка ОК, Full Refresh, EinkScrollView): OK")
+
+    # 3. Проверка AppUpdateManager.java на отсутствие серых фонов и исчезающих уведомлений
+    update_mgr_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/update/AppUpdateManager.java")
+    with open(update_mgr_path, "r", encoding="utf-8") as f:
+        update_code = f.read()
+    assert "FLAG_DIM_BEHIND" in update_code, "Диалог обновления обязан отключать затемнение FLAG_DIM_BEHIND!"
+    assert "R.drawable.dialog_notice_bg" in update_code, "Диалог обновления обязан использовать dialog_notice_bg!"
+    assert "Ознакомился" in update_code, "Диалог обновления обязан содержать кнопку подтверждения «Ознакомился»!"
+    assert "Toast.makeText" not in update_code, "AppUpdateManager не должен использовать Toast.makeText!"
+    print(" - AppUpdateManager.java (диалог без затемнения, кнопка «Ознакомился», нулевые Toast): OK")
+
+    # 4. Проверка MainActivity.java и ReaderActivity.java на отсутствие неконтрастных Toast
+    main_java_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java")
+    with open(main_java_path, "r", encoding="utf-8") as f:
+        main_code = f.read()
+    assert "Toast.makeText" not in main_code, "В MainActivity.java не должно быть вызовов Toast.makeText!"
+    assert "EinkNotice.show" in main_code, "В MainActivity.java обязаны использоваться вызовы EinkNotice.show!"
+
+    reader_java_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/ReaderActivity.java")
+    with open(reader_java_path, "r", encoding="utf-8") as f:
+        reader_code = f.read()
+    assert "Toast.makeText" not in reader_code, "В ReaderActivity.java не должно быть вызовов Toast.makeText!"
+    assert "EinkNotice.show" in reader_code, "В ReaderActivity.java обязаны использоваться вызовы EinkNotice.show!"
+    print(" - MainActivity & ReaderActivity (полная замена Toast на высококонтрастные EinkNotice): OK")
+
+    # 5. Проверка версий 1.5.12-beta
+    version_file = os.path.join(PROJECT_DIR, "VERSION")
+    with open(version_file, "r", encoding="utf-8") as f:
+        v_str = f.read().strip()
+    assert v_str == "1.5.12-beta", f"VERSION должен быть 1.5.12-beta, получено: {v_str}"
+
+    gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
+    with open(gradle_file, "r", encoding="utf-8") as f:
+        gradle_code = f.read()
+    assert 'versionName "1.5.12-beta"' in gradle_code
+    assert 'versionCode 45' in gradle_code
+
+    manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        m_code = f.read()
+    assert 'android:versionName="1.5.12-beta"' in m_code
+    assert 'android:versionCode="45"' in m_code
+    print(" - Версионирование v1.5.12-beta (versionCode=45, AndroidManifest, build.gradle, VERSION): OK")
+
+    print("✅ Тест v1.5.12-beta Высококонтрастные уведомления EinkNotice и обновление ПО успешно пройден!\n")
 
 
 if __name__ == "__main__":
@@ -2433,6 +2507,7 @@ if __name__ == "__main__":
     test_v158_manifest_sdk_density_and_memory_leak_prevention()
     test_v1510_reverse_landscape_and_bidirectional_cloud_sync()
     test_v1511_beta_ui_scaling_and_offline_reading_cloud_sync()
+    test_v1512_beta_eink_notice_high_contrast_and_persistent_alerts()
     print("==================================================")
-    print("🎉 ВСЕ 37 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 38 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

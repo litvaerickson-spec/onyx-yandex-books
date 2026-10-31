@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.12-beta] - 2026-10-31
+
+### Added
+- **Высококонтрастные E-Ink уведомления (EinkNotice)**:
+  - Разработан компонент `EinkNotice` со статическим методом показа диалоговых окон вместо стоковых системных `Toast`.
+  - Уведомления не имеют автоматических таймеров закрытия и ожидают обязательного подтверждения пользователя по кнопке «ОК» («Ознакомился»).
+  - Высококонтрастное оформление: сплошной белый фон `#FFFFFF`, четкая черная рамка 2.5dp (`dialog_notice_bg.xml`), разделитель 2dp `#000000`, крупный шрифт заголовка 15sp Bold и текста 13.5sp.
+  - Кастомный `EinkScrollView` с ограничением высоты до 55% высоты экрана (`maxHeight`) для гарантированной видимости кнопки «ОК» в портретной и обеих ландшафтных ориентациях.
+  - Полное аппаратное обновление E-Ink (`EpdController.requestFullRefresh`) при показе и скрытии уведомлений.
+  - Поддержка закрытия уведомлений физическими клавишами Back, Enter, DPAD Center.
+
+### Changed
+- **Диалог обновления приложения (AppUpdateManager)**:
+  - Фоновая проверка при старте приложения и ручная проверка через главное меню теперь открывают полноценный диалог обновления вместо быстро исчезавшего Toast'а.
+  - Отключен флаг затемнения `FLAG_DIM_BEHIND`, устранен серый дизеринг фона на E-Ink.
+  - Кнопка «Позже» заменена на «Ознакомился» с сохранением флага сессии `sUpdateNotifiedThisSession` для предотвращения повторных навязчивых показов.
+  - Диалог отсутствия обновлений при ручной проверке выводится в виде четкого `EinkNotice` с кнопкой «ОК».
+- **Комплексная замена Toast во всех модулях**:
+  - Полная ликвидация `Toast.makeText` в `MainActivity`, `ReaderActivity`, `AuthActivity`, `AuthWebViewActivity` и `AppUpdateManager`.
+  - Отключение `FLAG_DIM_BEHIND` и применение фона `dialog_notice_bg` во всех диалогах приложения (`showMainMenuDialog`, `showUiScaleDialog`, `showBatchDownloadDialog`, `showBookDetailsDialog`, `showTableOfContentsDialog`, `showProgressDialog`, `showEinkLoadingDialog`).
+
+### Fixed
+- **Исчезающие блеклые уведомления на E-Ink**:
+  - Устранена проблема полупрозрачных оверлеев системных уведомлений Android, вызывавших грязную серую сетку дизеринга и не читавшихся до момента их автоматического исчезновения.
+
 ## [v1.5.11-beta] - 2026-10-31
 
 ### Added

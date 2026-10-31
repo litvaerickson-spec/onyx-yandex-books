@@ -14,7 +14,6 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import com.google.zxing.BarcodeFormat;
 import com.google.zxing.common.BitMatrix;
@@ -25,6 +24,7 @@ import com.onyx.yandexbooks.core.auth.TokenStorage;
 import com.onyx.yandexbooks.core.eink.EinkScrollView;
 import com.onyx.yandexbooks.core.eink.EpdController;
 import com.onyx.yandexbooks.core.network.HttpClientFactory;
+import com.onyx.yandexbooks.core.ui.EinkNotice;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -112,7 +112,7 @@ public class AuthActivity extends Activity {
             @Override
             public void onClick(View v) {
                 startAuthorizationFlow();
-                Toast.makeText(AuthActivity.this, "Сетевой статус обновлен", Toast.LENGTH_SHORT).show();
+                EinkNotice.show(AuthActivity.this, "Сетевой статус", "Сетевой статус обновлен.");
             }
         });
 
@@ -279,7 +279,6 @@ public class AuthActivity extends Activity {
 
     private void onAuthSuccess(String token, String source) {
         tokenStorage.saveTokens(token, "", 31536000L);
-        Toast.makeText(AuthActivity.this, "Вход успешно выполнен (" + source + ")!", Toast.LENGTH_SHORT).show();
         setResult(RESULT_OK);
         finish();
     }
@@ -369,7 +368,7 @@ public class AuthActivity extends Activity {
                 if (token != null && !token.isEmpty()) {
                     onAuthSuccess(token, "Ручной ввод");
                 } else {
-                    Toast.makeText(AuthActivity.this, "Не удалось распознать токен. Токен должен начинаться с y0_", Toast.LENGTH_LONG).show();
+                    EinkNotice.show(AuthActivity.this, "Ошибка токена", "Не удалось распознать токен.\nТокен Яндекса должен начинаться с y0_");
                 }
             }
         });
