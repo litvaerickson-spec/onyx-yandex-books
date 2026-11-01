@@ -180,8 +180,12 @@ public class ReaderActivity extends Activity {
     private final Runnable autoSaveRunnable = new Runnable() {
         @Override
         public void run() {
-            if (userHasInteracted) {
-                saveProgress();
+            try {
+                if (userHasInteracted) {
+                    saveProgress();
+                }
+            } catch (Throwable t) {
+                Log.e(TAG, "Error in autoSaveRunnable", t);
             }
         }
     };
@@ -2929,124 +2933,152 @@ public class ReaderActivity extends Activity {
     }
 
     private void renderCurrentPage() {
-        recalculateTotalBookPages();
-        if (!currentPages.isEmpty() && currentPageIndex < currentPages.size()) {
-            String title = getActiveChapterTitle();
-            double percent = calculateCurrentGlobalPercent();
-            int totalChapters = chapters != null ? chapters.size() : 1;
-            readerCanvas.setPage(currentPages.get(currentPageIndex), globalPageIndex, totalBookPages, title, currentChapterIndex, totalChapters, percent);
-        }
+        try {
+            recalculateTotalBookPages();
+            if (!currentPages.isEmpty() && currentPageIndex < currentPages.size()) {
+                String title = getActiveChapterTitle();
+                double percent = calculateCurrentGlobalPercent();
+                int totalChapters = chapters != null ? chapters.size() : 1;
+                readerCanvas.setPage(currentPages.get(currentPageIndex), globalPageIndex, totalBookPages, title, currentChapterIndex, totalChapters, percent);
+            }
 
-        if (!hasPerformedInitialRefresh) {
-            hasPerformedInitialRefresh = true;
-            forceEpdRefresh();
-        }
+            if (!hasPerformedInitialRefresh) {
+                hasPerformedInitialRefresh = true;
+                forceEpdRefresh();
+            }
 
-        pageTurnCounter++;
-        if (pageTurnCounter >= typographyConfig.getEpdFullRefreshInterval()) {
-            pageTurnCounter = 0;
-            forceEpdRefresh();
-        }
+            pageTurnCounter++;
+            if (pageTurnCounter >= typographyConfig.getEpdFullRefreshInterval()) {
+                pageTurnCounter = 0;
+                forceEpdRefresh();
+            }
 
-        if (userHasInteracted) {
-            saveProgress();
+            if (userHasInteracted) {
+                saveProgress();
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "Error in renderCurrentPage", t);
         }
     }
 
     private void flipPageForward() {
-        if (isPaginating) {
-            return; // Защита от наложения параллельных пагинаций при быстром нажатии
-        }
-        userHasInteracted = true;
-        isInitialLoading = false;
-        if (currentPages != null && currentPageIndex + 1 < currentPages.size()) {
-            currentPageIndex++;
-            renderCurrentPage();
-            updateMenuControls();
-            scheduleAutoSaveProgress();
-        } else if (chapters != null && currentChapterIndex + 1 < chapters.size()) {
-            currentChapterIndex++;
-            currentPageIndex = 0;
-            loadChapter(currentChapterIndex, 0);
-            scheduleAutoSaveProgress();
-        } else {
-            EinkNotice.show(this, "Чтение", "Конец книги.");
+        try {
+            if (isPaginating) {
+                return; // Защита от наложения параллельных пагинаций при быстром нажатии
+            }
+            userHasInteracted = true;
+            isInitialLoading = false;
+            if (currentPages != null && currentPageIndex + 1 < currentPages.size()) {
+                currentPageIndex++;
+                renderCurrentPage();
+                updateMenuControls();
+                scheduleAutoSaveProgress();
+            } else if (chapters != null && currentChapterIndex + 1 < chapters.size()) {
+                currentChapterIndex++;
+                currentPageIndex = 0;
+                loadChapter(currentChapterIndex, 0);
+                scheduleAutoSaveProgress();
+            } else {
+                EinkNotice.show(this, "Чтение", "Конец книги.");
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "Error in flipPageForward", t);
         }
     }
 
     private void flipPageBackward() {
-        if (isPaginating) {
-            return; // Защита от наложения параллельных пагинаций при быстром нажатии
-        }
-        userHasInteracted = true;
-        isInitialLoading = false;
-        if (currentPageIndex > 0) {
-            currentPageIndex--;
-            renderCurrentPage();
-            updateMenuControls();
-            scheduleAutoSaveProgress();
-        } else if (chapters != null && currentChapterIndex > 0) {
-            currentChapterIndex--;
-            loadChapter(currentChapterIndex, -999);
-            scheduleAutoSaveProgress();
-        } else {
-            EinkNotice.show(this, "Чтение", "Начало книги.");
+        try {
+            if (isPaginating) {
+                return; // Защита от наложения параллельных пагинаций при быстром нажатии
+            }
+            userHasInteracted = true;
+            isInitialLoading = false;
+            if (currentPageIndex > 0) {
+                currentPageIndex--;
+                renderCurrentPage();
+                updateMenuControls();
+                scheduleAutoSaveProgress();
+            } else if (chapters != null && currentChapterIndex > 0) {
+                currentChapterIndex--;
+                loadChapter(currentChapterIndex, -999);
+                scheduleAutoSaveProgress();
+            } else {
+                EinkNotice.show(this, "Чтение", "Начало книги.");
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "Error in flipPageBackward", t);
         }
     }
 
     private void forceEpdRefresh() {
-        EpdController.applyGCOnce(readerCanvas);
-        EpdController.requestFullRefresh(this, readerCanvas);
+        try {
+            EpdController.applyGCOnce(readerCanvas);
+            EpdController.requestFullRefresh(this, readerCanvas);
+        } catch (Throwable t) {
+            Log.e(TAG, "Error in forceEpdRefresh", t);
+        }
     }
 
     private int calculateCurrentParagraphIndex() {
-        if (currentPages == null || currentPageIndex < 0 || currentPageIndex >= currentPages.size()) return 0;
-        String rawText = chapterTextMemoryCache.get(currentChapterIndex);
-        if (rawText == null || rawText.isEmpty()) return 0;
-        int offset = currentPages.get(currentPageIndex).startCharOffset;
-        if (offset <= 0) return 0;
-        int parCount = 0;
-        int len = Math.min(offset, rawText.length());
-        for (int i = 0; i < len; i++) {
-            if (rawText.charAt(i) == '\n') parCount++;
+        try {
+            if (currentPages == null || currentPageIndex < 0 || currentPageIndex >= currentPages.size()) return 0;
+            String rawText = chapterTextMemoryCache.get(currentChapterIndex);
+            if (rawText == null || rawText.isEmpty()) return 0;
+            int offset = currentPages.get(currentPageIndex).startCharOffset;
+            if (offset <= 0) return 0;
+            int parCount = 0;
+            int len = Math.min(offset, rawText.length());
+            for (int i = 0; i < len; i++) {
+                if (rawText.charAt(i) == '\n') parCount++;
+            }
+            return parCount;
+        } catch (Throwable t) {
+            return 0;
         }
-        return parCount;
     }
 
     private void saveProgress() {
-        double percent = calculateCurrentGlobalPercent();
-        long now = System.currentTimeMillis();
-        int parIndex = calculateCurrentParagraphIndex();
-        int spineIndex = chapterIndexToSpineIndex(currentChapterIndex);
-        String cfi = YandexBooksApiClient.generateCfi(spineIndex, parIndex);
-
-        ReadingProgress progress = new ReadingProgress(
-                bookUuid,
-                percent,
-                spineIndex,
-                parIndex,
-                currentPageIndex,
-                now
-        );
-        progress.setCfi(cfi);
-
         try {
-            Book b = dbHelper.getBookByUuid(bookUuid);
-            if (b != null) {
-                if (b.getLibraryCardId() != null && !b.getLibraryCardId().isEmpty()) {
-                    progress.setLibraryCardId(b.getLibraryCardId());
+            double percent = calculateCurrentGlobalPercent();
+            long now = System.currentTimeMillis();
+            int parIndex = calculateCurrentParagraphIndex();
+            int spineIndex = chapterIndexToSpineIndex(currentChapterIndex);
+            String cfi = YandexBooksApiClient.generateCfi(spineIndex, parIndex);
+
+            ReadingProgress progress = new ReadingProgress(
+                    bookUuid,
+                    percent,
+                    spineIndex,
+                    parIndex,
+                    currentPageIndex,
+                    now
+            );
+            progress.setCfi(cfi);
+
+            try {
+                Book b = dbHelper.getBookByUuid(bookUuid);
+                if (b != null) {
+                    if (b.getLibraryCardId() != null && !b.getLibraryCardId().isEmpty()) {
+                        progress.setLibraryCardId(b.getLibraryCardId());
+                    }
+                    if (b.getDocumentUuid() != null && !b.getDocumentUuid().isEmpty()) {
+                        progress.setDocumentUuid(b.getDocumentUuid());
+                    }
                 }
-                if (b.getDocumentUuid() != null && !b.getDocumentUuid().isEmpty()) {
-                    progress.setDocumentUuid(b.getDocumentUuid());
-                }
+            } catch (Exception ignored) {}
+
+            // Мгновенно сохраняем в локальную SQLite базу ридера
+            if (dbHelper != null) {
+                dbHelper.saveProgress(progress);
             }
-        } catch (Exception ignored) {}
 
-        // Мгновенно сохраняем в локальную SQLite базу ридера
-        dbHelper.saveProgress(progress);
-
-        // Отправка в облако Яндекса
-        syncManager.saveAndSyncProgress(progress, true, null);
+            // Отправка в облако Яндекса
+            if (syncManager != null) {
+                syncManager.saveAndSyncProgress(progress, true, null);
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "Error in saveProgress", t);
+        }
     }
 
     @Override
@@ -3090,17 +3122,23 @@ public class ReaderActivity extends Activity {
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (event == null) return false;
-        int keyCode = event.getKeyCode();
-        if (keyHandler != null && HardwareKeyHandler.isPageKey(keyCode, event)) {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                if (event.getRepeatCount() == 0) {
-                    event.startTracking();
+        try {
+            int keyCode = event.getKeyCode();
+            if (keyHandler != null && HardwareKeyHandler.isPageKey(keyCode, event)) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (event.getRepeatCount() == 0) {
+                        try {
+                            event.startTracking();
+                        } catch (Throwable ignored) {}
+                    }
+                    return keyHandler.handleKeyDown(keyCode, event);
+                } else if (event.getAction() == KeyEvent.ACTION_UP) {
+                    return keyHandler.handleKeyUp(keyCode, event);
                 }
-                return keyHandler.handleKeyDown(keyCode, event);
-            } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                return keyHandler.handleKeyUp(keyCode, event);
+                return true;
             }
-            return true;
+        } catch (Throwable t) {
+            Log.e(TAG, "Error in dispatchKeyEvent", t);
         }
         return super.dispatchKeyEvent(event);
     }

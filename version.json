@@ -1,10 +1,10 @@
 {
-  "versionName": "1.5.19-beta",
-  "versionCode": 52,
-  "tagName": "v1.5.19-beta",
-  "title": "v1.5.19-beta: Бесперебойная доставка OTA обновлений по воздуху и поддержка всех типов релизов",
-  "apkUrl": "https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.5.19-beta/yandex-books-lite-v1.5.19-beta.apk",
-  "apkFileName": "yandex-books-lite-v1.5.19-beta.apk",
-  "apkSize": 3344741,
-  "changelog": "• Исправлена доставка обновлений по воздуху (OTA):\n• Мульти-стратегический поиск релизов на GitHub (Releases List, raw version.json, Latest)\n• Поддержка всех типов релизов и бета-версий без блокировки\n• Автоматическая фоновая проверка при подключении Wi-Fi (ConnectivityReceiver)\n• Добавлено разрешение REQUEST_INSTALL_PACKAGES для Android 8/9/10/11 (Darwin 7)\n• Безопасный запуск PackageInstaller без FileUriExposedException на Android 7+"
+  "versionName": "1.5.20-beta",
+  "versionCode": 53,
+  "tagName": "v1.5.20-beta",
+  "title": "v1.5.20-beta: Устранение краша при перелистывании страниц и авто-миграция SQLite схемы",
+  "apkUrl": "https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.5.20-beta/yandex-books-lite-v1.5.20-beta.apk",
+  "apkFileName": "yandex-books-lite-v1.5.20-beta.apk",
+  "apkSize": 3348837,
+  "changelog": "• Исправлена критическая ошибка 'В приложении Яндекс книги произошла ошибка' при перелистывании страниц (тапом и боковыми кнопками):\n• Автоматическое накатывание недостающих колонок SQLite (cfi, document_uuid) в таблицы progress и sync_queue\n• Инкремент версии базы данных (DATABASE_VERSION=8) и самовосстановление схемы при открытии (onOpen/onUpgrade)\n• Полная изоляция UI потока ридера: исключения синхронизации и БД больше не приводят к падению приложения"
 }

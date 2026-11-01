@@ -19,7 +19,7 @@ import java.util.List;
 public class DatabaseHelper extends SQLiteOpenHelper {
 
     private static final String DATABASE_NAME = "yandex_books_lite.db";
-    private static final int DATABASE_VERSION = 7;
+    private static final int DATABASE_VERSION = 8;
 
     private static DatabaseHelper instance;
 
@@ -38,6 +38,35 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     public void onCreate(SQLiteDatabase db) {
         createTables(db);
         ensureBookmarksTable(db);
+        ensureSchemaMigration(db);
+    }
+
+    @Override
+    public void onOpen(SQLiteDatabase db) {
+        super.onOpen(db);
+        createTables(db);
+        ensureSchemaMigration(db);
+    }
+
+    public void ensureSchemaMigration(SQLiteDatabase db) {
+        if (db == null || db.isReadOnly()) return;
+        String[] migrations = {
+                "ALTER TABLE books ADD COLUMN card_id TEXT",
+                "ALTER TABLE books ADD COLUMN annotation TEXT",
+                "ALTER TABLE books ADD COLUMN document_uuid TEXT",
+                "ALTER TABLE books ADD COLUMN cfi TEXT",
+                "ALTER TABLE progress ADD COLUMN document_uuid TEXT",
+                "ALTER TABLE progress ADD COLUMN cfi TEXT",
+                "ALTER TABLE sync_queue ADD COLUMN document_uuid TEXT",
+                "ALTER TABLE sync_queue ADD COLUMN cfi TEXT",
+                "ALTER TABLE bookmarks ADD COLUMN timestamp INTEGER",
+                "ALTER TABLE bookmarks ADD COLUMN created_at INTEGER"
+        };
+        for (String sql : migrations) {
+            try {
+                db.execSQL(sql);
+            } catch (Throwable ignored) {}
+        }
     }
 
     private void createTables(SQLiteDatabase db) {
@@ -56,34 +85,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 "current_paragraph INTEGER," +
                 "shelf_type TEXT," +
                 "is_downloaded INTEGER," +
-                "last_read_timestamp INTEGER" +
+                "last_read_timestamp INTEGER," +
+                "document_uuid TEXT," +
+                "cfi TEXT" +
                 ")");
-
-        // Миграция колонок card_id и annotation для существующих баз
-        try {
-            db.execSQL("ALTER TABLE books ADD COLUMN card_id TEXT");
-        } catch (Exception ignored) {}
-        try {
-            db.execSQL("ALTER TABLE books ADD COLUMN annotation TEXT");
-        } catch (Exception ignored) {}
-        try {
-            db.execSQL("ALTER TABLE books ADD COLUMN document_uuid TEXT");
-        } catch (Exception ignored) {}
-        try {
-            db.execSQL("ALTER TABLE books ADD COLUMN cfi TEXT");
-        } catch (Exception ignored) {}
-        try {
-            db.execSQL("ALTER TABLE progress ADD COLUMN document_uuid TEXT");
-        } catch (Exception ignored) {}
-        try {
-            db.execSQL("ALTER TABLE progress ADD COLUMN cfi TEXT");
-        } catch (Exception ignored) {}
-        try {
-            db.execSQL("ALTER TABLE sync_queue ADD COLUMN document_uuid TEXT");
-        } catch (Exception ignored) {}
-        try {
-            db.execSQL("ALTER TABLE sync_queue ADD COLUMN cfi TEXT");
-        } catch (Exception ignored) {}
 
         // Таблица глав
         db.execSQL("CREATE TABLE IF NOT EXISTS chapters (" +
@@ -103,7 +108,9 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 "paragraph_index INTEGER," +
                 "page_index INTEGER," +
                 "timestamp INTEGER," +
-                "is_synced INTEGER" +
+                "is_synced INTEGER," +
+                "document_uuid TEXT," +
+                "cfi TEXT" +
                 ")");
 
         // Очередь офлайн-синхронизации прогресса
@@ -113,12 +120,17 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 "percent REAL," +
                 "chapter_index INTEGER," +
                 "paragraph_index INTEGER," +
-                "timestamp INTEGER" +
+                "timestamp INTEGER," +
+                "document_uuid TEXT," +
+                "cfi TEXT" +
                 ")");
 
         // Закладки пользователя
         ensureBookmarksTable(db);
         ensureHiddenBooksTable(db);
+
+        // Гарантируем наличие всех колонок для баз, обновленных с предыдущих версий
+        ensureSchemaMigration(db);
     }
 
     private void ensureBookmarksTable(SQLiteDatabase db) {
@@ -130,7 +142,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     "page_index INTEGER," +
                     "title TEXT," +
                     "snippet TEXT," +
-                    "timestamp INTEGER" +
+                    "timestamp INTEGER," +
+                    "created_at INTEGER" +
                     ")");
         } catch (Exception ignored) {}
     }
@@ -179,6 +192,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 // Очищаем кэшированные главы без изображений для автоматического перепарсинга с поддержкой графики
                 db.execSQL("DELETE FROM chapters");
             } catch (Exception ignored) {}
+        }
+
+        if (oldVersion < 8) {
+            ensureSchemaMigration(db);
         }
     }
 
@@ -489,7 +506,9 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             String pctStr = String.format(java.util.Locale.getDefault(), "%.0f%%", percent);
             bCv.put("title", "Облако (" + pctStr + ")");
             bCv.put("snippet", "Место с другого устройства: Гл. " + (Math.max(0, chapterIndex) + 1) + ", " + pctStr);
-            bCv.put("created_at", System.currentTimeMillis());
+            long now = System.currentTimeMillis();
+            bCv.put("timestamp", now);
+            bCv.put("created_at", now);
 
             if (exists && existingId > 0) {
                 db.update("bookmarks", bCv, "id = ?", new String[]{String.valueOf(existingId)});
@@ -735,6 +754,22 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     public synchronized void saveProgress(ReadingProgress progress) {
+        if (progress == null || progress.getBookUuid() == null || progress.getBookUuid().isEmpty()) return;
+        try {
+            internalSaveProgress(progress);
+        } catch (Throwable t) {
+            android.util.Log.e("DatabaseHelper", "Failed to save progress, applying schema auto-heal", t);
+            try {
+                SQLiteDatabase db = getWritableDatabase();
+                ensureSchemaMigration(db);
+                internalSaveProgress(progress);
+            } catch (Throwable fallbackErr) {
+                android.util.Log.e("DatabaseHelper", "Critical: saveProgress fallback failed", fallbackErr);
+            }
+        }
+    }
+
+    private void internalSaveProgress(ReadingProgress progress) {
         SQLiteDatabase db = getWritableDatabase();
         ContentValues cv = new ContentValues();
         cv.put("book_uuid", progress.getBookUuid());
@@ -831,6 +866,21 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
     public synchronized void enqueueOfflineProgress(ReadingProgress p) {
         if (p == null || p.getBookUuid() == null || p.getBookUuid().isEmpty()) return;
+        try {
+            internalEnqueueOfflineProgress(p);
+        } catch (Throwable t) {
+            android.util.Log.e("DatabaseHelper", "Failed to enqueue offline progress, applying schema auto-heal", t);
+            try {
+                SQLiteDatabase db = getWritableDatabase();
+                ensureSchemaMigration(db);
+                internalEnqueueOfflineProgress(p);
+            } catch (Throwable fallbackErr) {
+                android.util.Log.e("DatabaseHelper", "Critical: enqueueOfflineProgress fallback failed", fallbackErr);
+            }
+        }
+    }
+
+    private void internalEnqueueOfflineProgress(ReadingProgress p) {
         SQLiteDatabase db = getWritableDatabase();
         ContentValues cv = new ContentValues();
         cv.put("book_uuid", p.getBookUuid());

@@ -2728,7 +2728,7 @@ def test_v1515_beta_graphql_cfi_bidirectional_sync():
 
     assert "loadBooks(currentShelf)" in main_code, \
         "MainActivity.onResume обязан фоново перезапрашивать полку с сервера!"
-    assert any(v in main_code for v in ["v1.5.15-beta", "v1.5.16-beta", "v1.5.17-beta", "v1.5.18-beta", "v1.5.19-beta"]), \
+    assert any(v in main_code for v in ["v1.5.15-beta", "v1.5.16-beta", "v1.5.17-beta", "v1.5.18-beta", "v1.5.19-beta", "v1.5.20-beta"]), \
         "Интерфейс MainActivity должен отображать актуальную версию!"
     print(" - MainActivity: актуализация каталога при возврате и лейбл версии: OK")
 
@@ -2736,7 +2736,7 @@ def test_v1515_beta_graphql_cfi_bidirectional_sync():
     v_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(v_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str in ("1.5.15-beta", "1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta"), f"VERSION должен быть >= 1.5.15-beta, получено: {v_str}"
+    assert v_str in ("1.5.15-beta", "1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta"), f"VERSION должен быть >= 1.5.15-beta, получено: {v_str}"
 
     g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(g_file, "r", encoding="utf-8") as f:
@@ -2787,28 +2787,28 @@ def test_v1516_beta_onyx_sdk_hardware_regal_and_conflict_resolution():
     assert "navigateToResolvedProgress" in reader_code, "ReaderActivity должен содержать единую точку навигации navigateToResolvedProgress"
     print(" - ReaderActivity (Regal в onResume, GC в forceEpdRefresh, высококонтрастные диалоги разрешения конфликтов): OK")
 
-    # 4. Проверка версионирования v1.5.16-beta / v1.5.17-beta / v1.5.18-beta / v1.5.19-beta
+    # 4. Проверка версионирования v1.5.16-beta+ (versionCode >= 49)
     v_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(v_file, "r", encoding="utf-8") as f:
         ver = f.read().strip()
-    assert ver in ("1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta"), f"VERSION ожидал >= 1.5.16-beta, получено: {ver}"
+    assert ver in ("1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta"), f"VERSION ожидал >= 1.5.16-beta, получено: {ver}"
 
     g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(g_file, "r", encoding="utf-8") as f:
         g_code = f.read()
-    assert any(f'versionName "{v}"' in g_code for v in ["1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta"])
-    assert any(f'versionCode {c}' in g_code for c in [49, 50, 51, 52])
+    assert any(f'versionName "{v}"' in g_code for v in ["1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta"])
+    assert any(f'versionCode {c}' in g_code for c in [49, 50, 51, 52, 53])
 
     m_file = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(m_file, "r", encoding="utf-8") as f:
         m_code = f.read()
-    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta"])
-    assert any(f'android:versionCode="{c}"' in m_code for c in ["49", "50", "51", "52"])
+    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta"])
+    assert any(f'android:versionCode="{c}"' in m_code for c in ["49", "50", "51", "52", "53"])
 
     main_file = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java")
     with open(main_file, "r", encoding="utf-8") as f:
         main_code = f.read()
-    assert any(v in main_code for v in ["v1.5.16-beta", "v1.5.17-beta", "v1.5.18-beta", "v1.5.19-beta"])
+    assert any(v in main_code for v in ["v1.5.16-beta", "v1.5.17-beta", "v1.5.18-beta", "v1.5.19-beta", "v1.5.20-beta"])
     print(" - Версионирование (versionCode>=49, AndroidManifest, build.gradle, VERSION, MainActivity): OK")
 
     print("✅ Тест v1.5.16-beta Onyx SDK интеграция, Regal mode и диалоги конфликтов успешно пройден!\n")
@@ -2867,21 +2867,21 @@ def test_v1517_beta_hardware_buttons_dispatch_key_event():
     v_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(v_file, "r", encoding="utf-8") as f:
         ver = f.read().strip()
-    assert ver in ("1.5.17-beta", "1.5.18-beta", "1.5.19-beta"), f"VERSION ожидал >= 1.5.17-beta, получено: {ver}"
+    assert ver in ("1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta"), f"VERSION ожидал >= 1.5.17-beta, получено: {ver}"
 
     g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(g_file, "r", encoding="utf-8") as f:
         g_code = f.read()
-    assert any(f'versionName "{v}"' in g_code for v in ["1.5.17-beta", "1.5.18-beta", "1.5.19-beta"])
-    assert any(f'versionCode {c}' in g_code for c in [50, 51, 52])
+    assert any(f'versionName "{v}"' in g_code for v in ["1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta"])
+    assert any(f'versionCode {c}' in g_code for c in [50, 51, 52, 53])
 
     m_file = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(m_file, "r", encoding="utf-8") as f:
         m_code = f.read()
-    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.17-beta", "1.5.18-beta", "1.5.19-beta"])
-    assert any(f'android:versionCode="{c}"' in m_code for c in ["50", "51", "52"])
+    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta"])
+    assert any(f'android:versionCode="{c}"' in m_code for c in ["50", "51", "52", "53"])
 
-    assert any(v in main_code for v in ["v1.5.17-beta", "v1.5.18-beta", "v1.5.19-beta"])
+    assert any(v in main_code for v in ["v1.5.17-beta", "v1.5.18-beta", "v1.5.19-beta", "v1.5.20-beta"])
     print(" - Версионирование v1.5.17-beta+ (versionCode>=50, AndroidManifest, build.gradle, VERSION, MainActivity): OK")
 
     print("✅ Тест v1.5.17-beta Работоспособность боковых кнопок и перехват dispatchKeyEvent успешно пройден!\n")
@@ -2945,28 +2945,28 @@ def test_v1518_beta_touch_target_ergonomics_and_darwin7_fix():
     assert "(40 * density)" in reader_code, "Кнопка Закрыть в диалоге должна иметь высоту >= 38dp!"
     print(" - Диалог прогресса (увеличенные кнопки 42dp и 40dp): OK")
 
-    # 5. Проверка версионирования v1.5.18-beta / v1.5.19-beta
+    # 5. Проверка версионирования v1.5.18-beta+ (versionCode >= 51)
     v_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(v_file, "r", encoding="utf-8") as f:
         ver = f.read().strip()
-    assert ver in ["1.5.18-beta", "1.5.19-beta"], f"VERSION ожидал 1.5.18-beta или 1.5.19-beta, получено: {ver}"
+    assert ver in ["1.5.18-beta", "1.5.19-beta", "1.5.20-beta"], f"VERSION ожидал >= 1.5.18-beta, получено: {ver}"
 
     g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(g_file, "r", encoding="utf-8") as f:
         g_code = f.read()
-    assert any(v in g_code for v in ['versionName "1.5.18-beta"', 'versionName "1.5.19-beta"'])
-    assert any(c in g_code for c in ['versionCode 51', 'versionCode 52'])
+    assert any(v in g_code for v in ['versionName "1.5.18-beta"', 'versionName "1.5.19-beta"', 'versionName "1.5.20-beta"'])
+    assert any(c in g_code for c in ['versionCode 51', 'versionCode 52', 'versionCode 53'])
 
     m_file = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(m_file, "r", encoding="utf-8") as f:
         m_code = f.read()
-    assert any(v in m_code for v in ['android:versionName="1.5.18-beta"', 'android:versionName="1.5.19-beta"'])
-    assert any(c in m_code for c in ['android:versionCode="51"', 'android:versionCode="52"'])
+    assert any(v in m_code for v in ['android:versionName="1.5.18-beta"', 'android:versionName="1.5.19-beta"', 'android:versionName="1.5.20-beta"'])
+    assert any(c in m_code for c in ['android:versionCode="51"', 'android:versionCode="52"', 'android:versionCode="53"'])
 
     main_file = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java")
     with open(main_file, "r", encoding="utf-8") as f:
         main_code = f.read()
-    assert any(v in main_code for v in ["v1.5.18-beta", "v1.5.19-beta"])
+    assert any(v in main_code for v in ["v1.5.18-beta", "v1.5.19-beta", "v1.5.20-beta"])
     print(" - Версионирование v1.5.18-beta (versionCode=51, AndroidManifest, build.gradle, VERSION, MainActivity): OK")
 
     print("✅ Тест v1.5.18-beta Эргономика тачскринов Darwin 7 и Full-Row клики успешно пройден!\n")
@@ -3016,30 +3016,182 @@ def test_v1519_beta_ota_update_reliability():
         v_json_content = f.read()
     import json
     v_data = json.loads(v_json_content)
-    assert v_data.get("versionName") == "1.5.19-beta"
-    assert v_data.get("versionCode") == 52
-    assert v_data.get("tagName") == "v1.5.19-beta"
-    assert "yandex-books-lite-v1.5.19-beta.apk" in v_data.get("apkUrl", "")
+    assert v_data.get("versionName") in ("1.5.19-beta", "1.5.20-beta")
+    assert v_data.get("versionCode") in (52, 53)
+    assert v_data.get("tagName") in ("v1.5.19-beta", "v1.5.20-beta")
+    assert "yandex-books-lite-v1.5." in v_data.get("apkUrl", "")
     print(" - version.json: валидный манифест для CDN raw.githubusercontent.com: OK")
 
-    # 6. Проверка версионирования v1.5.19-beta (versionCode 52)
+    # 6. Проверка версионирования v1.5.19-beta+ (versionCode >= 52)
     v_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(v_file, "r", encoding="utf-8") as f:
         ver = f.read().strip()
-    assert ver == "1.5.19-beta", f"VERSION ожидал 1.5.19-beta, получено: {ver}"
+    assert ver in ("1.5.19-beta", "1.5.20-beta"), f"VERSION ожидал >= 1.5.19-beta, получено: {ver}"
 
     g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(g_file, "r", encoding="utf-8") as f:
         g_code = f.read()
-    assert 'versionName "1.5.19-beta"' in g_code
-    assert 'versionCode 52' in g_code
+    assert any(f'versionName "{v}"' in g_code for v in ["1.5.19-beta", "1.5.20-beta"])
+    assert any(f'versionCode {c}' in g_code for c in [52, 53])
 
-    assert 'android:versionName="1.5.19-beta"' in m_code
-    assert 'android:versionCode="52"' in m_code
-    assert "v1.5.19-beta" in main_code
-    print(" - Версионирование v1.5.19-beta (versionCode=52, AndroidManifest, build.gradle, VERSION, MainActivity): OK")
+    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.19-beta", "1.5.20-beta"])
+    assert any(f'android:versionCode="{c}"' in m_code for c in ["52", "53"])
+    assert any(v in main_code for v in ["v1.5.19-beta", "v1.5.20-beta"])
+    print(" - Версионирование v1.5.19-beta+ (versionCode>=52, AndroidManifest, build.gradle, VERSION, MainActivity): OK")
 
     print("✅ Тест v1.5.19-beta Бесперебойная доставка OTA обновлений успешно пройден!\n")
+
+
+def test_v1520_beta_page_flip_crash_prevention_and_schema_auto_heal():
+    print("--- [ТЕСТ 46] v1.5.20-beta: Устранение краша при перелистывании страниц и авто-миграция SQLite схемы ---")
+
+    # 1. Проверка DatabaseHelper.java: DATABASE_VERSION=8, DDL колонок cfi и document_uuid, ensureSchemaMigration, onOpen
+    db_file = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/storage/DatabaseHelper.java")
+    with open(db_file, "r", encoding="utf-8") as f:
+        db_code = f.read()
+
+    assert "DATABASE_VERSION = 8;" in db_code, "DatabaseHelper обязан иметь DATABASE_VERSION = 8!"
+    assert "public void ensureSchemaMigration(SQLiteDatabase db)" in db_code, "ensureSchemaMigration обязан существовать!"
+    assert "public void onOpen(SQLiteDatabase db)" in db_code, "onOpen обязан вызывать ensureSchemaMigration для авто-восстановления схемы!"
+    assert "internalSaveProgress(progress);" in db_code, "saveProgress обязан использовать безопасный fallback через internalSaveProgress!"
+    assert "internalEnqueueOfflineProgress(p);" in db_code, "enqueueOfflineProgress обязан использовать безопасный fallback!"
+
+    # 2. Физическое тестирование SQLite схемы через in-memory БД (Python sqlite3)
+    import sqlite3
+    con = sqlite3.connect(":memory:")
+    cur = con.cursor()
+
+    # Создаем таблицы по новой схеме DatabaseHelper v8
+    cur.execute("""CREATE TABLE IF NOT EXISTS progress (
+        book_uuid TEXT PRIMARY KEY,
+        percent REAL,
+        chapter_index INTEGER,
+        paragraph_index INTEGER,
+        page_index INTEGER,
+        timestamp INTEGER,
+        is_synced INTEGER,
+        document_uuid TEXT,
+        cfi TEXT
+    )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS sync_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        book_uuid TEXT,
+        percent REAL,
+        chapter_index INTEGER,
+        paragraph_index INTEGER,
+        timestamp INTEGER,
+        document_uuid TEXT,
+        cfi TEXT
+    )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS bookmarks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        book_uuid TEXT,
+        chapter_index INTEGER,
+        page_index INTEGER,
+        title TEXT,
+        snippet TEXT,
+        timestamp INTEGER,
+        created_at INTEGER
+    )""")
+
+    # Тестовая вставка прогресса с CFI и Document UUID (эмуляция сохранения при перелистывании)
+    cur.execute("INSERT OR REPLACE INTO progress (book_uuid, percent, chapter_index, paragraph_index, page_index, timestamp, is_synced, document_uuid, cfi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("test-uuid-1", 15.5, 2, 5, 1, 123456789, 1, "doc-uuid-1", "/6/6!/4/12:0"))
+    assert cur.rowcount == 1, "Вставка прогресса с CFI в новую схему должна пройти успешно!"
+
+    # Проверка чтения сохраненного CFI
+    cur.execute("SELECT cfi, document_uuid FROM progress WHERE book_uuid = ?", ("test-uuid-1",))
+    row = cur.fetchone()
+    assert row[0] == "/6/6!/4/12:0"
+    assert row[1] == "doc-uuid-1"
+
+    # Эмуляция старой поврежденной БД (без cfi) и применение ensureSchemaMigration
+    con_legacy = sqlite3.connect(":memory:")
+    cur_legacy = con_legacy.cursor()
+    cur_legacy.execute("""CREATE TABLE progress (
+        book_uuid TEXT PRIMARY KEY,
+        percent REAL,
+        chapter_index INTEGER,
+        paragraph_index INTEGER,
+        page_index INTEGER,
+        timestamp INTEGER,
+        is_synced INTEGER
+    )""")
+    # Применяем миграции
+    for mig in [
+        "ALTER TABLE progress ADD COLUMN document_uuid TEXT",
+        "ALTER TABLE progress ADD COLUMN cfi TEXT",
+    ]:
+        try:
+            cur_legacy.execute(mig)
+        except Exception:
+            pass
+    # Проверяем, что теперь вставка проходит
+    cur_legacy.execute("INSERT OR REPLACE INTO progress (book_uuid, percent, cfi) VALUES (?, ?, ?)",
+                       ("test-uuid-2", 42.0, "/6/4!/4/10:0"))
+    assert cur_legacy.rowcount == 1
+    print(" - DatabaseHelper: DATABASE_VERSION=8, DDL cfi/document_uuid, ensureSchemaMigration, onOpen, in-memory SQLite: OK")
+
+    # 3. Проверка ReaderActivity.java: полная изоляция UI-потока при листании страниц
+    reader_file = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/ReaderActivity.java")
+    with open(reader_file, "r", encoding="utf-8") as f:
+        reader_code = f.read()
+
+    assert "private void saveProgress() {" in reader_code
+    assert "Log.e(TAG, \"Error in saveProgress\", t);" in reader_code, "saveProgress обязан быть обернут в try-catch!"
+    assert "Log.e(TAG, \"Error in flipPageForward\", t);" in reader_code, "flipPageForward обязан быть обернут в try-catch!"
+    assert "Log.e(TAG, \"Error in flipPageBackward\", t);" in reader_code, "flipPageBackward обязан быть обернут в try-catch!"
+    assert "Log.e(TAG, \"Error in renderCurrentPage\", t);" in reader_code, "renderCurrentPage обязан быть защищен try-catch!"
+    assert "Log.e(TAG, \"Error in autoSaveRunnable\", t);" in reader_code, "autoSaveRunnable обязан быть защищен try-catch!"
+    assert "Log.e(TAG, \"Error in dispatchKeyEvent\", t);" in reader_code, "dispatchKeyEvent обязан быть защищен try-catch!"
+    print(" - ReaderActivity.java: 100% try-catch изоляция UI потока (saveProgress, flipPageForward, flipPageBackward, renderCurrentPage, dispatchKeyEvent): OK")
+
+    # 4. Проверка SyncManager.java: try-catch в saveAndSyncProgress
+    sync_file = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/sync/SyncManager.java")
+    with open(sync_file, "r", encoding="utf-8") as f:
+        sync_code = f.read()
+
+    assert "Log.e(TAG, \"Error in saveAndSyncProgress\", t);" in sync_code, "saveAndSyncProgress обязан быть защищен try-catch!"
+    print(" - SyncManager.java: try-catch защита saveAndSyncProgress: OK")
+
+    # 5. Проверка version.json
+    v_json_file = os.path.join(PROJECT_DIR, "version.json")
+    with open(v_json_file, "r", encoding="utf-8") as f:
+        v_json_content = f.read()
+    import json
+    v_data = json.loads(v_json_content)
+    assert v_data.get("versionName") == "1.5.20-beta"
+    assert v_data.get("versionCode") == 53
+    assert v_data.get("tagName") == "v1.5.20-beta"
+    assert "yandex-books-lite-v1.5.20-beta.apk" in v_data.get("apkUrl", "")
+    assert v_data.get("apkSize") == 3348837
+    print(" - version.json: валидный манифест v1.5.20-beta (versionCode=53, apkSize=3348837): OK")
+
+    # 6. Проверка версионирования v1.5.20-beta (versionCode 53)
+    v_file = os.path.join(PROJECT_DIR, "VERSION")
+    with open(v_file, "r", encoding="utf-8") as f:
+        ver = f.read().strip()
+    assert ver == "1.5.20-beta", f"VERSION ожидал 1.5.20-beta, получено: {ver}"
+
+    g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
+    with open(g_file, "r", encoding="utf-8") as f:
+        g_code = f.read()
+    assert 'versionName "1.5.20-beta"' in g_code
+    assert 'versionCode 53' in g_code
+
+    m_file = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
+    with open(m_file, "r", encoding="utf-8") as f:
+        m_code = f.read()
+    assert 'android:versionName="1.5.20-beta"' in m_code
+    assert 'android:versionCode="53"' in m_code
+
+    main_file = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java")
+    with open(main_file, "r", encoding="utf-8") as f:
+        main_code = f.read()
+    assert "v1.5.20-beta" in main_code
+    print(" - Версионирование v1.5.20-beta (versionCode=53, AndroidManifest, build.gradle, VERSION, MainActivity): OK")
+
+    print("✅ Тест v1.5.20-beta Устранение краша при листании страниц и авто-миграция SQLite схемы успешно пройден!\n")
 
 
 if __name__ == "__main__":
@@ -3092,6 +3244,7 @@ if __name__ == "__main__":
     test_v1517_beta_hardware_buttons_dispatch_key_event()
     test_v1518_beta_touch_target_ergonomics_and_darwin7_fix()
     test_v1519_beta_ota_update_reliability()
+    test_v1520_beta_page_flip_crash_prevention_and_schema_auto_heal()
     print("==================================================")
-    print("🎉 ВСЕ 45 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 46 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

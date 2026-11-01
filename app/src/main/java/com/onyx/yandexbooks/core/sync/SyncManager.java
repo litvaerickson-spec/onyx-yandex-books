@@ -37,53 +37,58 @@ public class SyncManager {
      * Сохранение новой позиции чтения с умным решением конфликтов.
      */
     public void saveAndSyncProgress(final ReadingProgress localProgress, boolean isOnline, final ConflictResolutionCallback callback) {
-        if (localProgress.getLibraryCardId() == null || localProgress.getLibraryCardId().isEmpty()
-                || localProgress.getDocumentUuid() == null || localProgress.getDocumentUuid().isEmpty()) {
-            try {
-                com.onyx.yandexbooks.core.api.models.Book b = dbHelper.getBookByUuid(localProgress.getBookUuid());
-                if (b != null) {
-                    if (b.getLibraryCardId() != null && !b.getLibraryCardId().isEmpty()) {
-                        localProgress.setLibraryCardId(b.getLibraryCardId());
+        if (localProgress == null || localProgress.getBookUuid() == null) return;
+        try {
+            if (localProgress.getLibraryCardId() == null || localProgress.getLibraryCardId().isEmpty()
+                    || localProgress.getDocumentUuid() == null || localProgress.getDocumentUuid().isEmpty()) {
+                try {
+                    com.onyx.yandexbooks.core.api.models.Book b = dbHelper.getBookByUuid(localProgress.getBookUuid());
+                    if (b != null) {
+                        if (b.getLibraryCardId() != null && !b.getLibraryCardId().isEmpty()) {
+                            localProgress.setLibraryCardId(b.getLibraryCardId());
+                        }
+                        if (b.getDocumentUuid() != null && !b.getDocumentUuid().isEmpty()) {
+                            localProgress.setDocumentUuid(b.getDocumentUuid());
+                        }
                     }
-                    if (b.getDocumentUuid() != null && !b.getDocumentUuid().isEmpty()) {
-                        localProgress.setDocumentUuid(b.getDocumentUuid());
-                    }
-                }
-            } catch (Exception ignored) {}
-        }
-
-        // Всегда сохраняем в локальную БД мгновенно
-        dbHelper.saveProgress(localProgress);
-
-        if (!isOnline) {
-            // Офлайн-режим: добавляем в очередь синхронизации
-            dbHelper.enqueueOfflineProgress(localProgress);
-            Log.d(TAG, "Device is offline. Progress enqueued for future sync: " + localProgress.getPercent() + "%");
-            if (callback != null) {
-                callback.onProgressUpdated(localProgress);
+                } catch (Exception ignored) {}
             }
-            return;
-        }
 
-        // Онлайн: отправляем на сервер
-        apiClient.sendReadingProgress(localProgress, new YandexBooksApiClient.ApiCallback<Boolean>() {
-            @Override
-            public void onSuccess(Boolean result) {
-                localProgress.setSyncedWithServer(true);
-                dbHelper.saveProgress(localProgress);
-                dbHelper.removeFromSyncQueue(localProgress.getBookUuid());
-                Log.d(TAG, "Progress successfully synced to Yandex cloud.");
+            // Всегда сохраняем в локальную БД мгновенно
+            dbHelper.saveProgress(localProgress);
+
+            if (!isOnline) {
+                // Офлайн-режим: добавляем в очередь синхронизации
+                dbHelper.enqueueOfflineProgress(localProgress);
+                Log.d(TAG, "Device is offline. Progress enqueued for future sync: " + localProgress.getPercent() + "%");
                 if (callback != null) {
                     callback.onProgressUpdated(localProgress);
                 }
+                return;
             }
 
-            @Override
-            public void onError(String errorMessage) {
-                Log.w(TAG, "Failed to send progress: " + errorMessage + ". Enqueuing.");
-                dbHelper.enqueueOfflineProgress(localProgress);
-            }
-        });
+            // Онлайн: отправляем на сервер
+            apiClient.sendReadingProgress(localProgress, new YandexBooksApiClient.ApiCallback<Boolean>() {
+                @Override
+                public void onSuccess(Boolean result) {
+                    localProgress.setSyncedWithServer(true);
+                    dbHelper.saveProgress(localProgress);
+                    dbHelper.removeFromSyncQueue(localProgress.getBookUuid());
+                    Log.d(TAG, "Progress successfully synced to Yandex cloud.");
+                    if (callback != null) {
+                        callback.onProgressUpdated(localProgress);
+                    }
+                }
+
+                @Override
+                public void onError(String errorMessage) {
+                    Log.w(TAG, "Failed to send progress: " + errorMessage + ". Enqueuing.");
+                    dbHelper.enqueueOfflineProgress(localProgress);
+                }
+            });
+        } catch (Throwable t) {
+            Log.e(TAG, "Error in saveAndSyncProgress", t);
+        }
     }
 
     /**

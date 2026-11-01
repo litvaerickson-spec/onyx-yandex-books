@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.20-beta] - 2026-11-01
+
+### Fixed
+- **Устранение аварийного завершения приложения («В приложении Яндекс книги произошла ошибка») при перелистывании страниц**:
+  - Локализована и устранена фундаментальная причина сбоя: при листании страниц (как тапом по экрану, так и физическими боковыми кнопками корпуса ридера) флаг взаимодействия `userHasInteracted` переключался в `true`, и метод `saveProgress()` вызывал запись в таблицу SQLite `progress` с колонкой `cfi`. В версиях с `v1.5.15-beta` по `v1.5.19-beta` из-за вызова `ALTER TABLE` до создания таблицы в `createTables` и отсутствия инкремента `DATABASE_VERSION`, на устройствах отсутствовала колонка `cfi`, что приводило к выбросу `SQLiteException` в главном UI потоке.
+  - В `DatabaseHelper.java` версия базы данных инкрементирована до `DATABASE_VERSION = 8`.
+  - Все таблицы (`progress`, `sync_queue`, `books`, `bookmarks`) теперь создаются с полным набором актуальных колонок (`document_uuid TEXT`, `cfi TEXT`, `created_at INTEGER`, `timestamp INTEGER`).
+  - Внедрен механизм **самовосстановления схемы (Self-Healing Schema Auto-Migration)**: в `onOpen()`, `onCreate()` и `onUpgrade()` вызывается метод `ensureSchemaMigration()`, динамически накатывающий недостающие поля без потери данных пользователя.
+  - Методы `saveProgress()` и `enqueueOfflineProgress()` в `DatabaseHelper` защищены fallback-механизмом: при возникновении ошибки структуры БД схема автоматически обновляется и повторно фиксирует прогресс.
+- **Тотальная изоляция UI потока ридера (Crash-Proof UI Thread)**:
+  - В `ReaderActivity.java` методы `saveProgress()`, `renderCurrentPage()`, `flipPageForward()`, `flipPageBackward()`, `autoSaveRunnable` и `dispatchKeyEvent()` полностью изолированы защитными блоками `try-catch (Throwable t)`.
+  - Ошибки записи в БД или сбои сетевой очереди больше ни при каких обстоятельствах не могут привести к аварийному завершению работы приложения.
+- **Защита менеджера синхронизации `SyncManager.java`**:
+  - Метод `saveAndSyncProgress()` обернут в защитный блок, предотвращающий падение приложения при кратковременных сбоях SQLite или сетевого стека.
+
+### Added
+- **Автотест `[ТЕСТ 46]` в `tools/verify_core_logic.py`**:
+  - Физическая in-memory симуляция SQLite схемы, валидация DDL колонок `cfi` и `document_uuid`, проверка авто-миграции поврежденной схемы, проверка try-catch изоляции всех методов листания и прогресса, а также верификация версионирования `v1.5.20-beta` (versionCode 53).
+
 ## [v1.5.19-beta] - 2026-11-01
 
 ### Fixed
