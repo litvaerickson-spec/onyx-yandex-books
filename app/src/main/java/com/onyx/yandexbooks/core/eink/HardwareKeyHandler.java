@@ -36,8 +36,18 @@ public class HardwareKeyHandler {
             return true;
         }
 
+        // Аппаратные скан-коды некоторых ревизий Onyx Boox
+        int scanCode = event.getScanCode();
+        if (scanCode == 93) {
+            listener.onPageForward();
+            return true;
+        } else if (scanCode == 92) {
+            listener.onPageBackward();
+            return true;
+        }
+
         switch (keyCode) {
-            // Листание вперед (правая боковая клавиша)
+            // Листание вперед (правая боковая клавиша: KEYCODE_PAGE_DOWN = 93)
             case KeyEvent.KEYCODE_PAGE_DOWN:
             case KeyEvent.KEYCODE_VOLUME_DOWN:
             case KeyEvent.KEYCODE_DPAD_RIGHT:
@@ -45,7 +55,7 @@ public class HardwareKeyHandler {
                 listener.onPageForward();
                 return true;
 
-            // Листание назад (левая боковая клавиша)
+            // Листание назад (левая боковая клавиша: KEYCODE_PAGE_UP = 92)
             case KeyEvent.KEYCODE_PAGE_UP:
             case KeyEvent.KEYCODE_VOLUME_UP:
             case KeyEvent.KEYCODE_DPAD_LEFT:
@@ -69,6 +79,8 @@ public class HardwareKeyHandler {
                keyCode == KeyEvent.KEYCODE_DPAD_DOWN ||
                keyCode == KeyEvent.KEYCODE_DPAD_UP ||
                keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
-               keyCode == KeyEvent.KEYCODE_DPAD_LEFT;
+               keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
+               keyCode == 92 ||
+               keyCode == 93;
     }
 }

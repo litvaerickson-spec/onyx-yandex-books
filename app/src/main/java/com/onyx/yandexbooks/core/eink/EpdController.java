@@ -37,6 +37,89 @@ public class EpdController {
     };
 
     /**
+     * Проверка, запущено ли приложение на устройстве производителя Onyx Boox.
+     */
+    public static boolean isOnyxDevice() {
+        try {
+            String m = android.os.Build.MANUFACTURER != null ? android.os.Build.MANUFACTURER.toLowerCase() : "";
+            String b = android.os.Build.BRAND != null ? android.os.Build.BRAND.toLowerCase() : "";
+            String f = android.os.Build.FINGERPRINT != null ? android.os.Build.FINGERPRINT.toLowerCase() : "";
+            return m.contains("onyx") || b.contains("onyx") || f.contains("onyx");
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * Включение аппаратного режима Regal (устраняет артефакты E-Ink без мигания экрана).
+     */
+    public static void enableRegalMode(View view) {
+        if (!isOnyxDevice()) return;
+        try {
+            for (String className : EPD_CONTROLLER_CLASS_NAMES) {
+                try {
+                    Class<?> clazz = Class.forName(className);
+                    Method m = clazz.getMethod("enableRegal", boolean.class);
+                    m.invoke(null, true);
+                    try {
+                        Method appScope = clazz.getMethod("applyAppScopeUpdate", boolean.class);
+                        appScope.invoke(null, true);
+                    } catch (Throwable ignored) {}
+                    Log.d(TAG, "Onyx EpdController.enableRegal(true) activated via " + className);
+                    return;
+                } catch (Throwable ignored) {}
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    /**
+     * Прямой вызов одиночного глубокого обновления экрана (GC) через официальный Onyx SDK.
+     */
+    public static void applyGCOnce(View view) {
+        if (!isOnyxDevice()) return;
+        try {
+            for (String className : EPD_CONTROLLER_CLASS_NAMES) {
+                try {
+                    Class<?> clazz = Class.forName(className);
+                    if (view != null) {
+                        try {
+                            Method m = clazz.getMethod("applyGCOnce", View.class);
+                            m.invoke(null, view);
+                            Log.d(TAG, "Onyx applyGCOnce(view) executed");
+                            return;
+                        } catch (NoSuchMethodException ignored) {}
+                    }
+                    Method mNoArg = clazz.getMethod("applyGCOnce");
+                    mNoArg.invoke(null);
+                    Log.d(TAG, "Onyx applyGCOnce() executed");
+                    return;
+                } catch (Throwable ignored) {}
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    /**
+     * Установка цветовой температуры и яркости подсветки (CTM: холодный / теплый свет).
+     */
+    public static void setFrontlight(Context context, int cold, int warm) {
+        if (!isOnyxDevice() || context == null) return;
+        try {
+            Class<?> brightClazz = Class.forName("com.onyx.android.sdk.api.device.brightness.BrightnessController");
+            Class<?> typeClazz = Class.forName("com.onyx.android.sdk.api.device.brightness.BrightnessType");
+            Object coldType = null;
+            Object warmType = null;
+            for (Object c : typeClazz.getEnumConstants()) {
+                if ("Cold".equalsIgnoreCase(c.toString())) coldType = c;
+                if ("Warm".equalsIgnoreCase(c.toString())) warmType = c;
+            }
+            Method setBrightness = brightClazz.getMethod("setBrightness", Context.class, int.class, typeClazz);
+            if (coldType != null) setBrightness.invoke(null, context, cold, coldType);
+            if (warmType != null) setBrightness.invoke(null, context, warm, warmType);
+            Log.d(TAG, "Onyx Frontlight set: cold=" + cold + ", warm=" + warm);
+        } catch (Throwable ignored) {}
+    }
+
+    /**
      * Запрос аппаратного полного обновления дисплея E-Ink (GC16 Full Refresh).
      */
     public static void requestFullRefresh(Context context, View view) {

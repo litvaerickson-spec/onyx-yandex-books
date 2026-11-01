@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.16-beta] - 2026-11-01
+
+### Added
+- **Аппаратная интеграция с Onyx Boox SDK (2026)**:
+  - Поддержка аппаратных скан-кодов боковых кнопок листания ридера (`92` — назад, `93` — вперед) в `HardwareKeyHandler` с подавлением ложного автоповтора при удержании.
+  - Внедрение класса `EpdController` с методами `isOnyxDevice()`, `enableRegalMode(View view)`, `applyGCOnce(View view)` и `setFrontlight(Context context, int cold, int warm)` с архитектурой Graceful Degradation через рефлексию (безопасно для сторонних Android-устройств и эмуляторов).
+  - Активация аппаратного режима Regal (`EpdController.enableRegalMode(readerCanvas)`) в `ReaderActivity.onResume()` для устранения остаточных артефактов E-Ink без мерцания экрана.
+  - Автоматический вызов глубокого обновления E-Ink экрана `EpdController.applyGCOnce(readerCanvas)` в `ReaderActivity.forceEpdRefresh()`.
+- **Защита от случайного отката прогресса и умное разрешение конфликтов (Multi-Device Conflict Resolution)**:
+  - Реализация алгоритма Last-Write-Wins (LWW) с валидацией направления прогресса на основе Blueprint Яндекс Книг (`YANDEX_BOOKS_ONYX_SYNC_REPORT.md`).
+  - При обнаружении на другом устройстве более ранней позиции ридер не откатывает чтение назад автоматически, а запрашивает подтверждение через высококонтрастный диалог `EinkNotice.showConfirm` («Откатиться» / «Остаться»).
+  - При обнаружении дальней позиции чтения во время активного сеанса ридер предлагает бесшовный переход («Перейти» / «Остаться»). При отказе от перехода текущий прогресс ридера отправляется на сервер.
+- **Автотест `[ТЕСТ 42]` в `tools/verify_core_logic.py`**:
+  - Полная верификация скан-кодов 92/93, методов `EpdController`, Regal режима в `onResume`, одиночного `applyGCOnce`, диалогов `showConfirm` и версионирования `v1.5.16-beta` (versionCode 49).
+
+### Changed
+- **Устранение сдвига на +1 главу при наличии искусственной обложки EPUB (`ch_0_cover`)**:
+  - Внедрена сквозная трансляция `chapterIndexToSpineIndex` и `spineIndexToChapterIndex` в `ReaderActivity` для идеального соответствия структуры EPUB-манифеста в облаке и ридере.
+- **Оптимизация порога синхронизации дельты прогресса**:
+  - Снижен блокирующий порог дельты в `DatabaseHelper` и `ReaderActivity`, что гарантирует мгновенную фиксацию даже коротких сеансов чтения со смартфона.
+
 ## [v1.5.15-beta] - 2026-11-01
 
 ### Added

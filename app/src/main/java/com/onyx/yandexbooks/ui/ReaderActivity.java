@@ -2234,28 +2234,71 @@ public class ReaderActivity extends Activity {
         loadChapter(currentChapterIndex, currentPageIndex);
     }
 
-    private void applyCloudProgressIfNewer(ReadingProgress cloudProgress) {
+    private void navigateToResolvedProgress(ReadingProgress cloudProgress, int cloudChapter, int cloudParagraph, double cloudPercent) {
         if (chapters == null || chapters.isEmpty()) return;
-        // Если читатель уже лично начал листать страницы книги, не перебиваем его фоновой облачной синхронизацией
-        if (userHasInteracted) return;
+        // Если есть конкретный абзац и допустимая глава (>= 0)
+        if (cloudChapter >= 0 && cloudChapter < chapters.size() && cloudParagraph > 0) {
+            currentChapterIndex = cloudChapter;
+            loadChapterAtParagraph(currentChapterIndex, cloudParagraph);
+            dbHelper.saveProgress(cloudProgress);
+            dbHelper.ensureCloudSyncBookmark(bookUuid, currentChapterIndex, currentPageIndex, (float) cloudPercent);
+            EinkNotice.show(ReaderActivity.this, "Синхронизация", String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d, абз. %d)\n[Закладка создана]", cloudPercent, currentChapterIndex + 1, cloudParagraph + 1));
+        } else if (cloudChapter >= 0 && cloudChapter < chapters.size()) {
+            currentChapterIndex = cloudChapter;
+            currentPageIndex = Math.max(0, cloudProgress.getPageIndex());
+            loadChapter(currentChapterIndex, currentPageIndex);
+            dbHelper.saveProgress(cloudProgress);
+            dbHelper.ensureCloudSyncBookmark(bookUuid, currentChapterIndex, currentPageIndex, (float) cloudPercent);
+            EinkNotice.show(ReaderActivity.this, "Синхронизация", String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)\n[Закладка создана]", cloudPercent, currentChapterIndex + 1));
+        } else if (cloudPercent > 0 && cloudPercent < 99.0 && totalBookLength > 0) {
+            // Если номер главы не указан – маппинг по общей длине
+            if (chapterLengths == null || chapterLengths.length != chapters.size()) {
+                calculateChapterLengths();
+            }
+            long targetGlobalOffset = (long) ((cloudPercent / 100.0) * totalBookLength);
+            long acc = 0;
+            int matchedCh = 0;
+            long matchedOffset = 0;
+            for (int i = 0; i < chapters.size(); i++) {
+                long chLen = chapterLengths[i];
+                if (targetGlobalOffset <= acc + chLen || i == chapters.size() - 1) {
+                    matchedCh = i;
+                    matchedOffset = Math.max(0, targetGlobalOffset - acc);
+                    break;
+                }
+                acc += chLen;
+            }
+            long curChLen = chapterLengths[matchedCh];
+            double chapterFraction = (curChLen > 0) ? ((double) matchedOffset / (double) curChLen) : 0.0;
+
+            currentChapterIndex = matchedCh;
+            loadChapterWithFraction(currentChapterIndex, chapterFraction);
+            dbHelper.saveProgress(cloudProgress);
+            dbHelper.ensureCloudSyncBookmark(bookUuid, currentChapterIndex, currentPageIndex, (float) cloudPercent);
+            EinkNotice.show(ReaderActivity.this, "Синхронизация", String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)\n[Закладка создана]", cloudPercent, currentChapterIndex + 1));
+        }
+    }
+
+    private void applyCloudProgressIfNewer(final ReadingProgress cloudProgress) {
+        if (chapters == null || chapters.isEmpty()) return;
 
         ReadingProgress local = dbHelper.getProgress(bookUuid);
         double curPercent = calculateCurrentGlobalPercent();
-        double cloudPercent = cloudProgress.getPercent();
-        int cloudChapter = cloudProgress.getChapterIndex();
-        int cloudParagraph = cloudProgress.getParagraphIndex();
+        final double cloudPercent = cloudProgress.getPercent();
+        int resolvedChapter = cloudProgress.getChapterIndex();
+        int resolvedParagraph = cloudProgress.getParagraphIndex();
         if (cloudProgress.getCfi() != null && !cloudProgress.getCfi().isEmpty()) {
             YandexBooksApiClient.CfiPosition cfiPos = YandexBooksApiClient.parseCfiPosition(cloudProgress.getCfi());
             if (cfiPos != null) {
-                if (cfiPos.paragraphIndex > 0 || cloudParagraph <= 0) {
-                    cloudParagraph = cfiPos.paragraphIndex;
+                if (cfiPos.paragraphIndex > 0 || resolvedParagraph <= 0) {
+                    resolvedParagraph = cfiPos.paragraphIndex;
                 }
                 if (cfiPos.chapterIndex >= 0) {
-                    cloudChapter = spineIndexToChapterIndex(cfiPos.chapterIndex);
+                    resolvedChapter = spineIndexToChapterIndex(cfiPos.chapterIndex);
                 }
             }
-        } else if (hasCoverChapter() && cloudChapter >= 0) {
-            cloudChapter = spineIndexToChapterIndex(cloudChapter);
+        } else if (hasCoverChapter() && resolvedChapter >= 0) {
+            resolvedChapter = spineIndexToChapterIndex(resolvedChapter);
         }
 
         // Защита от искаженного 100% при 0 главе или завершенной книге
@@ -2263,66 +2306,80 @@ public class ReaderActivity extends Activity {
             return;
         }
 
+        final int targetChapter = resolvedChapter;
+        final int targetParagraph = resolvedParagraph;
         long localTs = (local != null) ? local.getTimestamp() : 0L;
         long cloudTs = cloudProgress.getTimestamp();
 
+        boolean isForward = false;
+        boolean isBackward = false;
+
+        if (targetChapter > currentChapterIndex || (targetChapter == currentChapterIndex && targetParagraph > calculateCurrentParagraphIndex()) || cloudPercent > curPercent + 0.5) {
+            isForward = true;
+        } else if (targetChapter < currentChapterIndex || (targetChapter == currentChapterIndex && targetParagraph < calculateCurrentParagraphIndex()) || cloudPercent < curPercent - 2.0) {
+            isBackward = true;
+        }
+
+        // 1. Читатель уже начал листать страницы книги на ридере во время сетевого запроса
+        if (userHasInteracted) {
+            if (isForward && (cloudTs >= localTs || cloudPercent > curPercent + 1.0)) {
+                String msg = String.format(Locale.getDefault(),
+                        "На другом устройстве вы остановились дальше:\nГл. %d (%.0f%%)\n\nПерейти к этому месту?",
+                        Math.max(1, targetChapter + 1), cloudPercent);
+                EinkNotice.showConfirm(ReaderActivity.this, "Синхронизация", msg, "Перейти", "Остаться",
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                navigateToResolvedProgress(cloudProgress, targetChapter, targetParagraph, cloudPercent);
+                            }
+                        },
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                saveProgress();
+                            }
+                        });
+            }
+            return;
+        }
+
+        // 2. Защита от случайного отката назад (LWW с валидацией вперед)
+        if (isBackward) {
+            if (cloudTs > localTs && localTs > 0) {
+                String msg = String.format(Locale.getDefault(),
+                        "На другом устройстве открыта более ранняя позиция:\nГл. %d (%.0f%%)\n\nОткатиться назад к этому месту?",
+                        Math.max(1, targetChapter + 1), cloudPercent);
+                EinkNotice.showConfirm(ReaderActivity.this, "Синхронизация", msg, "Откатиться", "Остаться",
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                navigateToResolvedProgress(cloudProgress, targetChapter, targetParagraph, cloudPercent);
+                            }
+                        },
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                saveProgress();
+                            }
+                        });
+            }
+            return;
+        }
+
+        // 3. Бесшовное открытие сохраненной позиции при запуске ридера
         boolean isNewer = false;
         if (local == null) {
-            isNewer = (cloudPercent > 0 || cloudChapter > 0 || cloudParagraph > 0 || (cloudProgress.getCfi() != null && !cloudProgress.getCfi().isEmpty()));
+            isNewer = (cloudPercent > 0 || targetChapter > 0 || targetParagraph > 0 || (cloudProgress.getCfi() != null && !cloudProgress.getCfi().isEmpty()));
         } else if (cloudTs > localTs && cloudTs > 0) {
-            if (Math.abs(cloudPercent - curPercent) > 0.05 || cloudChapter != currentChapterIndex || Math.abs(cloudParagraph - calculateCurrentParagraphIndex()) > 0) {
+            if (Math.abs(cloudPercent - curPercent) > 0.05 || targetChapter != currentChapterIndex || Math.abs(targetParagraph - calculateCurrentParagraphIndex()) > 0) {
                 isNewer = true;
             }
-        } else if ((cloudPercent > curPercent + 0.05 || cloudChapter > currentChapterIndex || (cloudChapter == currentChapterIndex && cloudParagraph > calculateCurrentParagraphIndex())) && (cloudTs >= localTs || cloudTs == 0 || local.isSyncedWithServer())) {
+        } else if (isForward && (cloudTs >= localTs || cloudTs == 0 || local.isSyncedWithServer())) {
             isNewer = true;
         }
 
         if (isNewer) {
-            // Если есть конкретный абзац и допустимая глава (>= 0)
-            if (cloudChapter >= 0 && cloudChapter < chapters.size() && cloudParagraph > 0) {
-                currentChapterIndex = cloudChapter;
-                loadChapterAtParagraph(currentChapterIndex, cloudParagraph);
-                dbHelper.saveProgress(cloudProgress);
-                dbHelper.ensureCloudSyncBookmark(bookUuid, currentChapterIndex, currentPageIndex, (float) cloudPercent);
-                EinkNotice.show(ReaderActivity.this, "Синхронизация", String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d, абз. %d)\n[Закладка создана]", cloudPercent, currentChapterIndex + 1, cloudParagraph + 1));
-            } else if (cloudChapter > 0 && cloudChapter < chapters.size()) {
-                if (cloudChapter != currentChapterIndex || Math.abs(cloudPercent - curPercent) > 2.0) {
-                    currentChapterIndex = cloudChapter;
-                    currentPageIndex = Math.max(0, cloudProgress.getPageIndex());
-                    loadChapter(currentChapterIndex, currentPageIndex);
-                    dbHelper.saveProgress(cloudProgress);
-                    dbHelper.ensureCloudSyncBookmark(bookUuid, currentChapterIndex, currentPageIndex, (float) cloudPercent);
-                    EinkNotice.show(ReaderActivity.this, "Синхронизация", String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)\n[Закладка создана]", cloudPercent, currentChapterIndex + 1));
-                }
-            } else if (cloudPercent > 0 && cloudPercent < 99.0 && totalBookLength > 0) {
-                // Если номер главы не указан (или 0 при высоком проценте) – маппинг по общей длине
-                if (chapterLengths == null || chapterLengths.length != chapters.size()) {
-                    calculateChapterLengths();
-                }
-                long targetGlobalOffset = (long) ((cloudPercent / 100.0) * totalBookLength);
-                long acc = 0;
-                int matchedCh = 0;
-                long matchedOffset = 0;
-                for (int i = 0; i < chapters.size(); i++) {
-                    long chLen = chapterLengths[i];
-                    if (targetGlobalOffset <= acc + chLen || i == chapters.size() - 1) {
-                        matchedCh = i;
-                        matchedOffset = Math.max(0, targetGlobalOffset - acc);
-                        break;
-                    }
-                    acc += chLen;
-                }
-                long curChLen = chapterLengths[matchedCh];
-                double chapterFraction = (curChLen > 0) ? ((double) matchedOffset / (double) curChLen) : 0.0;
-
-                if (matchedCh != currentChapterIndex || Math.abs(cloudPercent - curPercent) > 2.0) {
-                    currentChapterIndex = matchedCh;
-                    loadChapterWithFraction(currentChapterIndex, chapterFraction);
-                    dbHelper.saveProgress(cloudProgress);
-                    dbHelper.ensureCloudSyncBookmark(bookUuid, currentChapterIndex, currentPageIndex, (float) cloudPercent);
-                    EinkNotice.show(ReaderActivity.this, "Синхронизация", String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)\n[Закладка создана]", cloudPercent, currentChapterIndex + 1));
-                }
-            }
+            navigateToResolvedProgress(cloudProgress, targetChapter, targetParagraph, cloudPercent);
         }
     }
 
@@ -2906,6 +2963,7 @@ public class ReaderActivity extends Activity {
     }
 
     private void forceEpdRefresh() {
+        EpdController.applyGCOnce(readerCanvas);
         EpdController.requestFullRefresh(this, readerCanvas);
     }
 
@@ -2962,6 +3020,7 @@ public class ReaderActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        EpdController.enableRegalMode(readerCanvas);
         forceEpdRefresh();
     }
 
