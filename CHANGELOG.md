@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.6.0] - 2026-11-01
+
+### Added
+- **Первый официальный стабильный релиз проекта (Stable Release)**:
+  - Успешно завершен цикл открытого бета-тестирования `v1.5.11-beta` – `v1.5.20-beta`.
+  - Удалены все плашки предварительного выпуска (Beta Notice) из интерфейса главного меню (`MainActivity`) и конфигурационных манифестов.
+  - Присвоен стабильный номер версии `1.6.0` (versionCode `54`).
+- **Сквозная архитектурная интеграция и стабилизация всех модулей**:
+  - Аппаратный E-Ink стек Onyx Boox SDK (режим Regal, глубокая очистка GC16, двухканальная подсветка CTM).
+  - Аппаратные боковые клавиши перелистывания (скан-коды 92/93, 104/109, полное подавление системного окна `VolumePanel` через ранний перехват `dispatchKeyEvent`).
+  - Сетевой протокол облачной синхронизации «Яндекс Книги» на базе Apollo GraphQL v3 и адресации EPUB 3 CFI (`/6/spine!/4/elem:0`) с защитой от сдвига обложки `ch_0_cover`.
+  - Сенсорная эргономика Full-Row Clickable Targets для экранов Carta Plus 300 DPI (Onyx Boox Darwin 7) с полным исключением утечек тач-событий на холст ридера.
+  - Отказоустойчивая база данных SQLite v8 с самовосстановлением схемы `ensureSchemaMigration()` в `onOpen()` и 100% изоляцией UI потока.
+  - Бесперебойная доставка обновлений по воздуху (мульти-стратегия поиска в GitHub Releases, CDN-манифест `version.json`, приемник событий сети `ConnectivityReceiver`, обход `FileUriExposedException` на Android 7–11).
+- **Автотест `[ТЕСТ 47]` в `tools/verify_core_logic.py`**:
+  - Комплексная проверка чистого стабильного статуса релиза, валидация бинарного APK-дистрибутива, проверка контрольных сумм в `SHA256SUMS` и `version.json`, сквозной аудит всех архитектурных вех эволюции v1.5.8 -> v1.6.0.
+
 ## [v1.5.20-beta] - 2026-11-01
 
 ### Fixed

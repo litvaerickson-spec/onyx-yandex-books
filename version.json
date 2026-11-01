@@ -1,10 +1,11 @@
 {
-  "versionName": "1.5.20-beta",
-  "versionCode": 53,
-  "tagName": "v1.5.20-beta",
-  "title": "v1.5.20-beta: Устранение краша при перелистывании страниц и авто-миграция SQLite схемы",
-  "apkUrl": "https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.5.20-beta/yandex-books-lite-v1.5.20-beta.apk",
-  "apkFileName": "yandex-books-lite-v1.5.20-beta.apk",
+  "versionName": "1.6.0",
+  "versionCode": 54,
+  "tagName": "v1.6.0",
+  "title": "v1.6.0: Стабильный релиз — Полная интеграция Onyx E-Ink, аппаратные кнопки, двусторонняя синхронизация и OTA",
+  "apkUrl": "https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.6.0/yandex-books-lite-v1.6.0.apk",
+  "apkFileName": "yandex-books-lite-v1.6.0.apk",
   "apkSize": 3348837,
-  "changelog": "• Исправлена критическая ошибка 'В приложении Яндекс книги произошла ошибка' при перелистывании страниц (тапом и боковыми кнопками):\n• Автоматическое накатывание недостающих колонок SQLite (cfi, document_uuid) в таблицы progress и sync_queue\n• Инкремент версии базы данных (DATABASE_VERSION=8) и самовосстановление схемы при открытии (onOpen/onUpgrade)\n• Полная изоляция UI потока ридера: исключения синхронизации и БД больше не приводят к падению приложения"
+  "sha256": "72240fefbc4742155fa4a3f82d84a44cec9dd507d2c10405050446889ba7a8c7",
+  "changelog": "• Первый официальный стабильный релиз (Stable Release, не бета!)\n• Полная поддержка всех поколений Onyx Boox (Darwin 1–7, Livingstone, Leaf, Poke, Nova, Note, Tab, Palma)\n• Аппаратная интеграция Onyx SDK: Regal режим, скан-коды боковых кнопок 92/93, подавление VolumePanel\n• Двусторонняя облачная синхронизация прогресса (Apollo GraphQL v3 / CFI / REST)\n• Эргономичные зоны касания Full-Row для 300 DPI экранов и защита от пробоя тачей\n• Надежная доставка OTA-обновлений по воздуху и самовосстановление базы данных SQLite (v8)"
 }
