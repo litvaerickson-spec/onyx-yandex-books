@@ -6,6 +6,6 @@
   "apkUrl": "https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.6.0/yandex-books-lite-v1.6.0.apk",
   "apkFileName": "yandex-books-lite-v1.6.0.apk",
   "apkSize": 3348837,
-  "sha256": "72240fefbc4742155fa4a3f82d84a44cec9dd507d2c10405050446889ba7a8c7",
+  "sha256": "a1c8979ef2470e3fa67f4554bced4ec62c4c21230143ce0d15d548d7ca2f7edf",
   "changelog": "• Первый официальный стабильный релиз (Stable Release, не бета!)\n• Полная поддержка всех поколений Onyx Boox (Darwin 1–7, Livingstone, Leaf, Poke, Nova, Note, Tab, Palma)\n• Аппаратная интеграция Onyx SDK: Regal режим, скан-коды боковых кнопок 92/93, подавление VolumePanel\n• Двусторонняя облачная синхронизация прогресса (Apollo GraphQL v3 / CFI / REST)\n• Эргономичные зоны касания Full-Row для 300 DPI экранов и защита от пробоя тачей\n• Надежная доставка OTA-обновлений по воздуху и самовосстановление базы данных SQLite (v8)"
 }

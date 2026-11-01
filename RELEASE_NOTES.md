@@ -92,6 +92,6 @@
 
 | Файл дистрибутива | Версия | Размер | SHA-256 контрольная сумма |
 | :--- | :---: | :---: | :--- |
-| **`yandex-books-lite-v1.6.0.apk`** | **1.6.0** (code `54`) | **3,348,837 байт** (~3.19 МБ) | `72240fefbc4742155fa4a3f82d84a44cec9dd507d2c10405050446889ba7a8c7` |
+| **`yandex-books-lite-v1.6.0.apk`** | **1.6.0** (code `54`) | **3,348,837 байт** (~3.19 МБ) | `a1c8979ef2470e3fa67f4554bced4ec62c4c21230143ce0d15d548d7ca2f7edf` |
 
 *Прямая ссылка для загрузки:* [yandex-books-lite-v1.6.0.apk](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.6.0/yandex-books-lite-v1.6.0.apk)

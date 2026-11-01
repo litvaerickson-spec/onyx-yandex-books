@@ -2386,8 +2386,8 @@ def test_v1511_beta_ui_scaling_and_offline_reading_cloud_sync():
     main_xml_path = os.path.join(PROJECT_DIR, "app/src/main/res/layout/activity_main.xml")
     with open(main_xml_path, "r", encoding="utf-8") as f:
         xml_code = f.read()
-    assert "[BETA]" in xml_code, "Маркер [BETA] должен присутствовать в шапке activity_main.xml!"
-    print(" - Бета-маркировка и версии (1.5.11-beta / 1.5.12-beta, [BETA]): OK")
+    assert "[BETA]" in xml_code or "Яндекс Книги Lite" in xml_code, "Маркер Яндекс Книги должен присутствовать в шапке activity_main.xml!"
+    print(" - Маркировка заголовка и версии (1.5.11-beta / 1.5.12-beta / 1.6.0): OK")
 
     print("✅ Тест v1.5.11-beta Масштабирование интерфейса и синхронизация офлайн-чтения успешно пройден!\n")
 

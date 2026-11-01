@@ -27,7 +27,7 @@
 ### 📥 Загрузка и установка
 
 * 🚀 **Официальный стабильный релиз (`v1.6.0`)**: [**Страница релиза v1.6.0 на GitHub (Releases)**](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/tag/v1.6.0)
-* 📦 **Прямая ссылка на APK:** [`yandex-books-lite-v1.6.0.apk`](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.6.0/yandex-books-lite-v1.6.0.apk) (3.19 МБ, SHA-256: `72240fefbc4742155fa4a3f82d84a44cec9dd507d2c10405050446889ba7a8c7`)
+* 📦 **Прямая ссылка на APK:** [`yandex-books-lite-v1.6.0.apk`](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/download/v1.6.0/yandex-books-lite-v1.6.0.apk) (3.19 МБ, SHA-256: `a1c8979ef2470e3fa67f4554bced4ec62c4c21230143ce0d15d548d7ca2f7edf`)
 * 🔄 **Обновление по воздуху (OTA без провода)**: прямо на ридере через **«Меню ☰» $\to$ «Обновление ПО»** или автоматически при подключении к Wi-Fi!
 * 📖 **Подробное руководство пользователя**: [`docs/guides/user_guide.md`](docs/guides/user_guide.md)
 * 🔨 **Скрипт сборки из исходников**: [`build_apk.sh`](build_apk.sh)
