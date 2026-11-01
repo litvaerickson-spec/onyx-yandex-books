@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.17-beta] - 2026-11-01
+
+### Fixed
+- **Исправление работы боковых аппаратных кнопок листания и устранение всплывающего ползунка громкости (VolumePanel)**:
+  - В `ReaderActivity` и `MainActivity` внедрен ранний перехват оконных событий через `dispatchKeyEvent(KeyEvent event)`, перехватывающий аппаратные клавиши до уровня `PhoneWindow`.
+  - Устранена ошибка версий `v1.5.15-beta` и `v1.5.16-beta`, из-за которой при нажатии на физические боковые кнопки корпуса устройства (`KEYCODE_VOLUME_DOWN` 25 / `KEYCODE_VOLUME_UP` 24) на экран выводилось системное окно регулировки громкости, перехватывающее фокус и блокирующее перелистывание страниц.
+  - Добавлен вызов `event.startTracking()` при первом нажатии (`repeatCount == 0`), что восстановило работу долгого нажатия физических кнопок для принудительного глубокого обновления E-Ink экрана (`applyGCOnce`).
+  - Во всех всплывающих диалогах (`showFontDialog`, `showTocDialog`, `showProgressDialog`, `EinkNotice.showConfirm`) обработка кнопок переведена на фасад `HardwareKeyHandler.isPageKey`, предотвращая утечку событий в аудиосервер Android.
+  - В `HardwareKeyHandler` вызов `event.getScanCode()` защищен от возможных исключений на нестандартных прошивках.
+
+### Added
+- **Постраничная навигация по полкам библиотеки боковыми кнопками (`MainActivity.dispatchKeyEvent`)**:
+  - На главном экране электронного ридера физические клавиши корпуса теперь листают списки полок (`scrollShelfBy(3)` / `scrollShelfBy(-3)`) без активации звукового меню.
+- **Автотест `[ТЕСТ 43]` в `tools/verify_core_logic.py`**:
+  - Комплексная валидация раннего перехвата `dispatchKeyEvent`, подавления `VolumePanel`, работы `startTracking()`, защиты от дребезга и версионирования `v1.5.17-beta` (versionCode 50).
+
 ## [v1.5.16-beta] - 2026-11-01
 
 ### Added

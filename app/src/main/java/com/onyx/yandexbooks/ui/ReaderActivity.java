@@ -988,18 +988,16 @@ public class ReaderActivity extends Activity {
         dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
             @Override
             public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
-                if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
-                        || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP
-                        || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_UP
+                if (HardwareKeyHandler.isPageKey(keyCode, event)
                         || keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
 
                     if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
                         int count = fonts.size();
-                        if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                        if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == 93 || keyCode == 167 || keyCode == 261) {
                             focusedIndex[0] = (focusedIndex[0] + 1) % count;
                             updateFontDialogVisuals(fontItemViews, focusedIndex[0], fonts, currentFontId);
                             EpdController.requestFullRefresh(ReaderActivity.this, root);
-                        } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                        } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == 92 || keyCode == 166 || keyCode == 260) {
                             focusedIndex[0] = (focusedIndex[0] - 1 + count) % count;
                             updateFontDialogVisuals(fontItemViews, focusedIndex[0], fonts, currentFontId);
                             EpdController.requestFullRefresh(ReaderActivity.this, root);
@@ -1748,13 +1746,11 @@ public class ReaderActivity extends Activity {
         dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
             @Override
             public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
-                if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
-                        || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP
-                        || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                if (HardwareKeyHandler.isPageKey(keyCode, event)) {
                     if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
                         EinkListView activeList = (listChaptersView.getVisibility() == View.VISIBLE) ? listChaptersView : listBookmarksView;
                         if (activeList != null && activeList.getVisibility() == View.VISIBLE && activeList.getCount() > 0) {
-                            if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                            if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == 93 || keyCode == 167 || keyCode == 261) {
                                 activeList.pageScrollEink(true);
                             } else {
                                 activeList.pageScrollEink(false);
@@ -1898,9 +1894,7 @@ public class ReaderActivity extends Activity {
         dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
             @Override
             public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
-                if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
-                        || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP
-                        || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                if (HardwareKeyHandler.isPageKey(keyCode, event)) {
                     return true;
                 }
                 return false;
@@ -3053,6 +3047,24 @@ public class ReaderActivity extends Activity {
             syncManager.flushOfflineQueue();
         }
         super.onBackPressed();
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event == null) return false;
+        int keyCode = event.getKeyCode();
+        if (keyHandler != null && HardwareKeyHandler.isPageKey(keyCode, event)) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (event.getRepeatCount() == 0) {
+                    event.startTracking();
+                }
+                return keyHandler.handleKeyDown(keyCode, event);
+            } else if (event.getAction() == KeyEvent.ACTION_UP) {
+                return keyHandler.handleKeyUp(keyCode, event);
+            }
+            return true;
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     @Override

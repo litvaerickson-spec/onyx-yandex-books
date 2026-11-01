@@ -216,6 +216,29 @@ public final class EinkNotice {
             final int targetW = Math.min((int) (dm.widthPixels * 0.90), (int) (440 * density));
             dialog.setContentView(root, new ViewGroup.LayoutParams(targetW, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+            // Аппаратные клавиши (Back = Cancel, Enter/Dpad Center = Confirm)
+            dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
+                @Override
+                public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
+                    if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                        if (keyCode == KeyEvent.KEYCODE_BACK) {
+                            dialog.dismiss();
+                            if (onCancel != null) {
+                                try { onCancel.run(); } catch (Exception ignored) {}
+                            }
+                            return true;
+                        } else if (keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_DPAD_CENTER) {
+                            dialog.dismiss();
+                            if (onConfirm != null) {
+                                try { onConfirm.run(); } catch (Exception ignored) {}
+                            }
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+            });
+
             dialog.setOnShowListener(new DialogInterface.OnShowListener() {
                 @Override
                 public void onShow(DialogInterface d) {

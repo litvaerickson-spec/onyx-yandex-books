@@ -39,6 +39,7 @@ import com.onyx.yandexbooks.core.api.models.ReadingProgress;
 import com.onyx.yandexbooks.core.auth.TokenStorage;
 import com.onyx.yandexbooks.core.eink.EinkScrollView;
 import com.onyx.yandexbooks.core.eink.EpdController;
+import com.onyx.yandexbooks.core.eink.HardwareKeyHandler;
 import com.onyx.yandexbooks.core.storage.CacheManager;
 import com.onyx.yandexbooks.core.storage.DatabaseHelper;
 import com.onyx.yandexbooks.core.sync.SyncManager;
@@ -357,7 +358,7 @@ public class MainActivity extends Activity {
         root.addView(listLayout);
 
         TextView tvBetaNotice = new TextView(this);
-        tvBetaNotice.setText("Яндекс Книги Lite v1.5.16-beta (предварительный выпуск)");
+        tvBetaNotice.setText("Яндекс Книги Lite v1.5.17-beta (предварительный выпуск)");
         tvBetaNotice.setTextSize(10);
         tvBetaNotice.setTextColor(Color.DKGRAY);
         tvBetaNotice.setGravity(Gravity.CENTER);
@@ -1429,30 +1430,57 @@ public class MainActivity extends Activity {
         EpdController.requestFullRefresh(this, booksListView);
     }
 
-    @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            if (event.getRepeatCount() > 0) {
-                return true;
+    private void scrollShelfBy(int delta) {
+        if (booksListView != null && currentBooks != null && !currentBooks.isEmpty()) {
+            int current = booksListView.getFirstVisiblePosition();
+            int target;
+            if (delta > 0) {
+                target = Math.min(currentBooks.size() - 1, current + delta);
+            } else {
+                target = Math.max(0, current + delta);
             }
-            if (booksListView != null && !currentBooks.isEmpty()) {
-                int current = booksListView.getFirstVisiblePosition();
-                int target = Math.min(currentBooks.size() - 1, current + 3);
-                booksListView.setSelection(target);
-                updateShelfFooter();
-                EpdController.requestFullRefresh(MainActivity.this, booksListView);
+            booksListView.setSelection(target);
+            updateShelfFooter();
+            EpdController.requestFullRefresh(MainActivity.this, booksListView);
+        }
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event == null) return false;
+        int keyCode = event.getKeyCode();
+        if (HardwareKeyHandler.isPageKey(keyCode, event)) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (event.getRepeatCount() == 0) {
+                    if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+                            || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
+                            || keyCode == 93 || keyCode == 167 || keyCode == 261) {
+                        scrollShelfBy(3);
+                    } else {
+                        scrollShelfBy(-3);
+                    }
+                }
+                return true;
+            } else if (event.getAction() == KeyEvent.ACTION_UP) {
+                return true;
             }
             return true;
-        } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-            if (event.getRepeatCount() > 0) {
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (HardwareKeyHandler.isPageKey(keyCode, event)) {
+            if (event != null && event.getRepeatCount() > 0) {
                 return true;
             }
-            if (booksListView != null && !currentBooks.isEmpty()) {
-                int current = booksListView.getFirstVisiblePosition();
-                int target = Math.max(0, current - 3);
-                booksListView.setSelection(target);
-                updateShelfFooter();
-                EpdController.requestFullRefresh(MainActivity.this, booksListView);
+            if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+                    || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
+                    || keyCode == 93 || keyCode == 167 || keyCode == 261) {
+                scrollShelfBy(3);
+            } else {
+                scrollShelfBy(-3);
             }
             return true;
         }
@@ -1461,8 +1489,7 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
-                || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+        if (HardwareKeyHandler.isPageKey(keyCode, event)) {
             return true;
         }
         return super.onKeyUp(keyCode, event);
