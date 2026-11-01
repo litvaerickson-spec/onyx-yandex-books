@@ -801,6 +801,44 @@ public class ReaderActivity extends Activity {
                 }
             });
         }
+
+        // Защита от утечки кликов на readerCanvas под панелями
+        if (readerTopBar != null) {
+            readerTopBar.setClickable(true);
+            readerTopBar.setFocusable(true);
+        }
+        if (readerBottomBar != null) {
+            readerBottomBar.setClickable(true);
+            readerBottomBar.setFocusable(true);
+        }
+        if (readerFormatPanel != null) {
+            readerFormatPanel.setClickable(true);
+            readerFormatPanel.setFocusable(true);
+        }
+
+        // Полноразмерные зоны касания (Full-Row Clickable Targets для E-Ink тачскринов)
+        setupRowClick(R.id.row_toggle_font_family, btnToggleFontFamily);
+        setupRowClick(R.id.row_toggle_indent, btnToggleIndent);
+        setupRowClick(R.id.row_toggle_contrast, btnToggleContrast);
+        setupRowClick(R.id.row_toggle_hyphenation, btnToggleHyphenation);
+        setupRowClick(R.id.row_toggle_eink_contrast, btnToggleEinkContrast);
+        setupRowClick(R.id.row_toggle_night_mode, btnToggleNightMode);
+        setupRowClick(R.id.row_toggle_line_spacing, btnToggleLineSpacing);
+        setupRowClick(R.id.row_toggle_margins, btnToggleMargins);
+        setupRowClick(R.id.row_toggle_vert_margins, btnToggleVertMargins);
+        setupRowClick(R.id.row_toggle_orientation, btnToggleOrientation);
+    }
+
+    private void setupRowClick(int rowId, final View targetButton) {
+        View row = findViewById(rowId);
+        if (row != null && targetButton != null) {
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    targetButton.performClick();
+                }
+            });
+        }
     }
 
     private void switchFormatSubtab(String subtab) {
@@ -1849,7 +1887,7 @@ public class ReaderActivity extends Activity {
         btnSyncNow.setBackgroundResource(R.drawable.btn_eink_primary);
         btnSyncNow.setPadding(0, 0, 0, 0);
         btnSyncNow.setSingleLine(true);
-        btnSyncNow.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (36 * density)));
+        btnSyncNow.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (42 * density)));
         btnSyncNow.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -1876,8 +1914,8 @@ public class ReaderActivity extends Activity {
         btnClose.setBackgroundResource(R.drawable.btn_eink);
         btnClose.setPadding(0, 0, 0, 0);
         btnClose.setSingleLine(true);
-        LinearLayout.LayoutParams lpClose = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (34 * density));
-        lpClose.setMargins(0, (int) (6 * density), 0, 0);
+        LinearLayout.LayoutParams lpClose = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (40 * density));
+        lpClose.setMargins(0, (int) (8 * density), 0, 0);
         btnClose.setLayoutParams(lpClose);
         btnClose.setOnClickListener(new View.OnClickListener() {
             @Override

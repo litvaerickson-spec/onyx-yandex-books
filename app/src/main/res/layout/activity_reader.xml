@@ -14,22 +14,24 @@
     <LinearLayout
         android:id="@+id/reader_top_bar"
         android:layout_width="match_parent"
-        android:layout_height="44dp"
+        android:layout_height="48dp"
         android:layout_alignParentTop="true"
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:background="@color/eink_white"
         android:paddingLeft="8dp"
         android:paddingRight="8dp"
+        android:clickable="true"
+        android:focusable="true"
         android:visibility="gone">
 
         <!-- Кнопка «Назад в библиотеку» -->
         <Button
             android:id="@+id/btn_reader_back"
-            android:layout_width="44dp"
-            android:layout_height="34dp"
-            android:minHeight="0dp"
-            android:minWidth="0dp"
+            android:layout_width="48dp"
+            android:layout_height="38dp"
+            android:minHeight="38dp"
+            android:minWidth="38dp"
             android:text="&lt;"
             android:textSize="18sp"
             android:textStyle="bold"
@@ -56,25 +58,25 @@
         <!-- Кнопка аппаратного сброса дисплея E-Ink -->
         <Button
             android:id="@+id/btn_reader_refresh"
-            android:layout_width="68dp"
-            android:layout_height="34dp"
-            android:minHeight="0dp"
-            android:minWidth="0dp"
+            android:layout_width="74dp"
+            android:layout_height="38dp"
+            android:minHeight="38dp"
+            android:minWidth="38dp"
             android:text="Сброс"
             android:textSize="12sp"
             android:textStyle="bold"
             android:textColor="@color/btn_eink_text_color"
             android:background="@drawable/btn_eink"
             android:includeFontPadding="false"
-            android:layout_marginRight="4dp" />
+            android:layout_marginRight="6dp" />
 
         <!-- Кнопка закрытия меню -->
         <Button
             android:id="@+id/btn_reader_close_overlay"
-            android:layout_width="40dp"
-            android:layout_height="34dp"
-            android:minHeight="0dp"
-            android:minWidth="0dp"
+            android:layout_width="44dp"
+            android:layout_height="38dp"
+            android:minHeight="38dp"
+            android:minWidth="38dp"
             android:text="X"
             android:textSize="14sp"
             android:textStyle="bold"
@@ -105,6 +107,8 @@
         android:paddingRight="10dp"
         android:paddingTop="6dp"
         android:paddingBottom="8dp"
+        android:clickable="true"
+        android:focusable="true"
         android:visibility="gone">
 
         <!-- Тонкий разделитель над нижней панелью -->
@@ -117,7 +121,7 @@
         <!-- Строка 1: Текущая глава слева + кнопки перехода к предыдущей/следующей главе -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="30dp"
+            android:layout_height="40dp"
             android:orientation="horizontal"
             android:gravity="center_vertical">
 
@@ -135,24 +139,24 @@
 
             <Button
                 android:id="@+id/btn_prev_chapter"
-                android:layout_width="40dp"
-                android:layout_height="28dp"
-                android:minHeight="0dp"
-                android:minWidth="0dp"
+                android:layout_width="48dp"
+                android:layout_height="36dp"
+                android:minHeight="36dp"
+                android:minWidth="36dp"
                 android:text="&lt;&lt;"
                 android:textSize="11sp"
                 android:textStyle="bold"
                 android:textColor="@color/btn_eink_text_color"
                 android:background="@drawable/btn_eink"
                 android:includeFontPadding="false"
-                android:layout_marginRight="4dp" />
+                android:layout_marginRight="6dp" />
 
             <Button
                 android:id="@+id/btn_next_chapter"
-                android:layout_width="40dp"
-                android:layout_height="28dp"
-                android:minHeight="0dp"
-                android:minWidth="0dp"
+                android:layout_width="48dp"
+                android:layout_height="36dp"
+                android:minHeight="36dp"
+                android:minWidth="36dp"
                 android:text="&gt;&gt;"
                 android:textSize="11sp"
                 android:textStyle="bold"
@@ -164,19 +168,19 @@
         <!-- Строка 2: Слайдер прогресса по страницам (точно как в NeoReader!) -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="34dp"
+            android:layout_height="40dp"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginTop="3dp">
+            android:layout_marginTop="2dp">
 
             <Button
                 android:id="@+id/btn_slider_page_back"
-                android:layout_width="32dp"
-                android:layout_height="28dp"
-                android:minHeight="0dp"
-                android:minWidth="0dp"
+                android:layout_width="44dp"
+                android:layout_height="36dp"
+                android:minHeight="36dp"
+                android:minWidth="36dp"
                 android:text="&lt;"
-                android:textSize="13sp"
+                android:textSize="14sp"
                 android:textStyle="bold"
                 android:textColor="@color/btn_eink_text_color"
                 android:background="@drawable/btn_eink"
@@ -194,12 +198,12 @@
 
             <Button
                 android:id="@+id/btn_slider_page_forward"
-                android:layout_width="32dp"
-                android:layout_height="28dp"
-                android:minHeight="0dp"
-                android:minWidth="0dp"
+                android:layout_width="44dp"
+                android:layout_height="36dp"
+                android:minHeight="36dp"
+                android:minWidth="36dp"
                 android:text="&gt;"
-                android:textSize="13sp"
+                android:textSize="14sp"
                 android:textStyle="bold"
                 android:textColor="@color/btn_eink_text_color"
                 android:background="@drawable/btn_eink"
@@ -223,6 +227,8 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:visibility="gone"
+            android:clickable="true"
+            android:focusable="true"
             android:layout_marginTop="4dp">
 
             <View
@@ -234,7 +240,7 @@
             <!-- Верхняя панель подвкладок панели Формат: Вид | Формат | Между строк -->
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="32dp"
+                android:layout_height="40dp"
                 android:orientation="horizontal"
                 android:gravity="center_vertical">
 
@@ -243,8 +249,7 @@
                     android:layout_width="0dp"
                     android:layout_height="match_parent"
                     android:layout_weight="1"
-                    android:minHeight="0dp"
-                    android:minWidth="0dp"
+                    android:minHeight="38dp"
                     android:text="Вид"
                     android:textSize="12sp"
                     android:textStyle="bold"
@@ -258,8 +263,7 @@
                     android:layout_width="0dp"
                     android:layout_height="match_parent"
                     android:layout_weight="1"
-                    android:minHeight="0dp"
-                    android:minWidth="0dp"
+                    android:minHeight="38dp"
                     android:text="Формат"
                     android:textSize="12sp"
                     android:textStyle="bold"
@@ -274,8 +278,7 @@
                     android:layout_width="0dp"
                     android:layout_height="match_parent"
                     android:layout_weight="1"
-                    android:minHeight="0dp"
-                    android:minWidth="0dp"
+                    android:minHeight="38dp"
                     android:text="Между строк"
                     android:textSize="12sp"
                     android:textStyle="bold"
@@ -298,12 +301,14 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
+                android:clickable="true"
+                android:focusable="true"
                 android:visibility="visible">
 
                 <!-- Размер шрифта: ползунок со стрелками/кнопками — и + -->
                 <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="32dp"
+                    android:layout_height="42dp"
                     android:orientation="horizontal"
                     android:gravity="center_vertical">
 
@@ -317,12 +322,12 @@
 
                     <Button
                         android:id="@+id/btn_font_decrease"
-                        android:layout_width="32dp"
-                        android:layout_height="28dp"
-                        android:minHeight="0dp"
-                        android:minWidth="0dp"
+                        android:layout_width="44dp"
+                        android:layout_height="36dp"
+                        android:minHeight="36dp"
+                        android:minWidth="36dp"
                         android:text="—"
-                        android:textSize="13sp"
+                        android:textSize="14sp"
                         android:textStyle="bold"
                         android:textColor="@color/btn_eink_text_color"
                         android:background="@drawable/btn_eink"
@@ -340,12 +345,12 @@
 
                     <Button
                         android:id="@+id/btn_font_increase"
-                        android:layout_width="32dp"
-                        android:layout_height="28dp"
-                        android:minHeight="0dp"
-                        android:minWidth="0dp"
+                        android:layout_width="44dp"
+                        android:layout_height="36dp"
+                        android:minHeight="36dp"
+                        android:minWidth="36dp"
                         android:text="+"
-                        android:textSize="13sp"
+                        android:textSize="14sp"
                         android:textStyle="bold"
                         android:textColor="@color/btn_eink_text_color"
                         android:background="@drawable/btn_eink"
@@ -364,11 +369,14 @@
 
                 <!-- Вид шрифта (Font Family: Serif, Sans-Serif, Monospace) -->
                 <LinearLayout
+                    android:id="@+id/row_toggle_font_family"
                     android:layout_width="match_parent"
-                    android:layout_height="32dp"
+                    android:layout_height="42dp"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginTop="4dp">
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:layout_marginTop="2dp">
 
                     <TextView
                         android:layout_width="0dp"
@@ -382,9 +390,9 @@
                     <Button
                         android:id="@+id/btn_toggle_font_family"
                         android:layout_width="140dp"
-                        android:layout_height="28dp"
-                        android:minHeight="0dp"
-                        android:minWidth="0dp"
+                        android:layout_height="36dp"
+                        android:minHeight="36dp"
+                        android:minWidth="36dp"
                         android:text="Serif"
                         android:textSize="12sp"
                         android:textStyle="bold"
@@ -395,11 +403,14 @@
 
                 <!-- Красная строка / Абзац -->
                 <LinearLayout
+                    android:id="@+id/row_toggle_indent"
                     android:layout_width="match_parent"
-                    android:layout_height="32dp"
+                    android:layout_height="42dp"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginTop="4dp">
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:layout_marginTop="2dp">
 
                     <TextView
                         android:layout_width="0dp"
@@ -413,9 +424,9 @@
                     <Button
                         android:id="@+id/btn_toggle_indent"
                         android:layout_width="140dp"
-                        android:layout_height="28dp"
-                        android:minHeight="0dp"
-                        android:minWidth="0dp"
+                        android:layout_height="36dp"
+                        android:minHeight="36dp"
+                        android:minWidth="36dp"
                         android:text="20 px"
                         android:textSize="12sp"
                         android:textStyle="bold"
@@ -431,14 +442,19 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
+                android:clickable="true"
+                android:focusable="true"
                 android:visibility="gone">
 
                 <!-- Жирность шрифта -->
                 <LinearLayout
+                    android:id="@+id/row_toggle_contrast"
                     android:layout_width="match_parent"
-                    android:layout_height="32dp"
+                    android:layout_height="42dp"
                     android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    android:gravity="center_vertical"
+                    android:clickable="true"
+                    android:focusable="true">
 
                     <TextView
                         android:layout_width="0dp"
@@ -452,9 +468,9 @@
                     <Button
                         android:id="@+id/btn_toggle_contrast"
                         android:layout_width="140dp"
-                        android:layout_height="28dp"
-                        android:minHeight="0dp"
-                        android:minWidth="0dp"
+                        android:layout_height="36dp"
+                        android:minHeight="36dp"
+                        android:minWidth="36dp"
                         android:text="Жирный"
                         android:textSize="12sp"
                         android:textStyle="bold"
@@ -465,11 +481,14 @@
 
                 <!-- Переносы слов TeX -->
                 <LinearLayout
+                    android:id="@+id/row_toggle_hyphenation"
                     android:layout_width="match_parent"
-                    android:layout_height="32dp"
+                    android:layout_height="42dp"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginTop="4dp">
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:layout_marginTop="2dp">
 
                     <TextView
                         android:layout_width="0dp"
@@ -483,9 +502,9 @@
                     <Button
                         android:id="@+id/btn_toggle_hyphenation"
                         android:layout_width="140dp"
-                        android:layout_height="28dp"
-                        android:minHeight="0dp"
-                        android:minWidth="0dp"
+                        android:layout_height="36dp"
+                        android:minHeight="36dp"
+                        android:minWidth="36dp"
                         android:text="Включены"
                         android:textSize="12sp"
                         android:textStyle="bold"
@@ -496,11 +515,14 @@
 
                 <!-- Контрастность E-Ink -->
                 <LinearLayout
+                    android:id="@+id/row_toggle_eink_contrast"
                     android:layout_width="match_parent"
-                    android:layout_height="32dp"
+                    android:layout_height="42dp"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginTop="4dp">
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:layout_marginTop="2dp">
 
                     <TextView
                         android:layout_width="0dp"
@@ -514,9 +536,9 @@
                     <Button
                         android:id="@+id/btn_toggle_eink_contrast"
                         android:layout_width="140dp"
-                        android:layout_height="28dp"
-                        android:minHeight="0dp"
-                        android:minWidth="0dp"
+                        android:layout_height="36dp"
+                        android:minHeight="36dp"
+                        android:minWidth="36dp"
                         android:text="Высокий"
                         android:textSize="12sp"
                         android:textStyle="bold"
@@ -527,11 +549,14 @@
 
                 <!-- Цветовая тема (Светлая / Тёмная) -->
                 <LinearLayout
+                    android:id="@+id/row_toggle_night_mode"
                     android:layout_width="match_parent"
-                    android:layout_height="32dp"
+                    android:layout_height="42dp"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginTop="4dp">
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:layout_marginTop="2dp">
 
                     <TextView
                         android:layout_width="0dp"
@@ -545,9 +570,9 @@
                     <Button
                         android:id="@+id/btn_toggle_night_mode"
                         android:layout_width="140dp"
-                        android:layout_height="28dp"
-                        android:minHeight="0dp"
-                        android:minWidth="0dp"
+                        android:layout_height="36dp"
+                        android:minHeight="36dp"
+                        android:minWidth="36dp"
                         android:text="Светлая"
                         android:textSize="12sp"
                         android:textStyle="bold"
@@ -563,14 +588,19 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
+                android:clickable="true"
+                android:focusable="true"
                 android:visibility="gone">
 
                 <!-- Межстрочный интервал -->
                 <LinearLayout
+                    android:id="@+id/row_toggle_line_spacing"
                     android:layout_width="match_parent"
-                    android:layout_height="32dp"
+                    android:layout_height="42dp"
                     android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    android:gravity="center_vertical"
+                    android:clickable="true"
+                    android:focusable="true">
 
                     <TextView
                         android:layout_width="0dp"
@@ -584,9 +614,9 @@
                     <Button
                         android:id="@+id/btn_toggle_line_spacing"
                         android:layout_width="140dp"
-                        android:layout_height="28dp"
-                        android:minHeight="0dp"
-                        android:minWidth="0dp"
+                        android:layout_height="36dp"
+                        android:minHeight="36dp"
+                        android:minWidth="36dp"
                         android:text="1.25x"
                         android:textSize="12sp"
                         android:textStyle="bold"
@@ -597,11 +627,14 @@
 
                 <!-- Боковые поля страницы -->
                 <LinearLayout
+                    android:id="@+id/row_toggle_margins"
                     android:layout_width="match_parent"
-                    android:layout_height="32dp"
+                    android:layout_height="42dp"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginTop="4dp">
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:layout_marginTop="2dp">
 
                     <TextView
                         android:layout_width="0dp"
@@ -615,9 +648,9 @@
                     <Button
                         android:id="@+id/btn_toggle_margins"
                         android:layout_width="140dp"
-                        android:layout_height="28dp"
-                        android:minHeight="0dp"
-                        android:minWidth="0dp"
+                        android:layout_height="36dp"
+                        android:minHeight="36dp"
+                        android:minWidth="36dp"
                         android:text="Узкие (18)"
                         android:textSize="12sp"
                         android:textStyle="bold"
@@ -628,11 +661,14 @@
 
                 <!-- Верхние и нижние поля -->
                 <LinearLayout
+                    android:id="@+id/row_toggle_vert_margins"
                     android:layout_width="match_parent"
-                    android:layout_height="32dp"
+                    android:layout_height="42dp"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginTop="4dp">
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:layout_marginTop="2dp">
 
                     <TextView
                         android:layout_width="0dp"
@@ -646,9 +682,9 @@
                     <Button
                         android:id="@+id/btn_toggle_vert_margins"
                         android:layout_width="140dp"
-                        android:layout_height="28dp"
-                        android:minHeight="0dp"
-                        android:minWidth="0dp"
+                        android:layout_height="36dp"
+                        android:minHeight="36dp"
+                        android:minWidth="36dp"
                         android:text="Стандарт"
                         android:textSize="12sp"
                         android:textStyle="bold"
@@ -659,11 +695,14 @@
 
                 <!-- Ориентация экрана (Портрет / Ландшафт) -->
                 <LinearLayout
+                    android:id="@+id/row_toggle_orientation"
                     android:layout_width="match_parent"
-                    android:layout_height="32dp"
+                    android:layout_height="42dp"
                     android:orientation="horizontal"
                     android:gravity="center_vertical"
-                    android:layout_marginTop="4dp">
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:layout_marginTop="2dp">
 
                     <TextView
                         android:layout_width="0dp"
@@ -677,9 +716,9 @@
                     <Button
                         android:id="@+id/btn_toggle_orientation"
                         android:layout_width="140dp"
-                        android:layout_height="28dp"
-                        android:minHeight="0dp"
-                        android:minWidth="0dp"
+                        android:layout_height="36dp"
+                        android:minHeight="36dp"
+                        android:minWidth="36dp"
                         android:text="Портрет"
                         android:textSize="12sp"
                         android:textStyle="bold"
@@ -701,7 +740,7 @@
         <!-- Строка 3: Три главные вкладки управления Onyx NeoReader -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="36dp"
+            android:layout_height="44dp"
             android:orientation="horizontal"
             android:gravity="center">
 
@@ -711,8 +750,8 @@
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:minHeight="0dp"
-                android:minWidth="0dp"
+                android:minHeight="40dp"
+                android:minWidth="40dp"
                 android:text="Содержание"
                 android:textSize="12sp"
                 android:textStyle="bold"
@@ -727,8 +766,8 @@
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:minHeight="0dp"
-                android:minWidth="0dp"
+                android:minHeight="40dp"
+                android:minWidth="40dp"
                 android:text="Прогресс"
                 android:textSize="12sp"
                 android:textStyle="bold"
@@ -744,8 +783,8 @@
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:minHeight="0dp"
-                android:minWidth="0dp"
+                android:minHeight="40dp"
+                android:minWidth="40dp"
                 android:text="Формат"
                 android:textSize="12sp"
                 android:textStyle="bold"
