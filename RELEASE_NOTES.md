@@ -46,4 +46,4 @@
 
 | Файл | Размер | SHA-256 |
 |---|---|---|
-| `yandex-books-lite-v1.5.15-beta.apk` | 3,332,453 байт (~3.18 MB) | `5f79f71b40bab6468dbc86b697994237420e9562bf71acfef82a552e9af39585` |
+| `yandex-books-lite-v1.5.15-beta.apk` | 3,332,453 байт (~3.18 MB) | `a56abd1cb56f9d8a1f72acbf4fa0838dad30b3b5384680e0ab78d54f67d5924f` |

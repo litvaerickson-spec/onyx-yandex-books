@@ -2675,7 +2675,7 @@ def test_v1515_beta_graphql_cfi_bidirectional_sync():
     with open(api_path, "r", encoding="utf-8") as f:
         api_code = f.read()
 
-    assert 'GRAPHQL_URL = "https://books.yandex.ru/node-api/p/p-graphql/"' in api_code, \
+    assert 'GRAPHQL_URL = "https://books.yandex.ru/node-api/p-graphql/"' in api_code, \
         "GRAPHQL_URL должен указывать на официальный node-api шлюз Яндекс Книг!"
     assert "query GetTextbookProgress" in api_code, \
         "GQL_GET_PROGRESS обязан присутствовать в клиенте!"
@@ -2713,8 +2713,10 @@ def test_v1515_beta_graphql_cfi_bidirectional_sync():
         "ReaderActivity обязан находить символьное смещение абзаца!"
     assert "loadChapterAtParagraph(" in reader_code, \
         "ReaderActivity обязан поддерживать переход к указанному абзацу!"
-    assert "generateCfi(currentChapterIndex, parIndex)" in reader_code, \
-        "saveProgress обязан генерировать EPUB CFI перед отправкой в облако!"
+    assert "generateCfi(spineIndex, parIndex)" in reader_code, \
+        "saveProgress обязан генерировать EPUB CFI с учетом корректного индекса spineIndex!"
+    assert "hasCoverChapter()" in reader_code and "spineIndexToChapterIndex(" in reader_code, \
+        "ReaderActivity обязан корректировать смещение глав при наличии искусственной обложки ch_0_cover!"
     assert "applyCloudProgressIfNewer" in reader_code, \
         "applyCloudProgressIfNewer обязан присутствовать!"
     print(" - ReaderActivity: абзацная навигация, сохранение CFI и синхронизация: OK")

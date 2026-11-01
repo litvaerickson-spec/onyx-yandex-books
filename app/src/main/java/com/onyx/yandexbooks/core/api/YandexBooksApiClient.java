@@ -42,7 +42,7 @@ public class YandexBooksApiClient {
 
     private static final String TAG = "YandexBooksApi";
     private static final String BASE_URL = "https://api.bookmate.yandex.net/api/v5";
-    private static final String GRAPHQL_URL = "https://books.yandex.ru/node-api/p/p-graphql/";
+    private static final String GRAPHQL_URL = "https://books.yandex.ru/node-api/p-graphql/";
     private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json; charset=utf-8");
 
     public static final String GQL_GET_PROGRESS =
@@ -871,6 +871,7 @@ public class YandexBooksApiClient {
                     Response gqlResp = null;
                     try {
                         JSONObject gqlBody = new JSONObject();
+                        gqlBody.put("operationName", "GetTextbookProgress");
                         gqlBody.put("query", GQL_GET_PROGRESS);
                         JSONObject vars = new JSONObject();
                         vars.put("uuid", bookUuid);
@@ -1647,6 +1648,7 @@ public class YandexBooksApiClient {
                     Response gqlResp = null;
                     try {
                         JSONObject gqlBody = new JSONObject();
+                        gqlBody.put("operationName", "ProgressUpdated");
                         gqlBody.put("query", GQL_PROGRESS_UPDATED);
 
                         JSONObject item = new JSONObject();
@@ -1676,8 +1678,14 @@ public class YandexBooksApiClient {
                                 .post(RequestBody.create(JSON_MEDIA_TYPE, gqlBody.toString()))
                                 .build();
                         gqlResp = httpClient.newCall(gqlReq).execute();
-                        if (gqlResp.isSuccessful()) {
-                            anySuccess = true;
+                        if (gqlResp.isSuccessful() && gqlResp.body() != null) {
+                            String respStr = gqlResp.body().string();
+                            JSONObject rj = new JSONObject(respStr);
+                            if (rj.has("data") && !rj.isNull("data")) {
+                                anySuccess = true;
+                            } else if (rj.has("errors")) {
+                                Log.w(TAG, "GraphQL ProgressUpdated returned errors: " + rj.optJSONArray("errors"));
+                            }
                         }
                     } catch (Exception ignored) {
                     } finally {

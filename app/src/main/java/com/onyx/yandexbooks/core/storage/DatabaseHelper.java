@@ -307,13 +307,18 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
             if (hasLocalProgress) {
                 // Серверный прогресс новее, если книга не была только что сброшена локально, и:
-                // 1) таймштамп сервера новее и процент больше, ИЛИ
-                // 2) локальный процент равен 0 (книга открыта впервые), а в облаке есть прогресс, ИЛИ
-                // 3) локальный прогресс уже был синхронизирован с сервером (нет офлайн-очереди), а в облаке процент вырос (чтение со смартфона)
+                // 1) таймштамп сервера новее — пользователь читал на смартфоне позже, чем на ридере, ИЛИ
+                // 2) локальный прогресс равен 0 (книга открыта впервые на ридере), а в облаке есть прогресс, ИЛИ
+                // 3) локальный прогресс уже был синхронизирован с сервером (нет офлайн-очереди), а в облаке прогресс продвинулся вперед (процент, глава или абзац)
+                boolean percentAdvanced = book.getPercent() > bestLocalPercent + 0.01;
+                boolean chapterAdvanced = book.getCurrentChapterIndex() > bestLocalCh;
+                boolean paragraphAdvanced = (book.getCurrentChapterIndex() == bestLocalCh && book.getCurrentParagraphIndex() > bestLocalPar);
+                boolean hasAnyCloudProgress = book.getPercent() > 0.01 || book.getCurrentChapterIndex() > 0 || (book.getCfi() != null && !book.getCfi().isEmpty());
+
                 serverIsNewerAndFurther = !wasJustResetLocally && cloudPercentValid && (
-                        (cloudTimestamp > bestLocalTs && cloudTimestamp > 0 && book.getPercent() > bestLocalPercent + 0.5)
-                        || (bestLocalPercent <= 0.0 && bestLocalCh == 0 && book.getPercent() > 0.5)
-                        || (localFullySynced && book.getPercent() > bestLocalPercent + 0.5 && (cloudTimestamp <= 0 || cloudTimestamp >= bestLocalTs))
+                        (cloudTimestamp > bestLocalTs && cloudTimestamp > 0)
+                        || (bestLocalPercent <= 0.0 && bestLocalCh == 0 && hasAnyCloudProgress)
+                        || (localFullySynced && (percentAdvanced || chapterAdvanced || paragraphAdvanced) && (cloudTimestamp <= 0 || cloudTimestamp >= bestLocalTs))
                 );
 
                 if (serverIsNewerAndFurther) {
