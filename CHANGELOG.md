@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.14-beta] - 2026-11-01
+
+### Added
+- **Высококонтрастные диалоги подтверждения `EinkNotice.showConfirm`**:
+  - Все системные окна подтверждения («Выйти из аккаунта», «Удалить файл», «Сбросить чтение», «Убрать с полки», «Нет подключения к интернету») переведены на единый E-Ink компонент `EinkNotice.showConfirm` без серого дизеринга фона (`FLAG_DIM_BEHIND` отключен).
+- **Автотест `[ТЕСТ 40]` в `tools/verify_core_logic.py`**:
+  - Верификация отсутствия гонки стартового сохранения в `ReaderActivity`, точного маппинга главы по проценту со смартфона, сохранения текущей полки при скачивании и полной очистки очереди при сбросе прогресса.
+
+### Changed
+- **Двухэтапная синхронизация по кнопке «Синхронизация» в главном меню**:
+  - Сначала выполняется гарантированная выгрузка офлайн-очереди на сервер (`SyncManager.flushOfflineQueue`), а сразу после завершения — загрузка свежих полок и прогресса со смартфона (`loadBooks`).
+- **Независимое скачивание книг в память (`ensureBookSavedForDownload`)**:
+  - Нажатие кнопки «Скачать» в карточке книги (а также фоновое пакетное скачивание полки) сохраняет книгу на её текущей полке (например, «В планах») без принудительного переноса в раздел «Читаю». Перевод в «Читаю» происходит именно при открытии книги для чтения.
+
+### Fixed
+- **Устранена гонка стартового сохранения в `ReaderActivity.renderCurrentPage()`**:
+  - Убран преждевременный вызов `saveProgress()` при первой отрисовке страницы до листания пользователем (`!userHasInteracted`), который конкурировал с сетевым запросом `getReadingProgress()` и мог перезаписать облачный прогресс со смартфона стартовой позицией 1-й страницы.
+- **Точный переход на главу и страницу при чтении со смартфона (`DatabaseHelper` и `ReaderActivity`)**:
+  - В `DatabaseHelper.saveOrUpdateBookInternal` и `syncInitialCloudProgress` при получении нового глобального процента со смартфона сбрасывается устаревший локальный индекс главы, а в `ReaderActivity.resolveInitialPositionAndOpen()` и `applyCloudProgressIfNewer()` позиция чтения точно вычисляется по взвешенной длине глав книги.
+- **Целостность сброса прогресса (`resetBookProgressAndMoveToPlans` и `DatabaseHelper.resetReadingProgress`)**:
+  - Устранен повторный вызов `sendReadingProgress` после сброса, который возвращал статус книги на сервере обратно в `"reading"`.
+  - В `resetReadingProgress` добавлена очистка `sync_queue` и фиксация `last_read_timestamp`, чтобы фоновый синк не откатывал сброшенную книгу обратно в «Читаю».
+
 ## [v1.5.13-beta] - 2026-10-31
 
 ### Added

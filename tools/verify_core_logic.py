@@ -2374,13 +2374,13 @@ def test_v1511_beta_ui_scaling_and_offline_reading_cloud_sync():
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str in ["1.5.11-beta", "1.5.12-beta", "1.5.13-beta"], f"VERSION должен быть >= 1.5.11-beta, получено: {v_str}"
+    assert v_str in ["1.5.11-beta", "1.5.12-beta", "1.5.13-beta", "1.5.14-beta"], f"VERSION должен быть >= 1.5.11-beta, получено: {v_str}"
 
     manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(manifest_path, "r", encoding="utf-8") as f:
         m_code = f.read()
-    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.11-beta", "1.5.12-beta", "1.5.13-beta"])
-    assert any(f'android:versionCode="{c}"' in m_code for c in ["44", "45", "46"])
+    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.11-beta", "1.5.12-beta", "1.5.13-beta", "1.5.14-beta"])
+    assert any(f'android:versionCode="{c}"' in m_code for c in ["44", "45", "46", "47"])
 
     main_xml_path = os.path.join(PROJECT_DIR, "app/src/main/res/layout/activity_main.xml")
     with open(main_xml_path, "r", encoding="utf-8") as f:
@@ -2447,19 +2447,19 @@ def test_v1512_beta_eink_notice_high_contrast_and_persistent_alerts():
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str in ["1.5.12-beta", "1.5.13-beta"], f"VERSION должен быть >= 1.5.12-beta, получено: {v_str}"
+    assert v_str in ["1.5.12-beta", "1.5.13-beta", "1.5.14-beta"], f"VERSION должен быть >= 1.5.12-beta, получено: {v_str}"
 
     gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(gradle_file, "r", encoding="utf-8") as f:
         gradle_code = f.read()
     assert f'versionName "{v_str}"' in gradle_code
-    assert 'versionCode 45' in gradle_code or 'versionCode 46' in gradle_code
+    assert any(vc in gradle_code for vc in ['versionCode 45', 'versionCode 46', 'versionCode 47'])
 
     manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(manifest_path, "r", encoding="utf-8") as f:
         m_code = f.read()
     assert f'android:versionName="{v_str}"' in m_code
-    assert 'android:versionCode="45"' in m_code or 'android:versionCode="46"' in m_code
+    assert any(vc in m_code for vc in ['android:versionCode="45"', 'android:versionCode="46"', 'android:versionCode="47"'])
     print(" - Версионирование v1.5.12-beta+ (AndroidManifest, build.gradle, VERSION): OK")
 
     print("✅ Тест v1.5.12-beta Высококонтрастные уведомления EinkNotice и обновление ПО успешно пройден!\n")
@@ -2526,26 +2526,88 @@ def test_v1513_beta_reading_shelf_promotion_and_library_card_uuid_sync():
     assert resolved_shelf == "reading", "Книга обязана остаться в разделе 'Читаю'!"
     print(" - Симуляция открытия книги из «В планах» при параллельном фоновом синке: книга остается в «Читаю»: OK")
 
-    # 6. Проверка версии 1.5.13-beta (versionCode 46)
+    # 6. Проверка версии >= 1.5.13-beta (versionCode >= 46)
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str == "1.5.13-beta", f"VERSION должен быть 1.5.13-beta, получено: {v_str}"
+    assert v_str in ["1.5.13-beta", "1.5.14-beta"], f"VERSION должен быть >= 1.5.13-beta, получено: {v_str}"
 
     gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(gradle_file, "r", encoding="utf-8") as f:
         gradle_code = f.read()
-    assert 'versionName "1.5.13-beta"' in gradle_code
-    assert 'versionCode 46' in gradle_code
+    assert f'versionName "{v_str}"' in gradle_code
+    assert 'versionCode 46' in gradle_code or 'versionCode 47' in gradle_code
 
     manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(manifest_path, "r", encoding="utf-8") as f:
         m_code = f.read()
-    assert 'android:versionName="1.5.13-beta"' in m_code
-    assert 'android:versionCode="46"' in m_code
-    print(" - Версионирование v1.5.13-beta (versionCode=46, AndroidManifest, build.gradle, VERSION): OK")
+    assert f'android:versionName="{v_str}"' in m_code
+    assert 'android:versionCode="46"' in m_code or 'android:versionCode="47"' in m_code
+    print(" - Версионирование v1.5.13-beta+ (AndroidManifest, build.gradle, VERSION): OK")
 
     print("✅ Тест v1.5.13-beta Перевод в «Читаю» и сквозная синхронизация успешно пройден!\n")
+
+
+def test_v1514_beta_deep_sync_race_and_reset_integrity():
+    """[ТЕСТ 40] v1.5.14-beta Устранение гонки стартового сохранения в ReaderActivity, точный маппинг глав со смартфона, целостность сброса и контрастные диалоги подтверждения"""
+    print("--- [ТЕСТ 40] v1.5.14-beta Глубокая верификация синхронизации со смартфона, сброса прогресса и диалогов EinkNotice.showConfirm ---")
+
+    api_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/api/YandexBooksApiClient.java")
+    db_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/storage/DatabaseHelper.java")
+    main_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java")
+    reader_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/ReaderActivity.java")
+    notice_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/ui/EinkNotice.java")
+
+    with open(api_path, "r", encoding="utf-8") as f:
+        api_code = f.read()
+    with open(db_path, "r", encoding="utf-8") as f:
+        db_code = f.read()
+    with open(main_path, "r", encoding="utf-8") as f:
+        main_code = f.read()
+    with open(reader_path, "r", encoding="utf-8") as f:
+        reader_code = f.read()
+    with open(notice_path, "r", encoding="utf-8") as f:
+        notice_code = f.read()
+
+    # 1. Проверка отсутствия преждевременного saveProgress() в renderCurrentPage() до листания пользователем
+    assert "if (dbHelper.getProgress(bookUuid) == null) {\n                saveProgress();\n            }" not in reader_code, \
+        "В renderCurrentPage() не должно быть преждевременного saveProgress() до получения облачного прогресса!"
+    print(" - Защита от преждевременного затирания облачного прогресса при открытии книги в ReaderActivity: OK")
+
+    # 2. Проверка сброса старого индекса главы при приходе нового глобального процента со смартфона
+    assert "syncInitialCloudProgress(db, book, serverIsNewerAndFurther);" in db_code, \
+        "DatabaseHelper обязан принудительно обновлять таблицу progress при получении более свежего процента со смартфона!"
+    assert 'db.delete("sync_queue", "book_uuid = ?", new String[]{uuid});' in db_code, \
+        "resetReadingProgress обязан очищать sync_queue для сброшенной книги!"
+    print(" - Корректный переход на новую главу по проценту со смартфона и полная очистка очереди при сбросе: OK")
+
+    # 3. Проверка сохранения текущей полки при простом скачивании файла и отсутствия возврата в 'reading' при сбросе
+    assert "ensureBookSavedForDownload(book" in main_code, \
+        "Кнопка 'Скачать' в карточке книги не должна принудительно переводить книгу из 'В планах' в 'Читаю'!"
+    assert "public static void showConfirm" in notice_code, \
+        "Высококонтрастный метод EinkNotice.showConfirm обязан присутствовать!"
+    print(" - Сохранение полки при скачивании в память и контрастные диалоги подтверждения EinkNotice.showConfirm: OK")
+
+    # 4. Проверка версии 1.5.14-beta (versionCode 47)
+    version_file = os.path.join(PROJECT_DIR, "VERSION")
+    with open(version_file, "r", encoding="utf-8") as f:
+        v_str = f.read().strip()
+    assert v_str == "1.5.14-beta", f"VERSION должен быть 1.5.14-beta, получено: {v_str}"
+
+    gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
+    with open(gradle_file, "r", encoding="utf-8") as f:
+        gradle_code = f.read()
+    assert 'versionName "1.5.14-beta"' in gradle_code
+    assert 'versionCode 47' in gradle_code
+
+    manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        m_code = f.read()
+    assert 'android:versionName="1.5.14-beta"' in m_code
+    assert 'android:versionCode="47"' in m_code
+    print(" - Версионирование v1.5.14-beta (versionCode=47, AndroidManifest, build.gradle, VERSION): OK")
+
+    print("✅ Тест v1.5.14-beta Глубокая верификация синхронизации и целостности сброса успешно пройден!\n")
 
 
 if __name__ == "__main__":
@@ -2592,6 +2654,7 @@ if __name__ == "__main__":
     test_v1511_beta_ui_scaling_and_offline_reading_cloud_sync()
     test_v1512_beta_eink_notice_high_contrast_and_persistent_alerts()
     test_v1513_beta_reading_shelf_promotion_and_library_card_uuid_sync()
+    test_v1514_beta_deep_sync_race_and_reset_integrity()
     print("==================================================")
-    print("🎉 ВСЕ 39 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 40 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

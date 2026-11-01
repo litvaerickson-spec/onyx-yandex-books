@@ -298,21 +298,17 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 dialog.dismiss();
-                loadBooks(currentShelf);
                 syncManager.flushOfflineQueue(new SyncManager.SyncCompleteCallback() {
                     @Override
                     public void onSyncFinished(final int count) {
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
+                                loadBooks(currentShelf);
                                 if (count > 0) {
                                     EinkNotice.show(MainActivity.this, "Синхронизация", "Синхронизирован прогресс " + count + " книг с облаком!");
                                 } else {
-                                    EinkNotice.show(MainActivity.this, "Синхронизация", "Прогресс всех книг актуален.");
-                                }
-                                if (!"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
-                                    currentBooks = dbHelper.getBooksByShelf(currentShelf);
-                                    adapter.notifyDataSetChanged();
+                                    EinkNotice.show(MainActivity.this, "Синхронизация", "Синхронизация выполнена. Полки и прогресс чтения обновлены.");
                                 }
                             }
                         });
@@ -361,7 +357,7 @@ public class MainActivity extends Activity {
         root.addView(listLayout);
 
         TextView tvBetaNotice = new TextView(this);
-        tvBetaNotice.setText("Яндекс Книги Lite v1.5.13-beta (предварительный выпуск)");
+        tvBetaNotice.setText("Яндекс Книги Lite v1.5.14-beta (предварительный выпуск)");
         tvBetaNotice.setTextSize(10);
         tvBetaNotice.setTextColor(Color.DKGRAY);
         tvBetaNotice.setGravity(Gravity.CENTER);
@@ -920,12 +916,15 @@ public class MainActivity extends Activity {
     }
 
     private void showLogoutConfirmDialog() {
-        new AlertDialog.Builder(MainActivity.this)
-                .setTitle(R.string.logout_confirm_title)
-                .setMessage(R.string.logout_confirm_message)
-                .setPositiveButton(R.string.btn_logout, new DialogInterface.OnClickListener() {
+        EinkNotice.showConfirm(
+                MainActivity.this,
+                getString(R.string.logout_confirm_title),
+                getString(R.string.logout_confirm_message),
+                getString(R.string.btn_logout),
+                getString(R.string.btn_cancel),
+                new Runnable() {
                     @Override
-                    public void onClick(DialogInterface dialog, int which) {
+                    public void run() {
                         tokenStorage.clear();
                         currentBooks.clear();
                         adapter.notifyDataSetChanged();
@@ -933,9 +932,9 @@ public class MainActivity extends Activity {
                         updateEmptyState();
                         startActivityForResult(new Intent(MainActivity.this, AuthActivity.class), REQUEST_AUTH);
                     }
-                })
-                .setNegativeButton(R.string.btn_cancel, null)
-                .show();
+                },
+                null
+        );
     }
 
     private Dialog showEinkLoadingDialog(String title, String message) {
@@ -1088,28 +1087,15 @@ public class MainActivity extends Activity {
 
     private void showNoInternetDialog(final Runnable onRetry) {
         if (isFinishing()) return;
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("Нет подключения к интернету");
-        builder.setMessage("Для работы каталога и поиска книг требуется подключение к сети Wi-Fi.\n\nПожалуйста, включите Wi-Fi на устройстве и попробуйте снова.");
-        builder.setPositiveButton("Повторить попытку", new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(DialogInterface dialog, int which) {
-                dialog.dismiss();
-                if (onRetry != null) {
-                    onRetry.run();
-                }
-            }
-        });
-        builder.setNegativeButton("Закрыть", new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(DialogInterface dialog, int which) {
-                dialog.dismiss();
-            }
-        });
-        builder.setCancelable(true);
-        AlertDialog dialog = builder.create();
-        dialog.show();
-        EpdController.requestFullRefresh(this, null);
+        EinkNotice.showConfirm(
+                this,
+                "Нет подключения к интернету",
+                "Для работы каталога и поиска книг требуется подключение к сети Wi-Fi.\n\nПожалуйста, включите Wi-Fi на устройстве и попробуйте снова.",
+                "Повторить попытку",
+                "Закрыть",
+                onRetry,
+                null
+        );
     }
 
     private void loadCatalog() {
@@ -1501,8 +1487,32 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void ensureBookSavedAndLinked(final Book book, final Runnable onReady) {
-        ensureBookOnReadingShelf(book, onReady);
+    private void ensureBookSavedForDownload(final Book book, final Runnable onReady) {
+        dbHelper.unhideBook(book.getUuid());
+        Book existing = dbHelper.getBookByUuid(book.getUuid());
+        String targetShelf = (existing != null && existing.getShelfType() != null)
+                ? existing.getShelfType()
+                : book.getShelfType();
+        if (targetShelf == null || "catalog".equals(targetShelf) || "search".equals(targetShelf)) {
+            targetShelf = "to_read";
+        }
+        book.setShelfType(targetShelf);
+        if (existing != null && (book.getLibraryCardId() == null || book.getLibraryCardId().isEmpty())) {
+            book.setLibraryCardId(existing.getLibraryCardId());
+        }
+        if (existing == null) {
+            dbHelper.saveBooks(java.util.Collections.singletonList(book), targetShelf);
+            apiClient.updateBookShelfState(book.getUuid(), book.getLibraryCardId(), targetShelf, new YandexBooksApiClient.ApiCallback<Boolean>() {
+                @Override
+                public void onSuccess(Boolean result) {}
+                @Override
+                public void onError(String errorMessage) {}
+            });
+        }
+        updateTabBadges();
+        if (onReady != null) {
+            onReady.run();
+        }
     }
 
     private void ensureBookOnReadingShelf(final Book book, final Runnable onReady) {
@@ -1680,14 +1690,6 @@ public class MainActivity extends Activity {
         }
 
         apiClient.updateBookShelfState(book.getUuid(), book.getLibraryCardId(), "to_read", new YandexBooksApiClient.ApiCallback<Boolean>() {
-            @Override
-            public void onSuccess(Boolean result) {}
-            @Override
-            public void onError(String errorMessage) {}
-        });
-        ReadingProgress resetProg = new ReadingProgress(book.getUuid(), 0.0, 0, 0, 0, System.currentTimeMillis());
-        resetProg.setLibraryCardId(book.getLibraryCardId());
-        apiClient.sendReadingProgress(resetProg, new YandexBooksApiClient.ApiCallback<Boolean>() {
             @Override
             public void onSuccess(Boolean result) {}
             @Override
@@ -2175,7 +2177,7 @@ public class MainActivity extends Activity {
                 public void onClick(View v) {
                     btnDownloadOrDelete.setEnabled(false);
                     btnDownloadOrDelete.setText("Загрузка...");
-                    ensureBookOnReadingShelf(book, new Runnable() {
+                    ensureBookSavedForDownload(book, new Runnable() {
                         @Override
                         public void run() {
                             cacheManager.downloadBookAsync(book.getUuid(), book.getTitle(), new CacheManager.DownloadProgressCallback() {
@@ -2215,21 +2217,22 @@ public class MainActivity extends Activity {
             btnDownloadOrDelete.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    new AlertDialog.Builder(MainActivity.this)
-                            .setTitle("Удалить файл")
-                            .setMessage("Удалить загруженный файл «" + book.getTitle() + "» из памяти устройства?\n(Книга на полке и прогресс сохранятся)")
-                            .setPositiveButton("Удалить", new DialogInterface.OnClickListener() {
+                    EinkNotice.showConfirm(
+                            MainActivity.this,
+                            "Удалить файл",
+                            "Удалить загруженный файл «" + book.getTitle() + "» из памяти устройства?\n(Книга на полке и прогресс сохранятся)",
+                            "Удалить",
+                            new Runnable() {
                                 @Override
-                                public void onClick(DialogInterface d, int which) {
+                                public void run() {
                                     cacheManager.deleteBookCache(book.getUuid(), book.getTitle());
                                     adapter.notifyDataSetChanged();
                                     EinkNotice.show(MainActivity.this, "Память", "Файл книги «" + book.getTitle() + "» удален из памяти устройства.");
                                     dialog.dismiss();
                                     EpdController.requestFullRefresh(MainActivity.this, booksListView);
                                 }
-                            })
-                            .setNegativeButton("Отмена", null)
-                            .show();
+                            }
+                    );
                 }
             });
         }
@@ -2249,12 +2252,14 @@ public class MainActivity extends Activity {
         btnResetProgress.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                new AlertDialog.Builder(MainActivity.this)
-                        .setTitle("Сбросить чтение")
-                        .setMessage("Сбросить прогресс чтения книги «" + book.getTitle() + "» до 0% и перенести её в раздел «В планах»?")
-                        .setPositiveButton("Сбросить", new DialogInterface.OnClickListener() {
+                EinkNotice.showConfirm(
+                        MainActivity.this,
+                        "Сбросить чтение",
+                        "Сбросить прогресс чтения книги «" + book.getTitle() + "» до 0% и перенести её в раздел «В планах»?",
+                        "Сбросить",
+                        new Runnable() {
                             @Override
-                            public void onClick(DialogInterface d, int which) {
+                            public void run() {
                                 resetBookProgressAndMoveToPlans(book, new Runnable() {
                                     @Override
                                     public void run() {
@@ -2263,9 +2268,8 @@ public class MainActivity extends Activity {
                                     }
                                 });
                             }
-                        })
-                        .setNegativeButton("Отмена", null)
-                        .show();
+                        }
+                );
             }
         });
         actionRow1.addView(btnResetProgress);
@@ -2329,12 +2333,14 @@ public class MainActivity extends Activity {
         btnRemoveShelf.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                new AlertDialog.Builder(MainActivity.this)
-                        .setTitle("Убрать с полки")
-                        .setMessage("Убрать книгу «" + book.getTitle() + "» из библиотеки и удалить с устройства?")
-                        .setPositiveButton("Убрать", new DialogInterface.OnClickListener() {
+                EinkNotice.showConfirm(
+                        MainActivity.this,
+                        "Убрать с полки",
+                        "Убрать книгу «" + book.getTitle() + "» из библиотеки и удалить с устройства?",
+                        "Убрать",
+                        new Runnable() {
                             @Override
-                            public void onClick(DialogInterface d, int which) {
+                            public void run() {
                                 removeBookFromLibraryAndDevice(book, new Runnable() {
                                     @Override
                                     public void run() {
@@ -2343,9 +2349,8 @@ public class MainActivity extends Activity {
                                     }
                                 });
                             }
-                        })
-                        .setNegativeButton("Отмена", null)
-                        .show();
+                        }
+                );
             }
         });
         actionRow2.addView(btnRemoveShelf);

@@ -989,7 +989,7 @@ public class YandexBooksApiClient {
             String endpoint = BASE_URL + "/profile/library_cards";
             JSONObject bodyJson = new JSONObject();
             bodyJson.put("book_uuid", bookUuid);
-            bodyJson.put("state", "reading");
+            bodyJson.put("state", "want_to_read");
             RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, bodyJson.toString());
             Request request = createAuthRequestBuilder(endpoint).post(body).build();
             resp = httpClient.newCall(request).execute();
@@ -1945,6 +1945,10 @@ public class YandexBooksApiClient {
                     }
                     bodyJson.put("book_uuid", bookUuid);
                     bodyJson.put("state", apiState);
+                    if ("want_to_read".equals(apiState)) {
+                        bodyJson.put("reading_progress", 0.0);
+                        bodyJson.put("percent", 0.0);
+                    }
                     JSONObject innerLc = new JSONObject();
                     if (resolvedCardId != null && !resolvedCardId.isEmpty()) {
                         innerLc.put("id", resolvedCardId);
@@ -1952,6 +1956,10 @@ public class YandexBooksApiClient {
                     }
                     innerLc.put("book_uuid", bookUuid);
                     innerLc.put("state", apiState);
+                    if ("want_to_read".equals(apiState)) {
+                        innerLc.put("reading_progress", 0.0);
+                        innerLc.put("percent", 0.0);
+                    }
                     bodyJson.put("lc", innerLc);
                     bodyJson.put("library_card", new JSONObject(innerLc.toString()));
 

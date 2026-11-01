@@ -2134,14 +2134,6 @@ public class ReaderActivity extends Activity {
             return;
         }
 
-        // Если есть конкретный индекс главы > 0:
-        if (chapters != null && !chapters.isEmpty() && targetChapter > 0 && targetChapter < chapters.size()) {
-            currentChapterIndex = targetChapter;
-            currentPageIndex = Math.max(0, targetPage);
-            loadChapter(currentChapterIndex, currentPageIndex);
-            return;
-        }
-
         // Если процент известен (> 0.5% и < 99.0%) и есть totalBookLength:
         if (percent > 0.5 && percent < 99.0 && totalBookLength > 0 && chapters != null && !chapters.isEmpty()) {
             long targetGlobalOffset = (long) ((percent / 100.0) * totalBookLength);
@@ -2163,10 +2155,15 @@ public class ReaderActivity extends Activity {
             if (targetChapter > 0 && targetChapter < chapters.size()) {
                 if (Math.abs(targetChapter - matchedCh) <= 1) {
                     currentChapterIndex = targetChapter;
-                    long tcLen = chapterLengths[targetChapter];
-                    long tcOffset = targetGlobalOffset - acc;
-                    double tcFrac = (tcLen > 0) ? Math.max(0.0, Math.min(1.0, (double) tcOffset / (double) tcLen)) : 0.0;
-                    loadChapterWithFraction(targetChapter, tcFrac);
+                    if (targetPage > 0) {
+                        currentPageIndex = targetPage;
+                        loadChapter(currentChapterIndex, currentPageIndex);
+                    } else {
+                        long tcLen = chapterLengths[targetChapter];
+                        long tcOffset = targetGlobalOffset - acc;
+                        double tcFrac = (tcLen > 0) ? Math.max(0.0, Math.min(1.0, (double) tcOffset / (double) tcLen)) : 0.0;
+                        loadChapterWithFraction(targetChapter, tcFrac);
+                    }
                     return;
                 }
             }
@@ -2210,7 +2207,7 @@ public class ReaderActivity extends Activity {
             isNewer = (cloudPercent > 0);
         } else if (cloudTs > localTs && cloudTs > 0 && Math.abs(cloudPercent - curPercent) > 1.5) {
             isNewer = true;
-        } else if (cloudPercent > curPercent + 2.0 && cloudTs >= localTs) {
+        } else if (cloudPercent > curPercent + 1.5 && (cloudTs >= localTs || cloudTs == 0 || local.isSyncedWithServer())) {
             isNewer = true;
         }
 
@@ -2748,11 +2745,6 @@ public class ReaderActivity extends Activity {
         if (!hasPerformedInitialRefresh) {
             hasPerformedInitialRefresh = true;
             forceEpdRefresh();
-            // При первом открытии книги фиксируем стартовую запись чтения в БД и облаке,
-            // чтобы книга гарантированно числилась в разделе «Читаю» даже без листания страниц
-            if (dbHelper.getProgress(bookUuid) == null) {
-                saveProgress();
-            }
         }
 
         pageTurnCounter++;
