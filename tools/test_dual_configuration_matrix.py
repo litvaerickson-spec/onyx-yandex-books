@@ -823,6 +823,33 @@ def run_all_devices_functional_and_ui_audit():
             "out_dir": OUT_DIR_D6,
             "prefix": "darwin6_rev_land",
         },
+        {
+            "name": "Onyx Boox Darwin 7 (Портрет, Android 9.0 Pie, API 28, 300 DPI Carta Plus)",
+            "width": 1072,
+            "height": 1448,
+            "density": 1.88,
+            "is_landscape": False,
+            "out_dir": OUT_DIR_D6,
+            "prefix": "darwin7_port",
+        },
+        {
+            "name": "Onyx Boox Darwin 7 (Ландшафт, Android 9.0 Pie, API 28, 300 DPI Carta Plus)",
+            "width": 1448,
+            "height": 1072,
+            "density": 1.88,
+            "is_landscape": True,
+            "out_dir": OUT_DIR_D6,
+            "prefix": "darwin7_land",
+        },
+        {
+            "name": "Onyx Boox Darwin 7 (Обратный ландшафт, Android 9.0 Pie, API 28, 300 DPI Carta Plus)",
+            "width": 1448,
+            "height": 1072,
+            "density": 1.88,
+            "is_landscape": True,
+            "out_dir": OUT_DIR_D6,
+            "prefix": "darwin7_rev_land",
+        },
     ]
 
     font_items = [
@@ -954,15 +981,15 @@ def run_all_devices_functional_and_ui_audit():
 
 def main():
     print("==========================================================================")
-    print("🚀 ЗАПУСК ПОЛНОГО ФИЗИЧЕСКОГО И ВИРТУАЛЬНОГО ТЕСТИРОВАНИЯ (v1.5.3)")
-    print("   Устройства: Onyx Boox Darwin 1 (API 17) + Darwin 3, 5, 6 (API 19)")
+    print("🚀 ЗАПУСК ПОЛНОГО ФИЗИЧЕСКОГО И ВИРТУАЛЬНОГО ТЕСТИРОВАНИЯ (v1.6.0)")
+    print("   Устройства: Onyx Boox Darwin 1 (API 17) + Darwin 3, 5, 6 (API 19) + Darwin 7 (Android 9 Pie, API 28)")
     print("==========================================================================")
     test_dex_bytecode_and_source_audit()
     run_physical_jvm_4device_harness()
     test_framebuffer_scroll_before_and_after()
     run_all_devices_functional_and_ui_audit()
     print("\n==========================================================================")
-    print("🎉 ВСЕ 4 МОДУЛЯ И ВСЕ 4 ВИРТУАЛЬНЫЕ МАШИНЫ (DARWIN 1, 3, 5, 6) ВЕРИФИЦИРОВАНЫ!")
+    print("🎉 ВСЕ 4 МОДУЛЯ И ВСЕ 5 ВИРТУАЛЬНЫХ МАШИН (DARWIN 1, 3, 5, 6, 7) ВЕРИФИЦИРОВАНЫ!")
     print("==========================================================================")
 
 

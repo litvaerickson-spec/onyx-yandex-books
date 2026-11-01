@@ -68,11 +68,12 @@ public class MultiDeviceVmHarness {
                 new DeviceProfile("Onyx Boox Darwin 1 (Android 4.2.2 Jelly Bean)", 17, "Rockchip RK3026", 758, 1024, 1.33f, true, false),
                 new DeviceProfile("Onyx Boox Darwin 3 (Android 4.4.4 KitKat)", 19, "Freescale i.MX6", 758, 1024, 1.33f, false, true),
                 new DeviceProfile("Onyx Boox Darwin 5 (Android 4.4.4 KitKat)", 19, "Freescale i.MX6", 758, 1024, 1.33f, false, true),
-                new DeviceProfile("Onyx Boox Darwin 6 (Android 4.4.4 KitKat, Carta Plus)", 19, "Freescale i.MX6", 1072, 1448, 1.88f, false, true)
+                new DeviceProfile("Onyx Boox Darwin 6 (Android 4.4.4 KitKat, Carta Plus)", 19, "Freescale i.MX6", 1072, 1448, 1.88f, false, true),
+                new DeviceProfile("Onyx Boox Darwin 7 (Android 9.0 Pie, Carta Plus 300 DPI)", 28, "Rockchip RK3128 / Quad-core", 1072, 1448, 1.88f, false, true)
         };
 
         System.out.println("======================================================================");
-        System.out.println("⚙️ ЗАПУСК ФИЗИЧЕСКОГО БАЙТКОД-СТЕНДА JVM ПО 4 ВИРТУАЛЬНЫМ МАШИНАМ");
+        System.out.println("⚙️ ЗАПУСК ФИЗИЧЕСКОГО БАЙТКОД-СТЕНДА JVM ПО 5 ВИРТУАЛЬНЫМ МАШИНАМ");
         System.out.println("======================================================================");
 
         for (DeviceProfile profile : profiles) {
@@ -80,7 +81,7 @@ public class MultiDeviceVmHarness {
         }
 
         System.out.println("\n======================================================================");
-        System.out.println("✅ ВСЕ 4 ВИРТУАЛЬНЫЕ МАШИНЫ (DARWIN 1, 3, 5, 6) ПРОШЛИ 100% ПРОВЕРОК!");
+        System.out.println("✅ ВСЕ 5 ВИРТУАЛЬНЫХ МАШИН (DARWIN 1, 3, 5, 6, 7) ПРОШЛИ 100% ПРОВЕРОК!");
         System.out.println("======================================================================");
     }
 
