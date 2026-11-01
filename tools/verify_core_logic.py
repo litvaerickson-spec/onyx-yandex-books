@@ -2728,7 +2728,7 @@ def test_v1515_beta_graphql_cfi_bidirectional_sync():
 
     assert "loadBooks(currentShelf)" in main_code, \
         "MainActivity.onResume обязан фоново перезапрашивать полку с сервера!"
-    assert any(v in main_code for v in ["v1.5.15-beta", "v1.5.16-beta", "v1.5.17-beta", "v1.5.18-beta"]), \
+    assert any(v in main_code for v in ["v1.5.15-beta", "v1.5.16-beta", "v1.5.17-beta", "v1.5.18-beta", "v1.5.19-beta"]), \
         "Интерфейс MainActivity должен отображать актуальную версию!"
     print(" - MainActivity: актуализация каталога при возврате и лейбл версии: OK")
 
@@ -2736,7 +2736,7 @@ def test_v1515_beta_graphql_cfi_bidirectional_sync():
     v_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(v_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str in ("1.5.15-beta", "1.5.16-beta", "1.5.17-beta", "1.5.18-beta"), f"VERSION должен быть >= 1.5.15-beta, получено: {v_str}"
+    assert v_str in ("1.5.15-beta", "1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta"), f"VERSION должен быть >= 1.5.15-beta, получено: {v_str}"
 
     g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(g_file, "r", encoding="utf-8") as f:
@@ -2787,28 +2787,28 @@ def test_v1516_beta_onyx_sdk_hardware_regal_and_conflict_resolution():
     assert "navigateToResolvedProgress" in reader_code, "ReaderActivity должен содержать единую точку навигации navigateToResolvedProgress"
     print(" - ReaderActivity (Regal в onResume, GC в forceEpdRefresh, высококонтрастные диалоги разрешения конфликтов): OK")
 
-    # 4. Проверка версионирования v1.5.16-beta / v1.5.17-beta / v1.5.18-beta
+    # 4. Проверка версионирования v1.5.16-beta / v1.5.17-beta / v1.5.18-beta / v1.5.19-beta
     v_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(v_file, "r", encoding="utf-8") as f:
         ver = f.read().strip()
-    assert ver in ("1.5.16-beta", "1.5.17-beta", "1.5.18-beta"), f"VERSION ожидал >= 1.5.16-beta, получено: {ver}"
+    assert ver in ("1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta"), f"VERSION ожидал >= 1.5.16-beta, получено: {ver}"
 
     g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(g_file, "r", encoding="utf-8") as f:
         g_code = f.read()
-    assert any(f'versionName "{v}"' in g_code for v in ["1.5.16-beta", "1.5.17-beta", "1.5.18-beta"])
-    assert any(f'versionCode {c}' in g_code for c in [49, 50, 51])
+    assert any(f'versionName "{v}"' in g_code for v in ["1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta"])
+    assert any(f'versionCode {c}' in g_code for c in [49, 50, 51, 52])
 
     m_file = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(m_file, "r", encoding="utf-8") as f:
         m_code = f.read()
-    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.16-beta", "1.5.17-beta", "1.5.18-beta"])
-    assert any(f'android:versionCode="{c}"' in m_code for c in ["49", "50", "51"])
+    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta"])
+    assert any(f'android:versionCode="{c}"' in m_code for c in ["49", "50", "51", "52"])
 
     main_file = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java")
     with open(main_file, "r", encoding="utf-8") as f:
         main_code = f.read()
-    assert any(v in main_code for v in ["v1.5.16-beta", "v1.5.17-beta", "v1.5.18-beta"])
+    assert any(v in main_code for v in ["v1.5.16-beta", "v1.5.17-beta", "v1.5.18-beta", "v1.5.19-beta"])
     print(" - Версионирование (versionCode>=49, AndroidManifest, build.gradle, VERSION, MainActivity): OK")
 
     print("✅ Тест v1.5.16-beta Onyx SDK интеграция, Regal mode и диалоги конфликтов успешно пройден!\n")
@@ -2867,21 +2867,21 @@ def test_v1517_beta_hardware_buttons_dispatch_key_event():
     v_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(v_file, "r", encoding="utf-8") as f:
         ver = f.read().strip()
-    assert ver in ("1.5.17-beta", "1.5.18-beta"), f"VERSION ожидал >= 1.5.17-beta, получено: {ver}"
+    assert ver in ("1.5.17-beta", "1.5.18-beta", "1.5.19-beta"), f"VERSION ожидал >= 1.5.17-beta, получено: {ver}"
 
     g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(g_file, "r", encoding="utf-8") as f:
         g_code = f.read()
-    assert any(f'versionName "{v}"' in g_code for v in ["1.5.17-beta", "1.5.18-beta"])
-    assert any(f'versionCode {c}' in g_code for c in [50, 51])
+    assert any(f'versionName "{v}"' in g_code for v in ["1.5.17-beta", "1.5.18-beta", "1.5.19-beta"])
+    assert any(f'versionCode {c}' in g_code for c in [50, 51, 52])
 
     m_file = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(m_file, "r", encoding="utf-8") as f:
         m_code = f.read()
-    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.17-beta", "1.5.18-beta"])
-    assert any(f'android:versionCode="{c}"' in m_code for c in ["50", "51"])
+    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.17-beta", "1.5.18-beta", "1.5.19-beta"])
+    assert any(f'android:versionCode="{c}"' in m_code for c in ["50", "51", "52"])
 
-    assert any(v in main_code for v in ["v1.5.17-beta", "v1.5.18-beta"])
+    assert any(v in main_code for v in ["v1.5.17-beta", "v1.5.18-beta", "v1.5.19-beta"])
     print(" - Версионирование v1.5.17-beta+ (versionCode>=50, AndroidManifest, build.gradle, VERSION, MainActivity): OK")
 
     print("✅ Тест v1.5.17-beta Работоспособность боковых кнопок и перехват dispatchKeyEvent успешно пройден!\n")
@@ -2945,31 +2945,101 @@ def test_v1518_beta_touch_target_ergonomics_and_darwin7_fix():
     assert "(40 * density)" in reader_code, "Кнопка Закрыть в диалоге должна иметь высоту >= 38dp!"
     print(" - Диалог прогресса (увеличенные кнопки 42dp и 40dp): OK")
 
-    # 5. Проверка версионирования v1.5.18-beta (versionCode 51)
+    # 5. Проверка версионирования v1.5.18-beta / v1.5.19-beta
     v_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(v_file, "r", encoding="utf-8") as f:
         ver = f.read().strip()
-    assert ver == "1.5.18-beta", f"VERSION ожидал 1.5.18-beta, получено: {ver}"
+    assert ver in ["1.5.18-beta", "1.5.19-beta"], f"VERSION ожидал 1.5.18-beta или 1.5.19-beta, получено: {ver}"
 
     g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(g_file, "r", encoding="utf-8") as f:
         g_code = f.read()
-    assert 'versionName "1.5.18-beta"' in g_code
-    assert 'versionCode 51' in g_code
+    assert any(v in g_code for v in ['versionName "1.5.18-beta"', 'versionName "1.5.19-beta"'])
+    assert any(c in g_code for c in ['versionCode 51', 'versionCode 52'])
 
     m_file = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(m_file, "r", encoding="utf-8") as f:
         m_code = f.read()
-    assert 'android:versionName="1.5.18-beta"' in m_code
-    assert 'android:versionCode="51"' in m_code
+    assert any(v in m_code for v in ['android:versionName="1.5.18-beta"', 'android:versionName="1.5.19-beta"'])
+    assert any(c in m_code for c in ['android:versionCode="51"', 'android:versionCode="52"'])
 
     main_file = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java")
     with open(main_file, "r", encoding="utf-8") as f:
         main_code = f.read()
-    assert "v1.5.18-beta" in main_code
+    assert any(v in main_code for v in ["v1.5.18-beta", "v1.5.19-beta"])
     print(" - Версионирование v1.5.18-beta (versionCode=51, AndroidManifest, build.gradle, VERSION, MainActivity): OK")
 
     print("✅ Тест v1.5.18-beta Эргономика тачскринов Darwin 7 и Full-Row клики успешно пройден!\n")
+
+
+def test_v1519_beta_ota_update_reliability():
+    print("--- [ТЕСТ 45] v1.5.19-beta: Надежная доставка OTA обновлений по воздуху и поддержка всех типов релизов ---")
+
+    # 1. Проверка AppUpdateManager: мульти-стратегия и парсинг релизов
+    updater_file = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/update/AppUpdateManager.java")
+    with open(updater_file, "r", encoding="utf-8") as f:
+        updater_code = f.read()
+
+    assert "GITHUB_RELEASES_LIST_URL" in updater_code
+    assert "GITHUB_RAW_VERSION_URL" in updater_code
+    assert "GITHUB_LATEST_RELEASE_URL" in updater_code
+    assert "parseReleaseFromJson" in updater_code
+    print(" - AppUpdateManager: мульти-стратегический поиск (Releases List + raw version.json + Latest): OK")
+
+    # 2. Проверка installApk: обход StrictMode FileUriExposedException и флаги
+    assert "disableDeathOnFileUriExposure" in updater_code
+    assert "FLAG_GRANT_READ_URI_PERMISSION" in updater_code
+    print(" - AppUpdateManager.installApk: обход StrictMode на Android 7.0+ и права чтения: OK")
+
+    # 3. Проверка MainActivity: ConnectivityReceiver и автопроверка при подключении Wi-Fi
+    main_file = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java")
+    with open(main_file, "r", encoding="utf-8") as f:
+        main_code = f.read()
+
+    assert "CONNECTIVITY_ACTION" in main_code
+    assert "networkReceiver" in main_code
+    assert "sUpdateCheckedSuccessfully" in main_code
+    assert "checkAppUpdate(false);" in main_code
+    print(" - MainActivity: динамический ConnectivityReceiver для автопроверки обновлений при включении Wi-Fi: OK")
+
+    # 4. Проверка Manifest: разрешение REQUEST_INSTALL_PACKAGES для Android 8/9/10/11
+    m_file = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
+    with open(m_file, "r", encoding="utf-8") as f:
+        m_code = f.read()
+    assert "android.permission.REQUEST_INSTALL_PACKAGES" in m_code
+    print(" - AndroidManifest.xml: системное разрешение REQUEST_INSTALL_PACKAGES: OK")
+
+    # 5. Проверка статического файла version.json
+    v_json_file = os.path.join(PROJECT_DIR, "version.json")
+    assert os.path.exists(v_json_file), "version.json отсутствует в корне проекта!"
+    with open(v_json_file, "r", encoding="utf-8") as f:
+        v_json_content = f.read()
+    import json
+    v_data = json.loads(v_json_content)
+    assert v_data.get("versionName") == "1.5.19-beta"
+    assert v_data.get("versionCode") == 52
+    assert v_data.get("tagName") == "v1.5.19-beta"
+    assert "yandex-books-lite-v1.5.19-beta.apk" in v_data.get("apkUrl", "")
+    print(" - version.json: валидный манифест для CDN raw.githubusercontent.com: OK")
+
+    # 6. Проверка версионирования v1.5.19-beta (versionCode 52)
+    v_file = os.path.join(PROJECT_DIR, "VERSION")
+    with open(v_file, "r", encoding="utf-8") as f:
+        ver = f.read().strip()
+    assert ver == "1.5.19-beta", f"VERSION ожидал 1.5.19-beta, получено: {ver}"
+
+    g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
+    with open(g_file, "r", encoding="utf-8") as f:
+        g_code = f.read()
+    assert 'versionName "1.5.19-beta"' in g_code
+    assert 'versionCode 52' in g_code
+
+    assert 'android:versionName="1.5.19-beta"' in m_code
+    assert 'android:versionCode="52"' in m_code
+    assert "v1.5.19-beta" in main_code
+    print(" - Версионирование v1.5.19-beta (versionCode=52, AndroidManifest, build.gradle, VERSION, MainActivity): OK")
+
+    print("✅ Тест v1.5.19-beta Бесперебойная доставка OTA обновлений успешно пройден!\n")
 
 
 if __name__ == "__main__":
@@ -3021,6 +3091,7 @@ if __name__ == "__main__":
     test_v1516_beta_onyx_sdk_hardware_regal_and_conflict_resolution()
     test_v1517_beta_hardware_buttons_dispatch_key_event()
     test_v1518_beta_touch_target_ergonomics_and_darwin7_fix()
+    test_v1519_beta_ota_update_reliability()
     print("==================================================")
-    print("🎉 ВСЕ 44 ТЕСТА УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 45 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

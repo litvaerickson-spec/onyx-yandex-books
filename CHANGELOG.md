@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.5.19-beta] - 2026-11-01
+
+### Fixed
+- **Бесперебойная доставка обновлений по воздуху (OTA) на электронные книги**:
+  - Устранена фундаментальная причина, из-за которой новые версии не доставлялись по воздуху: GitHub API эндпоинт `/releases/latest` полностью игнорировал предрелизы и бета-сборки (`--prerelease`), возвращая устаревшие данные.
+  - В `AppUpdateManager` реализован **мульти-стратегический поиск версий**:
+    1. Первичный запрос к `releases?per_page=10` с парсингом всех доступных версий и выбором наивысшего SemVer с валидным APK-дистрибутивом.
+    2. Надежный fallback на прямой статический CDN-манифест `version.json` на `raw.githubusercontent.com` (без лимитов запросов GitHub API).
+    3. Дополнительный fallback на `/releases/latest`.
+  - Устранено падение установщика на Android 7.0+ (Onyx Boox Darwin 7, Livingstone, Leaf, Page, Nova, Note): в `AppUpdateManager.installApk` добавлен безопасный обход `FileUriExposedException` через отключение строгой политики StrictMode и флаг `FLAG_GRANT_READ_URI_PERMISSION`.
+  - Реализован отказоустойчивый выбор директории для загрузки APK (`DIRECTORY_DOWNLOADS` -> `getExternalFilesDir` -> `/sdcard/Download`).
+
+### Added
+- **Автоматическое обнаружение обновлений при подключении Wi-Fi**:
+  - В `MainActivity` внедрен динамический приемник событий сети `ConnectivityManager.CONNECTIVITY_ACTION`. На электронных книгах E-Ink, где Wi-Fi отключается в спящем режиме для экономии батареи, при включении беспроводной сети автоматически запускается фоновая проверка обновлений и синхронизация очереди чтения.
+  - Добавлена проверка обновлений в `MainActivity.onResume` при наличии подключения к интернету.
+- **Поддержка современных версий Android (Android 8/9/10/11)**:
+  - В `AndroidManifest.xml` добавлено системное разрешение `android.permission.REQUEST_INSTALL_PACKAGES`, необходимое для запуска диалога обновления на Android 8.0+.
+- **Автотест `[ТЕСТ 45]` в `tools/verify_core_logic.py`**:
+  - Комплексная валидация мульти-стратегического парсинга релизов (`parseReleaseFromJson`, `version.json`, assets), проверки сетевого ресивера `CONNECTIVITY_ACTION`, разрешения `REQUEST_INSTALL_PACKAGES`, обхода StrictMode и версионирования `v1.5.19-beta` (versionCode 52).
+
 ## [v1.5.18-beta] - 2026-11-01
 
 ### Fixed

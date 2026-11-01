@@ -54,6 +54,10 @@ import okhttp3.Response;
 public class AppUpdateManager {
 
     private static final String TAG = "AppUpdateManager";
+    private static final String GITHUB_RELEASES_LIST_URL =
+            "https://api.github.com/repos/litvaerickson-spec/onyx-yandex-books/releases?per_page=10";
+    private static final String GITHUB_RAW_VERSION_URL =
+            "https://raw.githubusercontent.com/litvaerickson-spec/onyx-yandex-books/main/version.json";
     private static final String GITHUB_LATEST_RELEASE_URL =
             "https://api.github.com/repos/litvaerickson-spec/onyx-yandex-books/releases/latest";
 
@@ -126,62 +130,152 @@ public class AppUpdateManager {
     }
 
     /**
-     * Запрос последней версии с GitHub Releases API.
+     * Парсит объект релиза из JSON (поддерживает формат GitHub API Releases, а также статический version.json).
+     * Возвращает null, если релиз является черновиком или не содержит валидного APK файла.
+     */
+    public static ReleaseInfo parseReleaseFromJson(JSONObject json) {
+        if (json == null) return null;
+        if (json.optBoolean("draft", false)) return null;
+
+        ReleaseInfo release = new ReleaseInfo();
+        release.tagName = json.optString("tag_name", "");
+        if (TextUtils.isEmpty(release.tagName)) {
+            release.tagName = json.optString("tagName", "");
+        }
+        if (TextUtils.isEmpty(release.tagName)) return null;
+
+        release.versionName = release.tagName.replaceAll("^[vV]", "");
+        release.title = json.optString("name", release.tagName);
+        if (TextUtils.isEmpty(release.title)) {
+            release.title = json.optString("title", release.tagName);
+        }
+        release.body = json.optString("body", "");
+        if (TextUtils.isEmpty(release.body)) {
+            release.body = json.optString("changelog", "");
+        }
+
+        // 1. Проверяем прямые поля (например, из version.json)
+        String directApkUrl = json.optString("apkUrl", "");
+        if (!TextUtils.isEmpty(directApkUrl)) {
+            release.apkDownloadUrl = directApkUrl;
+            release.apkFileName = json.optString("apkFileName", "yandex-books-lite-" + release.tagName + ".apk");
+            release.apkSize = json.optLong("apkSize", 0);
+            return release;
+        }
+
+        // 2. Проверяем массив assets (GitHub Releases API)
+        JSONArray assets = json.optJSONArray("assets");
+        if (assets != null) {
+            for (int i = 0; i < assets.length(); i++) {
+                JSONObject asset = assets.optJSONObject(i);
+                if (asset == null) continue;
+                String assetName = asset.optString("name", "");
+                if (assetName.endsWith(".apk")) {
+                    release.apkDownloadUrl = asset.optString("browser_download_url", "");
+                    release.apkFileName = assetName;
+                    release.apkSize = asset.optLong("size", 0);
+                    break;
+                }
+            }
+        }
+
+        if (TextUtils.isEmpty(release.apkDownloadUrl)) {
+            return null;
+        }
+        return release;
+    }
+
+    /**
+     * Мульти-стратегический запрос последней версии с GitHub.
+     * 1) Сначала запрашивает список релизов (находит новейшие версии, включая предрелизы и бета).
+     * 2) В случае сбоя или лимитов обращается к CDN version.json на raw.githubusercontent.com.
+     * 3) В крайнем случае делает fallback на /releases/latest.
      */
     public void fetchLatestRelease(final Context context, final UpdateCheckCallback callback) {
         executor.execute(new Runnable() {
             @Override
             public void run() {
+                ReleaseInfo foundRelease = null;
+                String lastError = null;
+                OkHttpClient client = HttpClientFactory.getClient();
+                String currentVer = getCurrentVersionName(context);
+
+                // Стратегия 1: GitHub Releases List (находит свежайшие версии, включая пре-релизы и бета)
                 try {
-                    OkHttpClient client = HttpClientFactory.getClient();
                     Request request = new Request.Builder()
-                            .url(GITHUB_LATEST_RELEASE_URL)
-                            .header("User-Agent", "OnyxYandexBooks-App/" + getCurrentVersionName(context))
+                            .url(GITHUB_RELEASES_LIST_URL)
+                            .header("User-Agent", "OnyxYandexBooks-App/" + currentVer)
                             .header("Accept", "application/vnd.github.v3+json")
+                            .header("Cache-Control", "no-cache")
                             .build();
 
                     Response response = client.newCall(request).execute();
-                    if (!response.isSuccessful()) {
-                        postResult(callback, false, null, "Ошибка GitHub API: HTTP " + response.code());
-                        return;
-                    }
-
-                    String jsonStr = response.body().string();
-                    JSONObject json = new JSONObject(jsonStr);
-
-                    final ReleaseInfo release = new ReleaseInfo();
-                    release.tagName = json.optString("tag_name", "");
-                    release.versionName = release.tagName.replaceAll("^[vV]", "");
-                    release.title = json.optString("name", release.tagName);
-                    release.body = json.optString("body", "");
-
-                    JSONArray assets = json.optJSONArray("assets");
-                    if (assets != null) {
-                        for (int i = 0; i < assets.length(); i++) {
-                            JSONObject asset = assets.getJSONObject(i);
-                            String assetName = asset.optString("name", "");
-                            if (assetName.endsWith(".apk")) {
-                                release.apkDownloadUrl = asset.optString("browser_download_url", "");
-                                release.apkFileName = assetName;
-                                release.apkSize = asset.optLong("size", 0);
-                                break;
+                    if (response.isSuccessful() && response.body() != null) {
+                        String jsonStr = response.body().string();
+                        JSONArray array = new JSONArray(jsonStr);
+                        for (int i = 0; i < array.length(); i++) {
+                            JSONObject relObj = array.optJSONObject(i);
+                            ReleaseInfo rel = parseReleaseFromJson(relObj);
+                            if (rel != null) {
+                                if (foundRelease == null || isVersionNewer(rel.tagName, foundRelease.tagName)) {
+                                    foundRelease = rel;
+                                }
                             }
                         }
+                    } else {
+                        lastError = "GitHub API: HTTP " + (response != null ? response.code() : "null");
                     }
-
-                    if (TextUtils.isEmpty(release.apkDownloadUrl)) {
-                        postResult(callback, false, release, "В релизе " + release.tagName + " нет APK файла");
-                        return;
-                    }
-
-                    String current = getCurrentVersionName(context);
-                    boolean isNewer = isVersionNewer(release.tagName, current);
-
-                    postResult(callback, isNewer, release, isNewer ? "Доступно обновление" : "У вас последняя версия");
                 } catch (Exception e) {
-                    Log.e(TAG, "Error checking update from GitHub", e);
-                    postResult(callback, false, null, "Сбой проверки обновления: " + e.getMessage());
+                    Log.w(TAG, "Releases list fetch failed, falling back to version.json / latest", e);
+                    lastError = e.getMessage();
                 }
+
+                // Стратегия 2: Fallback на raw.githubusercontent.com version.json (без лимитов GitHub API)
+                if (foundRelease == null) {
+                    try {
+                        Request request = new Request.Builder()
+                                .url(GITHUB_RAW_VERSION_URL)
+                                .header("User-Agent", "OnyxYandexBooks-App/" + currentVer)
+                                .header("Cache-Control", "no-cache")
+                                .build();
+                        Response response = client.newCall(request).execute();
+                        if (response.isSuccessful() && response.body() != null) {
+                            String jsonStr = response.body().string();
+                            JSONObject json = new JSONObject(jsonStr);
+                            foundRelease = parseReleaseFromJson(json);
+                        }
+                    } catch (Exception e) {
+                        Log.w(TAG, "Raw version.json fallback failed", e);
+                    }
+                }
+
+                // Стратегия 3: Fallback на /releases/latest
+                if (foundRelease == null) {
+                    try {
+                        Request request = new Request.Builder()
+                                .url(GITHUB_LATEST_RELEASE_URL)
+                                .header("User-Agent", "OnyxYandexBooks-App/" + currentVer)
+                                .header("Accept", "application/vnd.github.v3+json")
+                                .header("Cache-Control", "no-cache")
+                                .build();
+                        Response response = client.newCall(request).execute();
+                        if (response.isSuccessful() && response.body() != null) {
+                            String jsonStr = response.body().string();
+                            JSONObject json = new JSONObject(jsonStr);
+                            foundRelease = parseReleaseFromJson(json);
+                        }
+                    } catch (Exception e) {
+                        Log.w(TAG, "Releases latest fallback failed", e);
+                    }
+                }
+
+                if (foundRelease == null) {
+                    postResult(callback, false, null, "Не удалось проверить обновления: " + (lastError != null ? lastError : "нет связи"));
+                    return;
+                }
+
+                boolean isNewer = isVersionNewer(foundRelease.tagName, currentVer);
+                postResult(callback, isNewer, foundRelease, isNewer ? "Доступно обновление" : "У вас последняя версия");
             }
         });
     }
@@ -404,13 +498,16 @@ public class AppUpdateManager {
             public void run() {
                 File targetFile = null;
                 try {
-                    // Выбираем публичную директорию Загрузок, доступную PackageInstaller
+                    // Выбираем публичную или внешнюю директорию Загрузок, доступную PackageInstaller
                     File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                    if (downloadDir == null || !downloadDir.exists()) {
-                        downloadDir = new File("/sdcard/Download");
+                    if (downloadDir == null || (!downloadDir.exists() && !downloadDir.mkdirs())) {
+                        downloadDir = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
                     }
-                    if (!downloadDir.exists()) {
-                        downloadDir.mkdirs();
+                    if (downloadDir == null || (!downloadDir.exists() && !downloadDir.mkdirs())) {
+                        downloadDir = new File("/sdcard/Download");
+                        if (!downloadDir.exists()) {
+                            downloadDir.mkdirs();
+                        }
                     }
 
                     String fname = release.apkFileName != null ? release.apkFileName : "yandex-books-update.apk";
@@ -503,10 +600,19 @@ public class AppUpdateManager {
         }
 
         try {
+            if (android.os.Build.VERSION.SDK_INT >= 24) {
+                try {
+                    java.lang.reflect.Method m = android.os.StrictMode.class.getMethod("disableDeathOnFileUriExposure");
+                    m.invoke(null);
+                } catch (Exception ignored) {
+                    android.os.StrictMode.setVmPolicy(new android.os.StrictMode.VmPolicy.Builder().build());
+                }
+            }
             apkFile.setReadable(true, false);
             Intent intent = new Intent(Intent.ACTION_VIEW);
             intent.setDataAndType(Uri.fromFile(apkFile), "application/vnd.android.package-archive");
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             context.startActivity(intent);
         } catch (Exception e) {
             Log.e(TAG, "Error launching package installer", e);

@@ -4,11 +4,14 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
 import android.app.ProgressDialog;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.net.ConnectivityManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -96,6 +99,42 @@ public class MainActivity extends Activity {
     private TextView shelfPageIndicator;
 
     private static boolean sUpdateNotifiedThisSession = false;
+    private static boolean sUpdateCheckedSuccessfully = false;
+    private BroadcastReceiver networkReceiver;
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        if (networkReceiver == null) {
+            networkReceiver = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    if (isNetworkAvailable()) {
+                        if (!sUpdateCheckedSuccessfully) {
+                            checkAppUpdate(false);
+                        }
+                        if (syncManager != null && tokenStorage != null && tokenStorage.isAuthorized()) {
+                            syncManager.flushOfflineQueue();
+                        }
+                    }
+                }
+            };
+            try {
+                registerReceiver(networkReceiver, new IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION));
+            } catch (Exception ignored) {}
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        if (networkReceiver != null) {
+            try {
+                unregisterReceiver(networkReceiver);
+            } catch (Exception ignored) {}
+            networkReceiver = null;
+        }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -358,7 +397,7 @@ public class MainActivity extends Activity {
         root.addView(listLayout);
 
         TextView tvBetaNotice = new TextView(this);
-        tvBetaNotice.setText("Яндекс Книги Lite v1.5.18-beta (предварительный выпуск)");
+        tvBetaNotice.setText("Яндекс Книги Lite v1.5.19-beta (предварительный выпуск)");
         tvBetaNotice.setTextSize(10);
         tvBetaNotice.setTextColor(Color.DKGRAY);
         tvBetaNotice.setGravity(Gravity.CENTER);
@@ -996,6 +1035,7 @@ public class MainActivity extends Activity {
                 dismissEinkLoadingDialog(pd);
 
                 if (updateAvailable && release != null) {
+                    sUpdateCheckedSuccessfully = true;
                     if (btnCheckUpdate != null) {
                         btnCheckUpdate.setVisibility(View.VISIBLE);
                         btnCheckUpdate.setText(release.tagName);
@@ -1007,8 +1047,11 @@ public class MainActivity extends Activity {
                         AppUpdateManager.getInstance().showUpdateDialog(MainActivity.this, release);
                     }
                 } else {
+                    if (message != null && !message.startsWith("Сбой") && !message.startsWith("Не удалось") && !message.startsWith("Ошибка")) {
+                        sUpdateCheckedSuccessfully = true;
+                    }
                     if (userTriggered) {
-                        if (message != null && message.startsWith("Сбой")) {
+                        if (message != null && (message.startsWith("Сбой") || message.startsWith("Не удалось") || message.startsWith("Ошибка"))) {
                             EinkNotice.show(MainActivity.this, "Обновление ПО", "Не удалось проверить обновления.\n" + message);
                         } else {
                             String cur = AppUpdateManager.getInstance().getCurrentVersionName(MainActivity.this);
@@ -1425,6 +1468,11 @@ public class MainActivity extends Activity {
             updateShelfFooter();
             // Автоматическая фоновая отправка прогресса офлайн-чтения в облако Яндекса
             syncManager.flushOfflineQueue();
+
+            // Автоматическая фоновая проверка обновлений при появлении интернета
+            if (!sUpdateCheckedSuccessfully && isNetworkAvailable()) {
+                checkAppUpdate(false);
+            }
         }
         // Очищаем экран при возвращении в библиотеку от возможных остаточных артефактов
         EpdController.requestFullRefresh(this, booksListView);
