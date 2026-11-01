@@ -50,16 +50,22 @@ public class CoverLoader {
         return instance;
     }
 
+    private static class BitmapLruCache extends LruCache<String, Bitmap> {
+        BitmapLruCache(int maxSize) {
+            super(maxSize);
+        }
+
+        @Override
+        protected int sizeOf(String key, Bitmap bitmap) {
+            return bitmap.getByteCount() / 1024;
+        }
+    }
+
     private CoverLoader(Context context) {
         // Кэш в памяти на ~30 обложек (около 4-6 МБ)
         int maxMemory = (int) (Runtime.getRuntime().maxMemory() / 1024);
         int cacheSize = Math.max(1024, maxMemory / 8);
-        memoryCache = new LruCache<String, Bitmap>(cacheSize) {
-            @Override
-            protected int sizeOf(String key, Bitmap bitmap) {
-                return bitmap.getByteCount() / 1024;
-            }
-        };
+        memoryCache = new BitmapLruCache(cacheSize);
 
         diskCacheDir = new File(context.getCacheDir(), "book_covers");
         if (!diskCacheDir.exists()) {

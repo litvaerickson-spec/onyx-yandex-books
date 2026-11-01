@@ -357,7 +357,7 @@ public class MainActivity extends Activity {
         root.addView(listLayout);
 
         TextView tvBetaNotice = new TextView(this);
-        tvBetaNotice.setText("Яндекс Книги Lite v1.5.14-beta (предварительный выпуск)");
+        tvBetaNotice.setText("Яндекс Книги Lite v1.5.15-beta (предварительный выпуск)");
         tvBetaNotice.setTextSize(10);
         tvBetaNotice.setTextColor(Color.DKGRAY);
         tvBetaNotice.setGravity(Gravity.CENTER);
@@ -1369,7 +1369,9 @@ public class MainActivity extends Activity {
         updateEmptyState();
         updateShelfFooter();
 
-        loadingTextView.setVisibility(View.VISIBLE);
+        if (currentBooks.isEmpty()) {
+            loadingTextView.setVisibility(View.VISIBLE);
+        }
 
         // 2. Фоновая загрузка актуальной библиотеки из облака Яндекса
         apiClient.getAllUserBooks(new YandexBooksApiClient.ApiCallback<List<Book>>() {
@@ -1415,6 +1417,8 @@ public class MainActivity extends Activity {
             if (!"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
                 currentBooks = dbHelper.getBooksByShelf(currentShelf);
                 adapter.notifyDataSetChanged();
+                // Автоматическое фоновое обновление библиотеки из облака, чтобы книги со смартфона появлялись сразу
+                loadBooks(currentShelf);
             }
             updateTabBadges();
             updateShelfFooter();

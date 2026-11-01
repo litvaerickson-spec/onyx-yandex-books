@@ -37,11 +37,17 @@ public class SyncManager {
      * Сохранение новой позиции чтения с умным решением конфликтов.
      */
     public void saveAndSyncProgress(final ReadingProgress localProgress, boolean isOnline, final ConflictResolutionCallback callback) {
-        if (localProgress.getLibraryCardId() == null || localProgress.getLibraryCardId().isEmpty()) {
+        if (localProgress.getLibraryCardId() == null || localProgress.getLibraryCardId().isEmpty()
+                || localProgress.getDocumentUuid() == null || localProgress.getDocumentUuid().isEmpty()) {
             try {
                 com.onyx.yandexbooks.core.api.models.Book b = dbHelper.getBookByUuid(localProgress.getBookUuid());
-                if (b != null && b.getLibraryCardId() != null && !b.getLibraryCardId().isEmpty()) {
-                    localProgress.setLibraryCardId(b.getLibraryCardId());
+                if (b != null) {
+                    if (b.getLibraryCardId() != null && !b.getLibraryCardId().isEmpty()) {
+                        localProgress.setLibraryCardId(b.getLibraryCardId());
+                    }
+                    if (b.getDocumentUuid() != null && !b.getDocumentUuid().isEmpty()) {
+                        localProgress.setDocumentUuid(b.getDocumentUuid());
+                    }
                 }
             } catch (Exception ignored) {}
         }
@@ -135,11 +141,17 @@ public class SyncManager {
 
         Log.i(TAG, "Flushing " + total + " pending offline progress events to Yandex cloud...");
         for (final ReadingProgress p : queue) {
-            if (p.getLibraryCardId() == null || p.getLibraryCardId().isEmpty()) {
+            if (p.getLibraryCardId() == null || p.getLibraryCardId().isEmpty()
+                    || p.getDocumentUuid() == null || p.getDocumentUuid().isEmpty()) {
                 try {
                     com.onyx.yandexbooks.core.api.models.Book b = dbHelper.getBookByUuid(p.getBookUuid());
-                    if (b != null && b.getLibraryCardId() != null && !b.getLibraryCardId().isEmpty()) {
-                        p.setLibraryCardId(b.getLibraryCardId());
+                    if (b != null) {
+                        if (b.getLibraryCardId() != null && !b.getLibraryCardId().isEmpty()) {
+                            p.setLibraryCardId(b.getLibraryCardId());
+                        }
+                        if (b.getDocumentUuid() != null && !b.getDocumentUuid().isEmpty()) {
+                            p.setDocumentUuid(b.getDocumentUuid());
+                        }
                     }
                 } catch (Exception ignored) {}
             }

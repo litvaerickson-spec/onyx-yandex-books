@@ -78,4 +78,13 @@ public class Book implements Serializable {
 
     public String getLibraryCardId() { return libraryCardId; }
     public void setLibraryCardId(String libraryCardId) { this.libraryCardId = libraryCardId; }
+
+    private String documentUuid;
+    private String cfi;
+
+    public String getDocumentUuid() { return documentUuid; }
+    public void setDocumentUuid(String documentUuid) { this.documentUuid = documentUuid; }
+
+    public String getCfi() { return cfi; }
+    public void setCfi(String cfi) { this.cfi = cfi; }
 }

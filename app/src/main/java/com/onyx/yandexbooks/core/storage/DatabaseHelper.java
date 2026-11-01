@@ -66,6 +66,24 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         try {
             db.execSQL("ALTER TABLE books ADD COLUMN annotation TEXT");
         } catch (Exception ignored) {}
+        try {
+            db.execSQL("ALTER TABLE books ADD COLUMN document_uuid TEXT");
+        } catch (Exception ignored) {}
+        try {
+            db.execSQL("ALTER TABLE books ADD COLUMN cfi TEXT");
+        } catch (Exception ignored) {}
+        try {
+            db.execSQL("ALTER TABLE progress ADD COLUMN document_uuid TEXT");
+        } catch (Exception ignored) {}
+        try {
+            db.execSQL("ALTER TABLE progress ADD COLUMN cfi TEXT");
+        } catch (Exception ignored) {}
+        try {
+            db.execSQL("ALTER TABLE sync_queue ADD COLUMN document_uuid TEXT");
+        } catch (Exception ignored) {}
+        try {
+            db.execSQL("ALTER TABLE sync_queue ADD COLUMN cfi TEXT");
+        } catch (Exception ignored) {}
 
         // Таблица глав
         db.execSQL("CREATE TABLE IF NOT EXISTS chapters (" +
@@ -353,9 +371,13 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     targetShelf = "to_read";
                 } else if ("done".equals(book.getShelfType()) || (effectivePercent >= 99.0 && effectiveChapter > 0)) {
                     targetShelf = "done";
+                } else if (effectivePercent > 0.0 && effectivePercent < 99.0 && !localToReadIsNewer) {
+                    targetShelf = "reading";
                 } else {
                     targetShelf = book.getShelfType();
                 }
+            } else if (effectivePercent > 0.0 && effectivePercent < 99.0) {
+                targetShelf = "reading";
             } else if (localShelfType != null) {
                 targetShelf = localShelfType;
             } else {
@@ -372,6 +394,12 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             }
             if (effectiveCardId != null && !effectiveCardId.isEmpty()) {
                 cv.put("card_id", effectiveCardId);
+            }
+            if (book.getDocumentUuid() != null && !book.getDocumentUuid().isEmpty()) {
+                cv.put("document_uuid", book.getDocumentUuid());
+            }
+            if (book.getCfi() != null && !book.getCfi().isEmpty()) {
+                cv.put("cfi", book.getCfi());
             }
 
             cv.put("title", book.getTitle());
@@ -496,6 +524,28 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         ContentValues cv = new ContentValues();
         cv.put("card_id", cardId);
         db.update("books", cv, "uuid = ?", new String[]{uuid});
+    }
+
+    public synchronized void updateBookDocumentUuid(String uuid, String docUuid) {
+        if (uuid == null || uuid.isEmpty() || docUuid == null || docUuid.isEmpty()) return;
+        SQLiteDatabase db = getWritableDatabase();
+        ContentValues cv = new ContentValues();
+        cv.put("document_uuid", docUuid);
+        db.update("books", cv, "uuid = ?", new String[]{uuid});
+    }
+
+    public synchronized String getBookDocumentUuid(String uuid) {
+        if (uuid == null || uuid.isEmpty()) return null;
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor c = db.rawQuery("SELECT document_uuid FROM books WHERE uuid = ?", new String[]{uuid});
+        String docUuid = null;
+        if (c != null) {
+            if (c.moveToFirst()) {
+                docUuid = c.getString(0);
+            }
+            c.close();
+        }
+        return docUuid;
     }
 
     public synchronized void resetReadingProgress(String uuid) {
@@ -628,6 +678,16 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             b.setLibraryCardId(c.getString(cardIdx));
         }
 
+        int docIdx = c.getColumnIndex("document_uuid");
+        if (docIdx >= 0) {
+            b.setDocumentUuid(c.getString(docIdx));
+        }
+
+        int cfiIdx = c.getColumnIndex("cfi");
+        if (cfiIdx >= 0) {
+            b.setCfi(c.getString(cfiIdx));
+        }
+
         return b;
     }
 
@@ -679,6 +739,12 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         cv.put("page_index", progress.getPageIndex());
         cv.put("timestamp", progress.getTimestamp());
         cv.put("is_synced", progress.isSyncedWithServer() ? 1 : 0);
+        if (progress.getCfi() != null && !progress.getCfi().isEmpty()) {
+            cv.put("cfi", progress.getCfi());
+        }
+        if (progress.getDocumentUuid() != null && !progress.getDocumentUuid().isEmpty()) {
+            cv.put("document_uuid", progress.getDocumentUuid());
+        }
         db.insertWithOnConflict("progress", null, cv, SQLiteDatabase.CONFLICT_REPLACE);
 
         // Также обновляем процент, главы, полку и таймштамп в таблице books
@@ -694,6 +760,12 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         }
         if (progress.getLibraryCardId() != null && !progress.getLibraryCardId().isEmpty()) {
             bookCv.put("card_id", progress.getLibraryCardId());
+        }
+        if (progress.getCfi() != null && !progress.getCfi().isEmpty()) {
+            bookCv.put("cfi", progress.getCfi());
+        }
+        if (progress.getDocumentUuid() != null && !progress.getDocumentUuid().isEmpty()) {
+            bookCv.put("document_uuid", progress.getDocumentUuid());
         }
         db.update("books", bookCv, "uuid = ?", new String[]{progress.getBookUuid()});
     }
@@ -712,17 +784,37 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 p.setPageIndex(c.getInt(c.getColumnIndex("page_index")));
                 p.setTimestamp(c.getLong(c.getColumnIndex("timestamp")));
                 p.setSyncedWithServer(c.getInt(c.getColumnIndex("is_synced")) == 1);
+                int cfiIdx = c.getColumnIndex("cfi");
+                if (cfiIdx >= 0) {
+                    p.setCfi(c.getString(cfiIdx));
+                }
+                int docIdx = c.getColumnIndex("document_uuid");
+                if (docIdx >= 0) {
+                    p.setDocumentUuid(c.getString(docIdx));
+                }
             }
             c.close();
         }
         if (p != null) {
             try {
-                Cursor bc = db.rawQuery("SELECT card_id FROM books WHERE uuid = ?", new String[]{bookUuid});
+                Cursor bc = db.rawQuery("SELECT card_id, document_uuid, cfi FROM books WHERE uuid = ?", new String[]{bookUuid});
                 if (bc != null) {
                     if (bc.moveToFirst()) {
                         String cardId = bc.getString(0);
                         if (cardId != null && !cardId.isEmpty()) {
                             p.setLibraryCardId(cardId);
+                        }
+                        if (p.getDocumentUuid() == null || p.getDocumentUuid().isEmpty()) {
+                            String dUuid = bc.getString(1);
+                            if (dUuid != null && !dUuid.isEmpty()) {
+                                p.setDocumentUuid(dUuid);
+                            }
+                        }
+                        if (p.getCfi() == null || p.getCfi().isEmpty()) {
+                            String savedCfi = bc.getString(2);
+                            if (savedCfi != null && !savedCfi.isEmpty()) {
+                                p.setCfi(savedCfi);
+                            }
                         }
                     }
                     bc.close();
@@ -741,6 +833,12 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         cv.put("chapter_index", p.getChapterIndex());
         cv.put("paragraph_index", p.getParagraphIndex());
         cv.put("timestamp", p.getTimestamp());
+        if (p.getCfi() != null && !p.getCfi().isEmpty()) {
+            cv.put("cfi", p.getCfi());
+        }
+        if (p.getDocumentUuid() != null && !p.getDocumentUuid().isEmpty()) {
+            cv.put("document_uuid", p.getDocumentUuid());
+        }
         // Заменяем старую запись в очереди, сохраняя только свежую позицию
         db.delete("sync_queue", "book_uuid = ?", new String[]{p.getBookUuid()});
         db.insert("sync_queue", null, cv);

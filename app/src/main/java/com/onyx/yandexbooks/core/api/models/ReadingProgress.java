@@ -14,6 +14,8 @@ public class ReadingProgress implements Serializable {
     private long timestamp;
     private boolean isSyncedWithServer;
     private String libraryCardId;
+    private String cfi;
+    private String documentUuid;
 
     public ReadingProgress() {}
 
@@ -50,4 +52,10 @@ public class ReadingProgress implements Serializable {
 
     public String getLibraryCardId() { return libraryCardId; }
     public void setLibraryCardId(String libraryCardId) { this.libraryCardId = libraryCardId; }
+
+    public String getCfi() { return cfi; }
+    public void setCfi(String cfi) { this.cfi = cfi; }
+
+    public String getDocumentUuid() { return documentUuid; }
+    public void setDocumentUuid(String documentUuid) { this.documentUuid = documentUuid; }
 }

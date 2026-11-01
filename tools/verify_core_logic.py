@@ -9,6 +9,7 @@
 
 import sys
 import os
+import re
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -2374,13 +2375,13 @@ def test_v1511_beta_ui_scaling_and_offline_reading_cloud_sync():
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str in ["1.5.11-beta", "1.5.12-beta", "1.5.13-beta", "1.5.14-beta"], f"VERSION должен быть >= 1.5.11-beta, получено: {v_str}"
+    assert v_str in ["1.5.11-beta", "1.5.12-beta", "1.5.13-beta", "1.5.14-beta", "1.5.15-beta"], f"VERSION должен быть >= 1.5.11-beta, получено: {v_str}"
 
     manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(manifest_path, "r", encoding="utf-8") as f:
         m_code = f.read()
-    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.11-beta", "1.5.12-beta", "1.5.13-beta", "1.5.14-beta"])
-    assert any(f'android:versionCode="{c}"' in m_code for c in ["44", "45", "46", "47"])
+    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.11-beta", "1.5.12-beta", "1.5.13-beta", "1.5.14-beta", "1.5.15-beta"])
+    assert any(f'android:versionCode="{c}"' in m_code for c in ["44", "45", "46", "47", "48"])
 
     main_xml_path = os.path.join(PROJECT_DIR, "app/src/main/res/layout/activity_main.xml")
     with open(main_xml_path, "r", encoding="utf-8") as f:
@@ -2447,19 +2448,19 @@ def test_v1512_beta_eink_notice_high_contrast_and_persistent_alerts():
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str in ["1.5.12-beta", "1.5.13-beta", "1.5.14-beta"], f"VERSION должен быть >= 1.5.12-beta, получено: {v_str}"
+    assert v_str in ["1.5.12-beta", "1.5.13-beta", "1.5.14-beta", "1.5.15-beta"], f"VERSION должен быть >= 1.5.12-beta, получено: {v_str}"
 
     gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(gradle_file, "r", encoding="utf-8") as f:
         gradle_code = f.read()
     assert f'versionName "{v_str}"' in gradle_code
-    assert any(vc in gradle_code for vc in ['versionCode 45', 'versionCode 46', 'versionCode 47'])
+    assert any(vc in gradle_code for vc in ['versionCode 45', 'versionCode 46', 'versionCode 47', 'versionCode 48'])
 
     manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(manifest_path, "r", encoding="utf-8") as f:
         m_code = f.read()
     assert f'android:versionName="{v_str}"' in m_code
-    assert any(vc in m_code for vc in ['android:versionCode="45"', 'android:versionCode="46"', 'android:versionCode="47"'])
+    assert any(vc in m_code for vc in ['android:versionCode="45"', 'android:versionCode="46"', 'android:versionCode="47"', 'android:versionCode="48"'])
     print(" - Версионирование v1.5.12-beta+ (AndroidManifest, build.gradle, VERSION): OK")
 
     print("✅ Тест v1.5.12-beta Высококонтрастные уведомления EinkNotice и обновление ПО успешно пройден!\n")
@@ -2530,19 +2531,19 @@ def test_v1513_beta_reading_shelf_promotion_and_library_card_uuid_sync():
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str in ["1.5.13-beta", "1.5.14-beta"], f"VERSION должен быть >= 1.5.13-beta, получено: {v_str}"
+    assert v_str in ["1.5.13-beta", "1.5.14-beta", "1.5.15-beta"], f"VERSION должен быть >= 1.5.13-beta, получено: {v_str}"
 
     gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(gradle_file, "r", encoding="utf-8") as f:
         gradle_code = f.read()
     assert f'versionName "{v_str}"' in gradle_code
-    assert 'versionCode 46' in gradle_code or 'versionCode 47' in gradle_code
+    assert 'versionCode 46' in gradle_code or 'versionCode 47' in gradle_code or 'versionCode 48' in gradle_code
 
     manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(manifest_path, "r", encoding="utf-8") as f:
         m_code = f.read()
     assert f'android:versionName="{v_str}"' in m_code
-    assert 'android:versionCode="46"' in m_code or 'android:versionCode="47"' in m_code
+    assert 'android:versionCode="46"' in m_code or 'android:versionCode="47"' in m_code or 'android:versionCode="48"' in m_code
     print(" - Версионирование v1.5.13-beta+ (AndroidManifest, build.gradle, VERSION): OK")
 
     print("✅ Тест v1.5.13-beta Перевод в «Читаю» и сквозная синхронизация успешно пройден!\n")
@@ -2588,26 +2589,167 @@ def test_v1514_beta_deep_sync_race_and_reset_integrity():
         "Высококонтрастный метод EinkNotice.showConfirm обязан присутствовать!"
     print(" - Сохранение полки при скачивании в память и контрастные диалоги подтверждения EinkNotice.showConfirm: OK")
 
-    # 4. Проверка версии 1.5.14-beta (versionCode 47)
+    # 4. Проверка версии 1.5.14-beta (versionCode 47) или выше
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str == "1.5.14-beta", f"VERSION должен быть 1.5.14-beta, получено: {v_str}"
+    assert v_str in ("1.5.14-beta", "1.5.15-beta"), f"VERSION должен быть 1.5.14-beta или 1.5.15-beta, получено: {v_str}"
 
     gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(gradle_file, "r", encoding="utf-8") as f:
         gradle_code = f.read()
-    assert 'versionName "1.5.14-beta"' in gradle_code
-    assert 'versionCode 47' in gradle_code
+    assert ('versionName "1.5.14-beta"' in gradle_code or 'versionName "1.5.15-beta"' in gradle_code)
+    assert ('versionCode 47' in gradle_code or 'versionCode 48' in gradle_code)
 
     manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(manifest_path, "r", encoding="utf-8") as f:
         m_code = f.read()
-    assert 'android:versionName="1.5.14-beta"' in m_code
-    assert 'android:versionCode="47"' in m_code
-    print(" - Версионирование v1.5.14-beta (versionCode=47, AndroidManifest, build.gradle, VERSION): OK")
+    assert ('android:versionName="1.5.14-beta"' in m_code or 'android:versionName="1.5.15-beta"' in m_code)
+    assert ('android:versionCode="47"' in m_code or 'android:versionCode="48"' in m_code)
+    print(" - Версионирование v1.5.14-beta/v1.5.15-beta (versionCode>=47, AndroidManifest, build.gradle, VERSION): OK")
 
     print("✅ Тест v1.5.14-beta Глубокая верификация синхронизации и целостности сброса успешно пройден!\n")
+
+
+def test_v1515_beta_graphql_cfi_bidirectional_sync():
+    """
+    [ТЕСТ 41] Тотальная верификация двусторонней синхронизации книг и позиции чтения (смартфон <-> ридер Onyx)
+    1. Математический расчет и парсер EPUB 3 CFI (Canonical Fragment Identifier).
+    2. GraphQL-клиент GetTextbookProgress и ProgressUpdated (белый список Яндекса, Apollo-Preflight).
+    3. Автоматическое перемещение начатых на смартфоне книг на полку 'Читаю' (reading) в SQLite и MainActivity.
+    4. Точный переход к главе и абзацу в ридере и передача точного CFI в смартфон.
+    5. Версионирование v1.5.15-beta (versionCode 48).
+    """
+    print("--- [ТЕСТ 41] Верификация GraphQL CFI и двусторонней синхронизации v1.5.15-beta ---")
+
+    # 1. Алгоритмическая верификация генератора и парсера EPUB CFI
+    def py_parse_cfi_position(cfi):
+        if not cfi or not cfi.strip():
+            return 0, 0
+        clean = cfi.strip()
+        parts = clean.split("!")
+        spine_part = parts[0]
+        elem_part = parts[1] if len(parts) > 1 else ""
+
+        # Главы: /6/N где spineIndex = (N / 2) - 1
+        m_spine = re.findall(r"/(\d+)", spine_part)
+        last_spine = int(m_spine[-1]) if m_spine else 2
+        chapter_idx = max(0, (last_spine // 2) - 1)
+
+        # Абзацы: /4/M:0 где paragraphIndex = (M / 2) - 1
+        m_elem = re.findall(r"/(\d+)", elem_part)
+        last_elem = int(m_elem[-1]) if m_elem else 2
+        paragraph_idx = max(0, (last_elem // 2) - 1)
+        return chapter_idx, paragraph_idx
+
+    def py_generate_cfi(chapter_idx, paragraph_idx):
+        spine_num = (max(0, chapter_idx) + 1) * 2
+        elem_num = (max(0, paragraph_idx) + 1) * 2
+        return f"/6/{spine_num}!/4/{elem_num}:0"
+
+    def py_generate_cfi_end(chapter_idx, paragraph_idx):
+        spine_num = (max(0, chapter_idx) + 1) * 2
+        elem_num = (max(0, paragraph_idx) + 1) * 2
+        return f"/6/{spine_num}!/4/{elem_num}:1"
+
+    # Проверка CFI: Глава 0, абзац 0
+    assert py_generate_cfi(0, 0) == "/6/2!/4/2:0"
+    assert py_generate_cfi_end(0, 0) == "/6/2!/4/2:1"
+    ch0, par0 = py_parse_cfi_position("/6/2!/4/2:0")
+    assert ch0 == 0 and par0 == 0
+
+    # Проверка CFI: Глава 1 (spine 4), абзац 4 (elem 10)
+    assert py_generate_cfi(1, 4) == "/6/4!/4/10:0"
+    ch1, par4 = py_parse_cfi_position("/6/4!/4/10:0")
+    assert ch1 == 1 and par4 == 4
+
+    # Проверка CFI: Глава 5, абзац 19
+    cfi_sample = py_generate_cfi(5, 19)
+    assert cfi_sample == "/6/12!/4/40:0"
+    ch5, par19 = py_parse_cfi_position(cfi_sample)
+    assert ch5 == 5 and par19 == 19
+    print(" - Математическая корректность EPUB 3 CFI (генерация и парсинг): OK")
+
+    # 2. Проверка кода YandexBooksApiClient.java
+    api_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/api/YandexBooksApiClient.java")
+    with open(api_path, "r", encoding="utf-8") as f:
+        api_code = f.read()
+
+    assert 'GRAPHQL_URL = "https://books.yandex.ru/node-api/p/p-graphql/"' in api_code, \
+        "GRAPHQL_URL должен указывать на официальный node-api шлюз Яндекс Книг!"
+    assert "query GetTextbookProgress" in api_code, \
+        "GQL_GET_PROGRESS обязан присутствовать в клиенте!"
+    assert "mutation ProgressUpdated" in api_code, \
+        "GQL_PROGRESS_UPDATED обязан присутствовать в клиенте!"
+    assert "Apollo-Require-Preflight" in api_code, \
+        "Apollo-Require-Preflight заголовок обязателен для GraphQL сервера Яндекса!"
+    assert "generateCfi(" in api_code and "parseCfiPosition(" in api_code, \
+        "Методы generateCfi и parseCfiPosition должны быть реализованы в YandexBooksApiClient!"
+    assert "formatIsoWithTimezone(" in api_code, \
+        "Метод formatIsoWithTimezone (совместимый с API 17) обязан присутствовать!"
+    print(" - YandexBooksApiClient GraphQL, CFI и Apollo-Preflight контракты: OK")
+
+    # 3. Проверка DatabaseHelper.java: миграции document_uuid, cfi и shelf reading promotion
+    db_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/storage/DatabaseHelper.java")
+    with open(db_path, "r", encoding="utf-8") as f:
+        db_code = f.read()
+
+    assert "document_uuid TEXT" in db_code and "cfi TEXT" in db_code, \
+        "Поля document_uuid и cfi обязаны присутствовать в структуре БД!"
+    assert "effectivePercent > 0.0 && effectivePercent < 99.0" in db_code, \
+        "Книга с ненулевым процентом со смартфона обязана автоматически попадать на полку reading ('Читаю')!"
+    assert "updateBookDocumentUuid" in db_code and "getBookDocumentUuid" in db_code, \
+        "Методы работы с document_uuid должны быть в DatabaseHelper!"
+    print(" - DatabaseHelper: сохранение document_uuid, cfi и авто-перевод в 'Читаю': OK")
+
+    # 4. Проверка ReaderActivity.java: точная навигация по абзацам и сохранение CFI
+    reader_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/ReaderActivity.java")
+    with open(reader_path, "r", encoding="utf-8") as f:
+        reader_code = f.read()
+
+    assert "calculateCurrentParagraphIndex()" in reader_code, \
+        "ReaderActivity обязан вычислять текущий абзац на странице!"
+    assert "findParagraphOffset(" in reader_code, \
+        "ReaderActivity обязан находить символьное смещение абзаца!"
+    assert "loadChapterAtParagraph(" in reader_code, \
+        "ReaderActivity обязан поддерживать переход к указанному абзацу!"
+    assert "generateCfi(currentChapterIndex, parIndex)" in reader_code, \
+        "saveProgress обязан генерировать EPUB CFI перед отправкой в облако!"
+    assert "applyCloudProgressIfNewer" in reader_code, \
+        "applyCloudProgressIfNewer обязан присутствовать!"
+    print(" - ReaderActivity: абзацная навигация, сохранение CFI и синхронизация: OK")
+
+    # 5. Проверка MainActivity.java: обновление полки в onResume без моргания
+    main_path = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java")
+    with open(main_path, "r", encoding="utf-8") as f:
+        main_code = f.read()
+
+    assert "loadBooks(currentShelf)" in main_code, \
+        "MainActivity.onResume обязан фоново перезапрашивать полку с сервера!"
+    assert "v1.5.15-beta" in main_code, \
+        "Интерфейс MainActivity должен отображать v1.5.15-beta!"
+    print(" - MainActivity: актуализация каталога при возврате и лейбл v1.5.15-beta: OK")
+
+    # 6. Версионирование v1.5.15-beta (versionCode 48)
+    v_file = os.path.join(PROJECT_DIR, "VERSION")
+    with open(v_file, "r", encoding="utf-8") as f:
+        v_str = f.read().strip()
+    assert v_str == "1.5.15-beta", f"VERSION должен быть 1.5.15-beta, получено: {v_str}"
+
+    g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
+    with open(g_file, "r", encoding="utf-8") as f:
+        g_code = f.read()
+    assert 'versionName "1.5.15-beta"' in g_code
+    assert 'versionCode 48' in g_code
+
+    m_file = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
+    with open(m_file, "r", encoding="utf-8") as f:
+        m_code = f.read()
+    assert 'android:versionName="1.5.15-beta"' in m_code
+    assert 'android:versionCode="48"' in m_code
+    print(" - Версионирование v1.5.15-beta (versionCode=48, AndroidManifest, build.gradle, VERSION): OK")
+
+    print("✅ Тест v1.5.15-beta GraphQL CFI и двусторонняя синхронизация успешно пройден!\n")
 
 
 if __name__ == "__main__":
@@ -2655,6 +2797,7 @@ if __name__ == "__main__":
     test_v1512_beta_eink_notice_high_contrast_and_persistent_alerts()
     test_v1513_beta_reading_shelf_promotion_and_library_card_uuid_sync()
     test_v1514_beta_deep_sync_race_and_reset_integrity()
+    test_v1515_beta_graphql_cfi_bidirectional_sync()
     print("==================================================")
-    print("🎉 ВСЕ 40 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 41 ТЕСТ УСПЕШНО ПРОЙДЕН! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")

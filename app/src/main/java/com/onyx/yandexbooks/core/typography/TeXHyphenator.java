@@ -17,13 +17,22 @@ public class TeXHyphenator {
 
     private static TeXHyphenator instance;
 
-    // Кэш точек переноса для частотных русских слов (ускорение до 10x при пагинации)
-    private final Map<String, List<Integer>> hyphenCache = new java.util.LinkedHashMap<String, List<Integer>>(512, 0.75f, true) {
-        @Override
-        protected boolean removeEldestEntry(Map.Entry<String, List<Integer>> eldest) {
-            return size() > 2048;
+    private static class HyphenLruCache<K, V> extends java.util.LinkedHashMap<K, V> {
+        private final int maxEntries;
+
+        HyphenLruCache(int initialCapacity, float loadFactor, int maxEntries) {
+            super(initialCapacity, loadFactor, true);
+            this.maxEntries = maxEntries;
         }
-    };
+
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {
+            return size() > maxEntries;
+        }
+    }
+
+    // Кэш точек переноса для частотных русских слов (ускорение до 10x при пагинации)
+    private final Map<String, List<Integer>> hyphenCache = new HyphenLruCache<String, List<Integer>>(512, 0.75f, 2048);
 
     public static synchronized TeXHyphenator getInstance() {
         if (instance == null) {

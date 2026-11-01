@@ -36,6 +36,25 @@ public final class EinkNotice {
     private static final Handler sMainHandler = new Handler(Looper.getMainLooper());
     private static Dialog sCurrentDialog = null;
 
+    private static class MaxHeightScrollView extends EinkScrollView {
+        private final int maxHeight;
+
+        MaxHeightScrollView(Context context, int maxHeight) {
+            super(context);
+            this.maxHeight = maxHeight;
+        }
+
+        @Override
+        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            int hMode = MeasureSpec.getMode(heightMeasureSpec);
+            int hSize = MeasureSpec.getSize(heightMeasureSpec);
+            if (hMode == MeasureSpec.UNSPECIFIED || hSize > maxHeight) {
+                heightMeasureSpec = MeasureSpec.makeMeasureSpec(maxHeight, MeasureSpec.AT_MOST);
+            }
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+        }
+    }
+
     private EinkNotice() {}
 
     /**
@@ -129,17 +148,7 @@ public final class EinkNotice {
             root.addView(divider, divLp);
 
             final int maxScrollH = (int) (dm.heightPixels * 0.55);
-            EinkScrollView scrollView = new EinkScrollView(activity) {
-                @Override
-                protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-                    int hMode = MeasureSpec.getMode(heightMeasureSpec);
-                    int hSize = MeasureSpec.getSize(heightMeasureSpec);
-                    if (hMode == MeasureSpec.UNSPECIFIED || hSize > maxScrollH) {
-                        heightMeasureSpec = MeasureSpec.makeMeasureSpec(maxScrollH, MeasureSpec.AT_MOST);
-                    }
-                    super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-                }
-            };
+            EinkScrollView scrollView = new MaxHeightScrollView(activity, maxScrollH);
             scrollView.setFadingEdgeLength(0);
             scrollView.setOverScrollMode(View.OVER_SCROLL_NEVER);
             root.addView(scrollView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -311,17 +320,7 @@ public final class EinkNotice {
 
             // Текст сообщения (в EinkScrollView с ограничением по высоте до 55% экрана)
             final int maxScrollH = (int) (dm.heightPixels * 0.55);
-            EinkScrollView scrollView = new EinkScrollView(activity) {
-                @Override
-                protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-                    int hMode = MeasureSpec.getMode(heightMeasureSpec);
-                    int hSize = MeasureSpec.getSize(heightMeasureSpec);
-                    if (hMode == MeasureSpec.UNSPECIFIED || hSize > maxScrollH) {
-                        heightMeasureSpec = MeasureSpec.makeMeasureSpec(maxScrollH, MeasureSpec.AT_MOST);
-                    }
-                    super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-                }
-            };
+            EinkScrollView scrollView = new MaxHeightScrollView(activity, maxScrollH);
             scrollView.setFadingEdgeLength(0);
             scrollView.setOverScrollMode(View.OVER_SCROLL_NEVER);
             LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);

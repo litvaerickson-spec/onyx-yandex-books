@@ -41,6 +41,19 @@ public class TextPaginator {
         }
     }
 
+    private static class PaintTextWidthMeasurer implements TeXHyphenator.TextWidthMeasurer {
+        private final Paint paint;
+
+        PaintTextWidthMeasurer(Paint paint) {
+            this.paint = paint;
+        }
+
+        @Override
+        public float measureWidth(String text) {
+            return paint.measureText(text);
+        }
+    }
+
     private final TeXHyphenator hyphenator;
 
     public TextPaginator() {
@@ -74,12 +87,7 @@ public class TextPaginator {
         float spaceWidth = paint.measureText(" ");
         boolean lastWasEmptyLine = false;
 
-        TeXHyphenator.TextWidthMeasurer measurer = new TeXHyphenator.TextWidthMeasurer() {
-            @Override
-            public float measureWidth(String text) {
-                return paint.measureText(text);
-            }
-        };
+        PaintTextWidthMeasurer measurer = new PaintTextWidthMeasurer(paint);
 
         for (String paragraph : paragraphs) {
             String trimmed = paragraph.trim();

@@ -22,7 +22,10 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.Random;
 import java.util.TimeZone;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import okhttp3.Call;
 import okhttp3.Callback;
@@ -39,7 +42,37 @@ public class YandexBooksApiClient {
 
     private static final String TAG = "YandexBooksApi";
     private static final String BASE_URL = "https://api.bookmate.yandex.net/api/v5";
+    private static final String GRAPHQL_URL = "https://books.yandex.ru/node-api/p/p-graphql/";
     private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json; charset=utf-8");
+
+    public static final String GQL_GET_PROGRESS =
+            "\nquery GetTextbookProgress($uuid: ID!) {\n" +
+            "  textBook(uuid: $uuid) {\n" +
+            "    document {\n" +
+            "      currentPosition {\n" +
+            "        cfi {\n" +
+            "          start\n" +
+            "          end\n" +
+            "        }\n" +
+            "      }\n" +
+            "    }\n" +
+            "  }\n" +
+            "}\n";
+
+    public static final String GQL_PROGRESS_UPDATED =
+            "\nmutation ProgressUpdated(\n" +
+            "    $textbookProgresses: [TextbookProgressUpdatedInput!],\n" +
+            "    $textSerialProgresses: [TextSerialProgressUpdatedInput!],\n" +
+            "    $audiobookProgresses: [AudiobookProgressUpdatedInput!]\n" +
+            ") {\n" +
+            "    progressUpdated(\n" +
+            "        textbookProgresses: $textbookProgresses,\n" +
+            "        textSerialProgresses: $textSerialProgresses,\n" +
+            "        audiobookProgresses: $audiobookProgresses\n" +
+            "    ) {\n" +
+            "        value\n" +
+            "    }\n" +
+            "}\n";
 
     public interface ApiCallback<T> {
         void onSuccess(T result);
@@ -71,6 +104,22 @@ public class YandexBooksApiClient {
         builder.addHeader("App-User-Agent", "Samsung/Galaxy_A51 Android/12 Bookmate/3.7.3");
         builder.addHeader("Accept", "application/json");
         builder.addHeader("User-Agent", "okhttp/3.12.13");
+        return builder;
+    }
+
+    private Request.Builder createGraphQLRequestBuilder(String url) {
+        String token = tokenStorage.getAccessToken();
+        Request.Builder builder = new Request.Builder().url(url);
+        if (token != null && !token.isEmpty()) {
+            builder.addHeader("Auth-Token", token);
+            builder.addHeader("Authorization", "OAuth " + token);
+        }
+        builder.addHeader("Apollo-Require-Preflight", "true");
+        builder.addHeader("Content-Type", "application/json");
+        builder.addHeader("Accept", "application/json");
+        builder.addHeader("App-Platform", "android");
+        builder.addHeader("App-Language", "ru");
+        builder.addHeader("User-Agent", "Mozilla/5.0");
         return builder;
     }
 
@@ -174,6 +223,116 @@ public class YandexBooksApiClient {
         public int chapterIndex = 0;
         public int paragraphIndex = 0;
         public long timestamp = 0L;
+        public String cfi = "";
+        public String documentUuid = "";
+    }
+
+    public static class CfiPosition {
+        public final int chapterIndex;
+        public final int paragraphIndex;
+        public final String rawCfi;
+
+        public CfiPosition(int chapterIndex, int paragraphIndex, String rawCfi) {
+            this.chapterIndex = chapterIndex;
+            this.paragraphIndex = paragraphIndex;
+            this.rawCfi = rawCfi;
+        }
+    }
+
+    public static CfiPosition parseCfiPosition(String cfi) {
+        if (cfi == null || cfi.trim().isEmpty()) {
+            return new CfiPosition(0, 0, "");
+        }
+        String clean = cfi.trim();
+        String[] parts = clean.split("!");
+        String spinePart = parts[0];
+        String elemPart = parts.length > 1 ? parts[1] : "";
+
+        int chapterIndex = 0;
+        Matcher mSpine = Pattern.compile("/(\\d+)").matcher(spinePart);
+        int lastSpineNum = -1;
+        while (mSpine.find()) {
+            try {
+                lastSpineNum = Integer.parseInt(mSpine.group(1));
+            } catch (Exception ignored) {}
+        }
+        if (lastSpineNum > 0) {
+            chapterIndex = Math.max(0, (lastSpineNum / 2) - 1);
+        }
+
+        int paragraphIndex = 0;
+        if (!elemPart.isEmpty()) {
+            String elemPath = elemPart.contains(":") ? elemPart.substring(0, elemPart.indexOf(':')) : elemPart;
+            Matcher mElem = Pattern.compile("/(\\d+)").matcher(elemPath);
+            int lastElemNum = -1;
+            while (mElem.find()) {
+                try {
+                    lastElemNum = Integer.parseInt(mElem.group(1));
+                } catch (Exception ignored) {}
+            }
+            if (lastElemNum > 0) {
+                paragraphIndex = Math.max(0, (lastElemNum / 2) - 1);
+            }
+        }
+
+        return new CfiPosition(chapterIndex, paragraphIndex, clean);
+    }
+
+    public static String generateCfi(int chapterIndex, int paragraphIndex) {
+        int itemNum = Math.max(2, (chapterIndex + 1) * 2);
+        int pNum = Math.max(2, (paragraphIndex + 1) * 2);
+        return "/6/" + itemNum + "!/4/" + pNum + ":0";
+    }
+
+    public static String generateCfiEnd(int chapterIndex, int paragraphIndex) {
+        int itemNum = Math.max(2, (chapterIndex + 1) * 2);
+        int pNum = Math.max(2, (paragraphIndex + 1) * 2);
+        return "/6/" + itemNum + "!/4/" + pNum + ":100";
+    }
+
+    public static String formatIsoWithTimezone(long timestamp) {
+        long effectiveTs = timestamp > 0 ? timestamp : System.currentTimeMillis();
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US);
+        TimeZone tz = TimeZone.getDefault();
+        sdf.setTimeZone(tz);
+        String base = sdf.format(new Date(effectiveTs));
+        int offsetMillis = tz.getOffset(effectiveTs);
+        int offsetHours = Math.abs(offsetMillis) / (3600 * 1000);
+        int offsetMins = (Math.abs(offsetMillis) % (3600 * 1000)) / (60 * 1000);
+        String sign = offsetMillis >= 0 ? "+" : "-";
+        return String.format(Locale.US, "%s%s%02d:%02d", base, sign, offsetHours, offsetMins);
+    }
+
+    public static String generateSessionId() {
+        Random r = new Random();
+        StringBuilder sb = new StringBuilder(16);
+        for (int i = 0; i < 16; i++) {
+            sb.append(Integer.toHexString(r.nextInt(16)));
+        }
+        return sb.toString();
+    }
+
+    public String fetchDocumentUuidSync(String bookUuid) {
+        if (bookUuid == null || bookUuid.isEmpty()) return "";
+        Response response = null;
+        try {
+            Request req = createAuthRequestBuilder(BASE_URL + "/books/" + bookUuid + "/metadata/v4").get().build();
+            response = httpClient.newCall(req).execute();
+            if (response.isSuccessful() && response.body() != null) {
+                String body = response.body().string();
+                JSONObject json = new JSONObject(body);
+                String docUuid = json.optString("document_uuid", json.optString("uuid", ""));
+                if (!docUuid.isEmpty()) {
+                    return docUuid;
+                }
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (response != null) {
+                try { response.close(); } catch (Exception ignored) {}
+            }
+        }
+        return bookUuid;
     }
 
     public static String extractLibraryCardId(JSONObject card, JSONObject bObj, String bookUuid) {
@@ -444,21 +603,14 @@ public class YandexBooksApiClient {
             if (lc != null) state = lc.optString("state", "");
         }
         String mappedShelf;
-        if ("reading".equalsIgnoreCase(state)) {
+        if ("reading".equalsIgnoreCase(state) || (pr.percent > 0.0 && pr.percent < 99.0)) {
             mappedShelf = "reading";
         } else if ("want_to_read".equalsIgnoreCase(state) || "to_read".equalsIgnoreCase(state) || "planned".equalsIgnoreCase(state)) {
             mappedShelf = "to_read";
-        } else if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state) || "completed".equalsIgnoreCase(state) || "done".equalsIgnoreCase(state)) {
+        } else if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state) || "completed".equalsIgnoreCase(state) || "done".equalsIgnoreCase(state) || (pr.percent >= 99.0 && pr.chapterIndex > 0)) {
             mappedShelf = "done";
         } else {
-            // Если state неизвестен, классифицируем по прогрессу
-            if (pr.percent >= 99.0 && pr.chapterIndex > 0) {
-                mappedShelf = "done";
-            } else if (pr.percent > 0.0) {
-                mappedShelf = "reading";
-            } else {
-                mappedShelf = "to_read";
-            }
+            mappedShelf = "to_read";
         }
 
         // Парсинг аннотации
@@ -474,6 +626,14 @@ public class YandexBooksApiClient {
         String cardId = extractLibraryCardId(card, bObj, uuid);
         if (!cardId.isEmpty()) {
             book.setLibraryCardId(cardId);
+        }
+
+        String docUuid = bObj.optString("document_uuid", card.optString("document_uuid", ""));
+        if (!docUuid.isEmpty()) {
+            book.setDocumentUuid(docUuid);
+        }
+        if (pr.cfi != null && !pr.cfi.isEmpty()) {
+            book.setCfi(pr.cfi);
         }
 
         book.setTitle(title);
@@ -694,52 +854,127 @@ public class YandexBooksApiClient {
     }
 
     /**
-     * Запрос актуальной позиции чтения из облака Яндекса.
+     * Запрос актуальной позиции чтения из облака Яндекса с поддержкой GraphQL (EPUB CFI) и Bookmate API.
      */
     public void getReadingProgress(final String bookUuid, final ApiCallback<ReadingProgress> callback) {
-        String endpoint = BASE_URL + "/profile/library_cards?book_uuid=" + bookUuid + "&per_page=100";
-        Request request = createAuthRequestBuilder(endpoint).get().build();
+        if (bookUuid == null || bookUuid.isEmpty()) {
+            postError(callback, "Пустой UUID книги");
+            return;
+        }
 
-        httpClient.newCall(request).enqueue(new Callback() {
+        new Thread(new Runnable() {
             @Override
-            public void onFailure(Call call, IOException e) {
-                getReadingProgressFallback(bookUuid, callback);
-            }
-
-            @Override
-            public void onResponse(Call call, Response response) throws IOException {
-                if (!response.isSuccessful()) {
-                    response.close();
-                    getReadingProgressFallback(bookUuid, callback);
-                    return;
-                }
+            public void run() {
                 try {
-                    String body = response.body().string();
-                    JSONObject json = new JSONObject(body);
-                    JSONArray arr = json.optJSONArray("library_cards");
-                    if (arr != null && arr.length() > 0) {
-                        JSONObject card = findMatchingLibraryCardInArray(arr, bookUuid);
-                        if (card != null) {
-                            JSONObject bObj = card.optJSONObject("book");
-                            ParsedProgress pr = extractProgress(card, bObj);
-                            final ReadingProgress progress = new ReadingProgress(bookUuid, pr.percent, pr.chapterIndex, pr.paragraphIndex, 0, pr.timestamp);
-                            String cardId = extractLibraryCardId(card, bObj, bookUuid);
-                            if (!cardId.isEmpty()) {
-                                progress.setLibraryCardId(cardId);
+                    // 1. Попытка запроса точной позиции чтения через GraphQL (GetTextbookProgress)
+                    String gqlCfiStart = null;
+                    Response gqlResp = null;
+                    try {
+                        JSONObject gqlBody = new JSONObject();
+                        gqlBody.put("query", GQL_GET_PROGRESS);
+                        JSONObject vars = new JSONObject();
+                        vars.put("uuid", bookUuid);
+                        gqlBody.put("variables", vars);
+
+                        Request gqlReq = createGraphQLRequestBuilder(GRAPHQL_URL)
+                                .post(RequestBody.create(JSON_MEDIA_TYPE, gqlBody.toString()))
+                                .build();
+                        gqlResp = httpClient.newCall(gqlReq).execute();
+                        if (gqlResp.isSuccessful() && gqlResp.body() != null) {
+                            String respStr = gqlResp.body().string();
+                            JSONObject rj = new JSONObject(respStr);
+                            JSONObject data = rj.optJSONObject("data");
+                            if (data != null) {
+                                JSONObject tb = data.optJSONObject("textBook");
+                                if (tb != null) {
+                                    JSONObject doc = tb.optJSONObject("document");
+                                    if (doc != null) {
+                                        JSONObject curPos = doc.optJSONObject("currentPosition");
+                                        if (curPos != null) {
+                                            JSONObject cfiObj = curPos.optJSONObject("cfi");
+                                            if (cfiObj != null) {
+                                                gqlCfiStart = cfiObj.optString("start", null);
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                            progress.setSyncedWithServer(true);
-                            postSuccess(callback, progress);
-                            return;
+                        }
+                    } catch (Exception ignored) {
+                    } finally {
+                        if (gqlResp != null) {
+                            try { gqlResp.close(); } catch (Exception ignored) {}
                         }
                     }
+
+                    // 2. Запрос карточки библиотеки для извлечения процента и cardId
+                    double cardPercent = 0.0;
+                    String cardId = "";
+                    long cardTs = 0L;
+                    int cardChapter = 0;
+                    int cardParagraph = 0;
+
+                    Response cardResp = null;
+                    try {
+                        String endpoint = BASE_URL + "/profile/library_cards?book_uuid=" + bookUuid + "&per_page=100";
+                        Request cardReq = createAuthRequestBuilder(endpoint).get().build();
+                        cardResp = httpClient.newCall(cardReq).execute();
+                        if (cardResp.isSuccessful() && cardResp.body() != null) {
+                            String body = cardResp.body().string();
+                            JSONObject json = new JSONObject(body);
+                            JSONArray arr = json.optJSONArray("library_cards");
+                            if (arr != null && arr.length() > 0) {
+                                JSONObject card = findMatchingLibraryCardInArray(arr, bookUuid);
+                                if (card != null) {
+                                    JSONObject bObj = card.optJSONObject("book");
+                                    ParsedProgress pr = extractProgress(card, bObj);
+                                    cardPercent = pr.percent;
+                                    cardChapter = pr.chapterIndex;
+                                    cardParagraph = pr.paragraphIndex;
+                                    cardTs = pr.timestamp;
+                                    cardId = extractLibraryCardId(card, bObj, bookUuid);
+                                }
+                            }
+                        }
+                    } catch (Exception ignored) {
+                    } finally {
+                        if (cardResp != null) {
+                            try { cardResp.close(); } catch (Exception ignored) {}
+                        }
+                    }
+
+                    // 3. Синтез наиболее точного прогресса
+                    int finalChapter = cardChapter;
+                    int finalParagraph = cardParagraph;
+                    if (gqlCfiStart != null && !gqlCfiStart.isEmpty()) {
+                        CfiPosition pos = parseCfiPosition(gqlCfiStart);
+                        finalChapter = pos.chapterIndex;
+                        finalParagraph = pos.paragraphIndex;
+                    }
+
+                    if (gqlCfiStart != null || cardPercent > 0.0 || !cardId.isEmpty()) {
+                        final ReadingProgress progress = new ReadingProgress(
+                                bookUuid, cardPercent, finalChapter, finalParagraph, 0,
+                                cardTs > 0 ? cardTs : System.currentTimeMillis()
+                        );
+                        if (!cardId.isEmpty()) {
+                            progress.setLibraryCardId(cardId);
+                        }
+                        if (gqlCfiStart != null && !gqlCfiStart.isEmpty()) {
+                            progress.setCfi(gqlCfiStart);
+                        }
+                        progress.setSyncedWithServer(true);
+                        postSuccess(callback, progress);
+                        return;
+                    }
+
+                    // 4. Если ничего не найдено, запускаем fallback
                     getReadingProgressFallback(bookUuid, callback);
                 } catch (Exception e) {
                     getReadingProgressFallback(bookUuid, callback);
-                } finally {
-                    try { response.close(); } catch (Exception ignored) {}
                 }
             }
-        });
+        }).start();
     }
 
     private void getReadingProgressFallback(final String bookUuid, final ApiCallback<ReadingProgress> callback) {
@@ -1293,6 +1528,15 @@ public class YandexBooksApiClient {
         posObj.put("updated_at", isoDate);
         posObj.put("last_read_at", isoDate);
 
+        if (progress.getCfi() != null && !progress.getCfi().isEmpty()) {
+            cardObj.put("cfi", progress.getCfi());
+            posObj.put("cfi", progress.getCfi());
+        }
+        if (progress.getDocumentUuid() != null && !progress.getDocumentUuid().isEmpty()) {
+            cardObj.put("document_uuid", progress.getDocumentUuid());
+            posObj.put("document_uuid", progress.getDocumentUuid());
+        }
+
         cardObj.put("position", posObj);
         cardObj.put("reading_position", posObj);
         cardObj.put("last_reading_position", posObj);
@@ -1381,7 +1625,68 @@ public class YandexBooksApiClient {
                     boolean anySuccess = false;
                     boolean stateConfirmed = false;
 
-                    // 1. Обновление конкретной карточки по ее настоящему UUID (PUT и PATCH /profile/library_cards/{cardUuid})
+                    // 1. Официальный GraphQL-запрос ProgressUpdated с CFI для мобильного ридера смартфона
+                    String docUuid = progress.getDocumentUuid();
+                    if (docUuid == null || docUuid.isEmpty()) {
+                        docUuid = fetchDocumentUuidSync(bookUuid);
+                        if (docUuid != null && !docUuid.isEmpty()) {
+                            progress.setDocumentUuid(docUuid);
+                        } else {
+                            docUuid = bookUuid;
+                            progress.setDocumentUuid(docUuid);
+                        }
+                    }
+
+                    String startCfi = progress.getCfi();
+                    if (startCfi == null || startCfi.isEmpty()) {
+                        startCfi = generateCfi(progress.getChapterIndex(), progress.getParagraphIndex());
+                        progress.setCfi(startCfi);
+                    }
+                    String endCfi = generateCfiEnd(progress.getChapterIndex(), progress.getParagraphIndex());
+
+                    Response gqlResp = null;
+                    try {
+                        JSONObject gqlBody = new JSONObject();
+                        gqlBody.put("query", GQL_PROGRESS_UPDATED);
+
+                        JSONObject item = new JSONObject();
+                        item.put("uuid", bookUuid);
+                        item.put("documentUuid", (docUuid != null && !docUuid.isEmpty()) ? docUuid : bookUuid);
+
+                        JSONObject cfiObj = new JSONObject();
+                        cfiObj.put("start", startCfi);
+                        cfiObj.put("end", endCfi);
+                        item.put("cfi", cfiObj);
+
+                        item.put("consumptionType", "CONSUMPTION");
+                        long nowTs = progress.getTimestamp() > 0 ? progress.getTimestamp() : System.currentTimeMillis();
+                        item.put("readAt", formatIsoWithTimezone(nowTs));
+                        item.put("timezoneId", TimeZone.getDefault().getID());
+                        item.put("sessionId", generateSessionId());
+                        item.put("timespent", 15000);
+
+                        JSONArray progArr = new JSONArray();
+                        progArr.put(item);
+
+                        JSONObject vars = new JSONObject();
+                        vars.put("textbookProgresses", progArr);
+                        gqlBody.put("variables", vars);
+
+                        Request gqlReq = createGraphQLRequestBuilder(GRAPHQL_URL)
+                                .post(RequestBody.create(JSON_MEDIA_TYPE, gqlBody.toString()))
+                                .build();
+                        gqlResp = httpClient.newCall(gqlReq).execute();
+                        if (gqlResp.isSuccessful()) {
+                            anySuccess = true;
+                        }
+                    } catch (Exception ignored) {
+                    } finally {
+                        if (gqlResp != null) {
+                            try { gqlResp.close(); } catch (Exception ignored) {}
+                        }
+                    }
+
+                    // 2. Обновление конкретной карточки по ее настоящему UUID (PUT и PATCH /profile/library_cards/{cardUuid})
                     if (cardId != null && !cardId.isEmpty() && !cardId.equals(bookUuid)) {
                         String cardUrl = BASE_URL + "/profile/library_cards/" + cardId;
                         Response putResp = null;
@@ -1425,19 +1730,8 @@ public class YandexBooksApiClient {
                         }
 
                         // Если карточка на сервере застряла в "want_to_read" и PUT/PATCH не переключили ее в "reading",
-                        // выполняем атомарное пересоздание карточки со статусом "reading" и актуальным прогрессом!
+                        // выполняем создание/актуализацию карточки со статусом "reading" и актуальным прогрессом!
                         if (!stateConfirmed) {
-                            Response delResp = null;
-                            try {
-                                Request reqDel = createAuthRequestBuilder(cardUrl).delete().build();
-                                delResp = httpClient.newCall(reqDel).execute();
-                            } catch (Exception ignored) {
-                            } finally {
-                                if (delResp != null) {
-                                    try { delResp.close(); } catch (Exception ignored) {}
-                                }
-                            }
-
                             Response recreateResp = null;
                             try {
                                 Request reqRecreate = createAuthRequestBuilder(BASE_URL + "/profile/library_cards")
@@ -1467,7 +1761,7 @@ public class YandexBooksApiClient {
                         }
                     }
 
-                    // 2. Официальный эндпоинт Bookmate API v5: bulk PATCH
+                    // 3. Официальный эндпоинт Bookmate API v5: bulk PATCH
                     String endpointBulk = BASE_URL + "/profile/library_cards/bulk";
                     JSONObject bulkBody = new JSONObject();
                     JSONArray cardsArray = new JSONArray();

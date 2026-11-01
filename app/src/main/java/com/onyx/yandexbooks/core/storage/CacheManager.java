@@ -55,6 +55,17 @@ public class CacheManager {
         void onError(String message);
     }
 
+    private static class ImageBitmapCache extends LruCache<String, Bitmap> {
+        ImageBitmapCache(int maxSize) {
+            super(maxSize);
+        }
+
+        @Override
+        protected int sizeOf(String key, Bitmap bitmap) {
+            return bitmap.getByteCount() / 1024;
+        }
+    }
+
     public CacheManager(Context context, YandexBooksApiClient apiClient) {
         this.context = context.getApplicationContext();
         this.booksDir = new File(this.context.getFilesDir(), "cached_books");
@@ -67,12 +78,7 @@ public class CacheManager {
         // Выделяем до 6 МБ под кэш декодированных картинок на E-Ink ридере
         int maxMemory = (int) (Runtime.getRuntime().maxMemory() / 1024);
         int cacheSize = Math.max(2048, Math.min(6144, maxMemory / 8));
-        this.imageCache = new LruCache<String, Bitmap>(cacheSize) {
-            @Override
-            protected int sizeOf(String key, Bitmap bitmap) {
-                return bitmap.getByteCount() / 1024;
-            }
-        };
+        this.imageCache = new ImageBitmapCache(cacheSize);
     }
 
     public File getEpubFile(String bookUuid) {

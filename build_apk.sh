@@ -7,15 +7,30 @@ TARGET_APK="yandex-books-lite-v${VERSION}.apk"
 
 echo "=== Сборка Яндекс Книги APK (Версия: $VERSION) ==="
 
-export JAVA_HOME="/opt/homebrew/opt/openjdk@17"
-export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"
+if [ -d "/opt/android-sdk" ]; then
+    SDK_ROOT="/opt/android-sdk"
+elif [ -d "/opt/homebrew/share/android-commandlinetools" ]; then
+    SDK_ROOT="/opt/homebrew/share/android-commandlinetools"
+else
+    SDK_ROOT="${ANDROID_HOME:-/opt/android-sdk}"
+fi
 
-SDK_ROOT="/opt/homebrew/share/android-commandlinetools"
+if [ -z "$JAVA_HOME" ] || [ ! -d "$JAVA_HOME" ]; then
+    if [ -d "/usr/lib/jvm/java-21-openjdk-amd64" ]; then
+        export JAVA_HOME="/usr/lib/jvm/java-21-openjdk-amd64"
+    elif [ -d "/opt/homebrew/opt/openjdk@17" ]; then
+        export JAVA_HOME="/opt/homebrew/opt/openjdk@17"
+    fi
+fi
+if [ -n "$JAVA_HOME" ] && [ -d "$JAVA_HOME/bin" ]; then
+    export PATH="$JAVA_HOME/bin:$PATH"
+fi
 BUILD_TOOLS="$SDK_ROOT/build-tools/30.0.3"
 PLATFORM="$SDK_ROOT/platforms/android-19/android.jar"
 
 cd "$PROJECT_DIR"
 
+rm -rf build/classes build/lib build/classes.dex
 mkdir -p build/classes build/lib
 rm -f "$PROJECT_DIR"/build/*.apk*
 
@@ -33,6 +48,21 @@ echo "[2/6] Компиляция Java исходников..."
   -cp "libs/okhttp-3.12.13.jar:libs/okio-1.15.0.jar:libs/zxing-core-3.4.1.jar:libs/conscrypt.jar" \
   -d build/classes \
   $(find app/src/main/java -name "*.java")
+
+echo "[2.5/6] Нормализация байткода Java 21 для совместимости с D8..."
+python3 -c "
+import os
+for root, dirs, files in os.walk('build/classes'):
+    for f in files:
+        if f.endswith('.class'):
+            p = os.path.join(root, f)
+            with open(p, 'rb') as fp:
+                d = fp.read()
+            if b'MethodParameters' in d:
+                d = d.replace(b'MethodParameters', b'XethodParameters')
+                with open(p, 'wb') as fp:
+                    fp.write(d)
+"
 
 echo "[3/6] Конвертация в Dalvik DEX (D8)..."
 "$BUILD_TOOLS/d8" \
