@@ -105,6 +105,7 @@ fi
   --key-pass pass:android \
   --v1-signing-enabled true \
   --v2-signing-enabled true \
+  --v3-signing-enabled true \
   --out "$TARGET_APK" \
   build/aligned.apk
 

@@ -142,10 +142,17 @@ public class MainActivity extends Activity {
         com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, appSettings.getUiScale());
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        com.onyx.yandexbooks.core.ui.UiScaleHelper.applyViewTreeScale(findViewById(android.R.id.content), appSettings.getUiScale());
+
+        requestRuntimeStoragePermissionsIfNeeded();
 
         tokenStorage = new TokenStorage(this);
-        apiClient = new YandexBooksApiClient(tokenStorage);
         dbHelper = DatabaseHelper.getInstance(this);
+        // Автоматическое восстановление резервной копии после отката версии / переустановки
+        if (dbHelper.restoreBackupFromPublicStorageIfNeeded(this)) {
+            com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, appSettings.getUiScale());
+        }
+        apiClient = new YandexBooksApiClient(tokenStorage);
         cacheManager = new CacheManager(this, apiClient);
         syncManager = new SyncManager(this, apiClient);
         coverLoader = CoverLoader.getInstance(this);
@@ -188,6 +195,22 @@ public class MainActivity extends Activity {
         checkAuthAndLoad();
     }
 
+    private void requestRuntimeStoragePermissionsIfNeeded() {
+        if (android.os.Build.VERSION.SDK_INT >= 23) {
+            try {
+                java.lang.reflect.Method checkSelf = android.content.Context.class.getMethod("checkSelfPermission", String.class);
+                Object res = checkSelf.invoke(this, "android.permission.WRITE_EXTERNAL_STORAGE");
+                if (res instanceof Integer && ((Integer) res) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    java.lang.reflect.Method reqPerms = android.app.Activity.class.getMethod("requestPermissions", String[].class, int.class);
+                    reqPerms.invoke(this, new String[]{
+                            "android.permission.WRITE_EXTERNAL_STORAGE",
+                            "android.permission.READ_EXTERNAL_STORAGE"
+                    }, 1002);
+                }
+            } catch (Throwable ignored) {}
+        }
+    }
+
     private void checkAuthAndLoad() {
         if (!tokenStorage.isAuthorized()) {
             if (!isAuthLaunching) {
@@ -208,15 +231,14 @@ public class MainActivity extends Activity {
         btnToggleReaderMode.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                boolean wasOnyx = appSettings.isOnyxReaderPreferred();
-                String newMode = wasOnyx ? com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_LITE : com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_ONYX;
-                appSettings.setReaderMode(newMode);
-                updateReaderModeButton();
-                adapter.notifyDataSetChanged();
-                String msg = appSettings.isOnyxReaderPreferred() 
-                        ? "Основной ридер: Системный Onyx (NeoReader/AlReader)" 
-                        : "Основной ридер: Встроенный (с синхронизацией)";
-                EinkNotice.show(MainActivity.this, "Режим чтения", msg);
+                cycleReaderMode();
+            }
+        });
+        btnToggleReaderMode.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override
+            public boolean onLongClick(View v) {
+                showReaderModeSelectionDialog();
+                return true;
             }
         });
 
@@ -376,6 +398,15 @@ public class MainActivity extends Activity {
         }, density);
         listLayout.addView(btnUpdate);
 
+        Button btnArchive = createMenuButton("Архив версий и откат ПО", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                AppUpdateManager.getInstance().showReleaseArchiveDialog(MainActivity.this);
+            }
+        }, density);
+        listLayout.addView(btnArchive);
+
         Button btnRefresh = createMenuButton("Очистить экран", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -397,22 +428,27 @@ public class MainActivity extends Activity {
         root.addView(listLayout);
 
         TextView tvBetaNotice = new TextView(this);
-        tvBetaNotice.setText("Яндекс Книги Lite v1.6.0");
+        tvBetaNotice.setText("Яндекс Книги Lite v1.7.0-beta [BETA]");
         tvBetaNotice.setTextSize(10);
         tvBetaNotice.setTextColor(Color.DKGRAY);
         tvBetaNotice.setGravity(Gravity.CENTER);
         tvBetaNotice.setPadding(0, (int) (2 * density), 0, (int) (6 * density));
         root.addView(tvBetaNotice);
 
+        LinearLayout bottomBtnRow = new LinearLayout(this);
+        bottomBtnRow.setOrientation(LinearLayout.HORIZONTAL);
+        bottomBtnRow.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (36 * density)));
+
         Button btnClose = new Button(this);
-        btnClose.setText("Закрыть");
-        btnClose.setTextSize(12);
+        btnClose.setText("Свернуть меню");
+        btnClose.setTextSize(11.5f);
         btnClose.setTypeface(null, Typeface.BOLD);
         btnClose.setTextColor(Color.BLACK);
         btnClose.setBackgroundResource(R.drawable.btn_eink);
         btnClose.setPadding(0, 0, 0, 0);
         btnClose.setSingleLine(true);
-        LinearLayout.LayoutParams lpClose = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (34 * density));
+        LinearLayout.LayoutParams lpClose = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
+        lpClose.setMargins(0, 0, (int) (3 * density), 0);
         btnClose.setLayoutParams(lpClose);
         btnClose.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -420,7 +456,31 @@ public class MainActivity extends Activity {
                 dialog.dismiss();
             }
         });
-        root.addView(btnClose);
+        bottomBtnRow.addView(btnClose);
+
+        Button btnExitApp = new Button(this);
+        btnExitApp.setText("Выйти из приложения");
+        btnExitApp.setTextSize(11.5f);
+        btnExitApp.setTypeface(null, Typeface.BOLD);
+        btnExitApp.setTextColor(Color.BLACK);
+        btnExitApp.setBackgroundResource(R.drawable.btn_eink);
+        btnExitApp.setPadding(0, 0, 0, 0);
+        btnExitApp.setSingleLine(true);
+        LinearLayout.LayoutParams lpExit = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
+        lpExit.setMargins((int) (3 * density), 0, 0, 0);
+        btnExitApp.setLayoutParams(lpExit);
+        btnExitApp.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                try {
+                    dbHelper.exportBackupToPublicStorage(MainActivity.this);
+                } catch (Throwable ignored) {}
+                finish();
+            }
+        });
+        bottomBtnRow.addView(btnExitApp);
+        root.addView(bottomBtnRow);
 
         dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -464,7 +524,9 @@ public class MainActivity extends Activity {
     private String getUiScaleLabel() {
         float scale = appSettings.getUiScale();
         int pct = Math.round(scale * 100);
-        if (pct >= 155) return pct + "% (Макс)";
+        if (pct >= 195) return pct + "% (Макс 10.3\")";
+        if (pct >= 175) return pct + "% (Планшет 10.3\")";
+        if (pct >= 155) return pct + "% (Огромный)";
         if (pct >= 140) return pct + "% (Очень крупный)";
         if (pct >= 125) return pct + "% (Крупный)";
         if (pct >= 110) return pct + "% (Увеличенный)";
@@ -513,14 +575,18 @@ public class MainActivity extends Activity {
                 com.onyx.yandexbooks.core.storage.AppSettings.UI_SCALE_MEDIUM,
                 com.onyx.yandexbooks.core.storage.AppSettings.UI_SCALE_LARGE,
                 com.onyx.yandexbooks.core.storage.AppSettings.UI_SCALE_EXTRA_LARGE,
-                com.onyx.yandexbooks.core.storage.AppSettings.UI_SCALE_MAX
+                com.onyx.yandexbooks.core.storage.AppSettings.UI_SCALE_MAX,
+                com.onyx.yandexbooks.core.storage.AppSettings.UI_SCALE_180,
+                com.onyx.yandexbooks.core.storage.AppSettings.UI_SCALE_200
         };
         final String[] labels = new String[]{
                 "100% — Стандартный",
                 "115% — Увеличенный (комфорт для 6\")",
                 "130% — Крупный (рекомендуется)",
                 "145% — Очень крупный (макс. четкость)",
-                "160% — Огромный"
+                "160% — Огромный",
+                "180% — Для планшетов 10.3\" (Go 10.3)",
+                "200% — Максимальный (10.3\" 300 PPI)"
         };
 
         float currentScale = appSettings.getUiScale();
@@ -1545,8 +1611,120 @@ public class MainActivity extends Activity {
 
     private void updateReaderModeButton() {
         if (btnToggleReaderMode != null) {
-            boolean isOnyx = appSettings.isOnyxReaderPreferred();
-            btnToggleReaderMode.setText(isOnyx ? "Onyx" : "Онлайн");
+            String mode = appSettings.getReaderMode();
+            if (com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_LITE.equalsIgnoreCase(mode)) {
+                btnToggleReaderMode.setText("Lite");
+            } else if (com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_ALREADER.equalsIgnoreCase(mode)) {
+                btnToggleReaderMode.setText("AlReader");
+            } else if (com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_CHOOSER.equalsIgnoreCase(mode)) {
+                btnToggleReaderMode.setText("Выбор");
+            } else {
+                btnToggleReaderMode.setText("NeoReader");
+            }
+        }
+    }
+
+    private void cycleReaderMode() {
+        String cur = appSettings.getReaderMode();
+        String next;
+        String desc;
+        if (com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_LITE.equalsIgnoreCase(cur)) {
+            next = com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_NEOREADER;
+            desc = "Основной ридер: Onyx NeoReader\n(Книги открываются в системном NeoReader; зажмите кнопку для быстрого выбора)";
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_NEOREADER.equalsIgnoreCase(cur)
+                || com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_ONYX.equalsIgnoreCase(cur)) {
+            next = com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_ALREADER;
+            desc = "Основной ридер: AlReader / AlReaderX\n(Прямой запуск AlReader без перенастройки системы)";
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_ALREADER.equalsIgnoreCase(cur)) {
+            next = com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_CHOOSER;
+            desc = "Основной ридер: Диалог выбора\n(При каждом открытии книги система предложит выбрать приложение)";
+        } else {
+            next = com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_LITE;
+            desc = "Основной ридер: Встроенный Lite\n(Двусторонняя облачная синхронизация прогресса чтения с Яндекс Книгами)";
+        }
+        appSettings.setReaderMode(next);
+        updateReaderModeButton();
+        adapter.notifyDataSetChanged();
+        EinkNotice.show(MainActivity.this, "Режим чтения", desc);
+    }
+
+    private void showReaderModeSelectionDialog() {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setWindowAnimations(0);
+        }
+        float density = getResources().getDisplayMetrics().density;
+        final DisplayMetrics dm = getResources().getDisplayMetrics();
+
+        final LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundResource(R.drawable.dialog_notice_bg);
+        int pad = (int) (14 * density);
+        root.setPadding(pad, pad, pad, pad);
+
+        TextView titleView = new TextView(this);
+        titleView.setText("Выбор основного приложения для чтения");
+        titleView.setTextSize(14);
+        titleView.setTypeface(null, Typeface.BOLD);
+        titleView.setTextColor(Color.BLACK);
+        titleView.setGravity(Gravity.CENTER);
+        titleView.setPadding(0, 0, 0, (int) (6 * density));
+        root.addView(titleView);
+
+        View div = new View(this);
+        div.setBackgroundColor(Color.BLACK);
+        root.addView(div, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
+
+        LinearLayout opts = new LinearLayout(this);
+        opts.setOrientation(LinearLayout.VERTICAL);
+        opts.setPadding(0, (int) (6 * density), 0, (int) (6 * density));
+
+        final String[] modes = new String[]{
+                com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_LITE,
+                com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_NEOREADER,
+                com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_ALREADER,
+                com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_CHOOSER
+        };
+        final String[] titles = new String[]{
+                "Встроенный Lite (синхронизация с Яндекс)",
+                "Onyx NeoReader (системный ридер)",
+                "AlReader / AlReaderX (прямой запуск)",
+                "Всегда спрашивать (системный выбор)"
+        };
+
+        String cur = appSettings.getReaderMode();
+        for (int i = 0; i < modes.length; i++) {
+            final String m = modes[i];
+            boolean sel = m.equalsIgnoreCase(cur) || (i == 1 && com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_ONYX.equalsIgnoreCase(cur));
+            Button b = createMenuButton((sel ? "• " : "  ") + titles[i], new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    dialog.dismiss();
+                    appSettings.setReaderMode(m);
+                    updateReaderModeButton();
+                    adapter.notifyDataSetChanged();
+                }
+            }, density);
+            if (sel) b.setBackgroundResource(R.drawable.btn_eink_primary);
+            opts.addView(b);
+        }
+        root.addView(opts);
+
+        Button btnClose = createMenuButton("Закрыть", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        }, density);
+        root.addView(btnClose);
+
+        dialog.setContentView(root);
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setLayout((int) (dm.widthPixels * 0.88), ViewGroup.LayoutParams.WRAP_CONTENT);
         }
     }
 
@@ -1809,13 +1987,16 @@ public class MainActivity extends Activity {
     }
 
     private void openInOnyxReader(final Book book) {
+        openInExternalReaderWithMode(book, appSettings.getReaderMode());
+    }
+
+    private void openInExternalReaderWithMode(final Book book, final String readerMode) {
         File epub = cacheManager.ensurePublicEpubFile(book.getUuid(), book.getTitle());
         if (epub != null && epub.exists() && epub.length() > 0) {
-            // Полусинхронизация: создаем закладку места чтения с другого устройства
             if (book.getPercent() > 0.0 && book.getPercent() < 99.0) {
                 dbHelper.ensureCloudSyncBookmark(book.getUuid(), book.getCurrentChapterIndex(), 0, book.getPercent());
             }
-            boolean ok = CacheManager.openInSystemReader(this, epub, book.getPercent(), book.getCurrentChapterIndex());
+            boolean ok = CacheManager.openInSystemReader(this, epub, book.getPercent(), book.getCurrentChapterIndex(), readerMode);
             if (!ok) {
                 EinkNotice.show(this, "Ридер", "Внешний ридер не найден. Открываем во встроенном ридере...");
                 openInLiteReader(book);
@@ -1823,7 +2004,7 @@ public class MainActivity extends Activity {
             return;
         }
 
-        final Dialog dialog = showEinkLoadingDialog("Яндекс Книги", "Загрузка EPUB в /sdcard/Books/ для Onyx...");
+        final Dialog dialog = showEinkLoadingDialog("Яндекс Книги", "Загрузка EPUB в /sdcard/Books/ для внешнего ридера...");
 
         cacheManager.downloadBookAsync(book.getUuid(), book.getTitle(), new CacheManager.DownloadProgressCallback() {
             @Override
@@ -1838,7 +2019,7 @@ public class MainActivity extends Activity {
                 }
                 File readyEpub = cacheManager.ensurePublicEpubFile(book.getUuid(), book.getTitle());
                 if (readyEpub != null && readyEpub.exists()) {
-                    boolean ok = CacheManager.openInSystemReader(MainActivity.this, readyEpub, book.getPercent(), book.getCurrentChapterIndex());
+                    boolean ok = CacheManager.openInSystemReader(MainActivity.this, readyEpub, book.getPercent(), book.getCurrentChapterIndex(), readerMode);
                     if (!ok) {
                         openInLiteReader(book);
                     }
@@ -2064,21 +2245,21 @@ public class MainActivity extends Activity {
         int row1Height = (int) (36 * density);
         int row2Height = (int) (32 * density);
 
-        // Строка 1: Кнопки чтения [ Onyx Reader ] и [ Встроенный ридер ] бок о бок (50% / 50%)
+        // Строка 1: Кнопки чтения [ NeoReader ] [ AlReader ] [ Ридер Lite ] бок о бок
         LinearLayout readRow = new LinearLayout(this);
         readRow.setOrientation(LinearLayout.HORIZONTAL);
         readRow.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, row1Height));
 
         Button btnOnyx = new Button(this);
         btnOnyx.setText("NeoReader");
-        btnOnyx.setTextSize(11);
+        btnOnyx.setTextSize(10.5f);
         btnOnyx.setTypeface(null, Typeface.BOLD);
         btnOnyx.setTextColor(Color.BLACK);
         btnOnyx.setBackgroundResource(R.drawable.btn_eink_primary);
         btnOnyx.setPadding(0, 0, 0, 0);
         btnOnyx.setSingleLine(true);
         LinearLayout.LayoutParams lpOnyx = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
-        lpOnyx.setMargins(0, 0, (int) (4 * density), 0);
+        lpOnyx.setMargins(0, 0, (int) (3 * density), 0);
         btnOnyx.setLayoutParams(lpOnyx);
         btnOnyx.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -2087,23 +2268,48 @@ public class MainActivity extends Activity {
                 ensureBookOnReadingShelf(book, new Runnable() {
                     @Override
                     public void run() {
-                        openInOnyxReader(book);
+                        openInExternalReaderWithMode(book, com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_NEOREADER);
                     }
                 });
             }
         });
         readRow.addView(btnOnyx);
 
+        Button btnAlReader = new Button(this);
+        btnAlReader.setText("AlReader");
+        btnAlReader.setTextSize(10.5f);
+        btnAlReader.setTypeface(null, Typeface.BOLD);
+        btnAlReader.setTextColor(Color.BLACK);
+        btnAlReader.setBackgroundResource(R.drawable.btn_eink);
+        btnAlReader.setPadding(0, 0, 0, 0);
+        btnAlReader.setSingleLine(true);
+        LinearLayout.LayoutParams lpAl = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
+        lpAl.setMargins((int) (2 * density), 0, (int) (2 * density), 0);
+        btnAlReader.setLayoutParams(lpAl);
+        btnAlReader.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                ensureBookOnReadingShelf(book, new Runnable() {
+                    @Override
+                    public void run() {
+                        openInExternalReaderWithMode(book, com.onyx.yandexbooks.core.storage.AppSettings.READER_MODE_ALREADER);
+                    }
+                });
+            }
+        });
+        readRow.addView(btnAlReader);
+
         Button btnLite = new Button(this);
         btnLite.setText("Ридер Lite");
-        btnLite.setTextSize(11);
+        btnLite.setTextSize(10.5f);
         btnLite.setTypeface(null, Typeface.BOLD);
         btnLite.setTextColor(Color.BLACK);
         btnLite.setBackgroundResource(R.drawable.btn_eink);
         btnLite.setPadding(0, 0, 0, 0);
         btnLite.setSingleLine(true);
         LinearLayout.LayoutParams lpLite = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
-        lpLite.setMargins((int) (4 * density), 0, 0, 0);
+        lpLite.setMargins((int) (3 * density), 0, 0, 0);
         btnLite.setLayoutParams(lpLite);
         btnLite.setOnClickListener(new View.OnClickListener() {
             @Override

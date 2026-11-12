@@ -694,20 +694,66 @@ public class CacheManager {
         return null;
     }
 
+    public static final String[] ALREADER_PACKAGES = new String[]{
+            "com.neverland.alreader",
+            "com.neverland.alreaderx",
+            "com.neverland.alreader.onyx",
+            "ru.alreader"
+    };
+
+    public static final String[] NEOREADER_PACKAGES = new String[]{
+            "com.onyx.kreader",
+            "com.onyx.reader"
+    };
+
+    private static void disableFileUriExposureIfNeeded() {
+        if (android.os.Build.VERSION.SDK_INT >= 24) {
+            try {
+                java.lang.reflect.Method m = android.os.StrictMode.class.getMethod("disableDeathOnFileUriExposure");
+                m.invoke(null);
+            } catch (Throwable ignored) {
+                try {
+                    android.os.StrictMode.setVmPolicy(new android.os.StrictMode.VmPolicy.Builder().build());
+                } catch (Throwable ignored2) {}
+            }
+        }
+    }
+
+    public static String findInstalledPackage(Context context, String[] candidates) {
+        if (context == null || candidates == null) return null;
+        android.content.pm.PackageManager pm = context.getPackageManager();
+        for (String pkg : candidates) {
+            try {
+                pm.getPackageInfo(pkg, 0);
+                return pkg;
+            } catch (Throwable ignored) {}
+        }
+        return null;
+    }
+
     public static boolean openInSystemReader(android.app.Activity activity, File epubFile) {
-        return openInSystemReader(activity, epubFile, 0.0, 0);
+        return openInSystemReader(activity, epubFile, 0.0, 0, null);
     }
 
     public static boolean openInSystemReader(android.app.Activity activity, File epubFile, double percent, int chapterIndex) {
+        String mode = null;
+        if (activity != null) {
+            mode = new AppSettings(activity).getReaderMode();
+        }
+        return openInSystemReader(activity, epubFile, percent, chapterIndex, mode);
+    }
+
+    public static boolean openInSystemReader(android.app.Activity activity, File epubFile, double percent, int chapterIndex, String targetReaderMode) {
         if (epubFile == null || !epubFile.exists()) {
             return false;
         }
+        disableFileUriExposureIfNeeded();
         android.net.Uri uri = android.net.Uri.fromFile(epubFile);
 
-        // 1. Попытка открыть напрямую через Intent для EPUB
         android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW);
         intent.setDataAndType(uri, "application/epub+zip");
         intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+        intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
 
         if (percent > 0.0) {
             intent.putExtra("percent", (float) percent);
@@ -718,6 +764,40 @@ public class CacheManager {
             intent.putExtra("org.geometerplus.zlibrary.ui.android.action.VIEW", uri);
         }
 
+        // 0. Если явно запрошен системный выбор приложения (Chooser)
+        if (AppSettings.READER_MODE_CHOOSER.equalsIgnoreCase(targetReaderMode)) {
+            try {
+                android.content.Intent chooser = android.content.Intent.createChooser(intent, "Выберите приложение для чтения:");
+                chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                activity.startActivity(chooser);
+                return true;
+            } catch (Exception ignored) {}
+        }
+
+        // 0.1. Если явно выбран AlReader или NeoReader — проверяем установленные пакеты
+        if (AppSettings.READER_MODE_ALREADER.equalsIgnoreCase(targetReaderMode)) {
+            String alPkg = findInstalledPackage(activity, ALREADER_PACKAGES);
+            if (alPkg != null) {
+                try {
+                    android.content.Intent direct = new android.content.Intent(intent);
+                    direct.setPackage(alPkg);
+                    activity.startActivity(direct);
+                    return true;
+                } catch (Exception ignored) {}
+            }
+        } else if (AppSettings.READER_MODE_NEOREADER.equalsIgnoreCase(targetReaderMode)) {
+            String neoPkg = findInstalledPackage(activity, NEOREADER_PACKAGES);
+            if (neoPkg != null) {
+                try {
+                    android.content.Intent direct = new android.content.Intent(intent);
+                    direct.setPackage(neoPkg);
+                    activity.startActivity(direct);
+                    return true;
+                } catch (Exception ignored) {}
+            }
+        }
+
+        // 1. Попытка открыть напрямую через системный Intent для EPUB
         try {
             activity.startActivity(intent);
             return true;

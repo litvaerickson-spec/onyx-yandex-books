@@ -42,11 +42,11 @@ public class UiScaleHelper {
     }
 
     /**
-     * Ограничение масштаба безопасным диапазоном (от 85% до 180%).
+     * Ограничение масштаба безопасным диапазоном (от 85% до 200%).
      */
     public static float sanitizeScale(float scaleFactor) {
         if (scaleFactor < 0.85f) return 1.0f;
-        if (scaleFactor > 1.80f) return 1.80f;
+        if (scaleFactor > 2.00f) return 2.00f;
         return scaleFactor;
     }
 
@@ -86,5 +86,41 @@ public class UiScaleHelper {
 
     public static float getBaseFontScale() {
         return sBaseFontScale > 0 ? sBaseFontScale : 1.0f;
+    }
+
+    /**
+     * Дополнительный обход View-дерева для гарантированного масштабирования высот панелей и кнопок
+     * на прошивках Onyx OS с Android 10–14 (Go 10.3, Bigme B6), которые могут кэшировать DisplayMetrics.
+     */
+    public static void applyViewTreeScale(android.view.View root, float scaleFactor) {
+        if (root == null) return;
+        float effective = sanitizeScale(scaleFactor);
+        if (Math.abs(effective - 1.0f) < 0.04f) return;
+        try {
+            Object tag = root.getTag();
+            if ("__ui_scaled__".equals(tag)) return;
+            root.setTag("__ui_scaled__");
+            scaleViewNodeRecursive(root, effective);
+        } catch (Throwable ignored) {}
+    }
+
+    private static void scaleViewNodeRecursive(android.view.View view, float factor) {
+        if (view == null) return;
+        try {
+            android.view.ViewGroup.LayoutParams lp = view.getLayoutParams();
+            if (lp != null && lp.height > 0 && factor > 1.25f) {
+                // Мягкое дополнительное расширение высоты кнопок/панелей при масштабах 145%–200%
+                float boost = 1.0f + (factor - 1.0f) * 0.25f;
+                lp.height = Math.round(lp.height * boost);
+                view.setLayoutParams(lp);
+            }
+            if (view instanceof android.view.ViewGroup) {
+                android.view.ViewGroup vg = (android.view.ViewGroup) view;
+                int count = vg.getChildCount();
+                for (int i = 0; i < count; i++) {
+                    scaleViewNodeRecursive(vg.getChildAt(i), factor);
+                }
+            }
+        } catch (Throwable ignored) {}
     }
 }

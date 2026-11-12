@@ -13,6 +13,14 @@ public class AppSettings {
     public static final String KEY_READER_MODE = "reader_mode";
     public static final String READER_MODE_ONYX = "onyx";
     public static final String READER_MODE_LITE = "lite";
+    public static final String READER_MODE_NEOREADER = "neoreader";
+    public static final String READER_MODE_ALREADER = "alreader";
+    public static final String READER_MODE_CHOOSER = "chooser";
+
+    public static final String KEY_TAP_ZONE_MODE = "tap_zone_mode";
+    public static final String TAP_ZONE_STANDARD = "standard";
+    public static final String TAP_ZONE_LEFT_HANDED = "left_handed";
+    public static final String TAP_ZONE_TOP_BACK_BOTTOM_FWD = "top_back_bottom_fwd";
 
     public static final String KEY_MARGIN_MODE = "margin_mode";
     public static final String MARGIN_EXTRA_NARROW = "extra_narrow"; // 8px
@@ -31,6 +39,8 @@ public class AppSettings {
     public static final float UI_SCALE_LARGE = 1.30f;       // 130%
     public static final float UI_SCALE_EXTRA_LARGE = 1.45f; // 145%
     public static final float UI_SCALE_MAX = 1.60f;         // 160%
+    public static final float UI_SCALE_180 = 1.80f;         // 180% (Планшеты 10.3")
+    public static final float UI_SCALE_200 = 2.00f;         // 200% (Максимум для 10.3" 300 PPI)
 
     private final SharedPreferences prefs;
 
@@ -51,7 +61,16 @@ public class AppSettings {
     }
 
     public boolean isOnyxReaderPreferred() {
-        return READER_MODE_ONYX.equalsIgnoreCase(getReaderMode());
+        String mode = getReaderMode();
+        return !READER_MODE_LITE.equalsIgnoreCase(mode);
+    }
+
+    public String getTapZoneMode() {
+        return prefs.getString(KEY_TAP_ZONE_MODE, TAP_ZONE_STANDARD);
+    }
+
+    public void setTapZoneMode(String mode) {
+        prefs.edit().putString(KEY_TAP_ZONE_MODE, mode != null ? mode : TAP_ZONE_STANDARD).apply();
     }
 
     public String getMarginMode() {

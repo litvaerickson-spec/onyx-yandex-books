@@ -116,6 +116,7 @@ public class ReaderActivity extends Activity {
     private SeekBar seekbarFontSize;
     private Button btnToggleFontFamily;
     private Button btnToggleIndent;
+    private Button btnToggleTapZones;
 
     // Элементы подвкладки «Формат»
     private Button btnToggleContrast; // Утолщение текста
@@ -248,6 +249,7 @@ public class ReaderActivity extends Activity {
         seekbarFontSize = (SeekBar) findViewById(R.id.seekbar_font_size);
         btnToggleFontFamily = (Button) findViewById(R.id.btn_toggle_font_family);
         btnToggleIndent = (Button) findViewById(R.id.btn_toggle_indent);
+        btnToggleTapZones = (Button) findViewById(R.id.btn_toggle_tap_zones);
 
         // Контролы подвкладки «Формат»
         btnToggleContrast = (Button) findViewById(R.id.btn_toggle_contrast);
@@ -277,6 +279,7 @@ public class ReaderActivity extends Activity {
         typographyConfig.setContrastMode(appSettings.getContrastMode());
         typographyConfig.setVerticalMarginMode(appSettings.getVerticalMarginMode());
         typographyConfig.setNightMode(appSettings.isNightMode());
+        typographyConfig.setTapZoneMode(appSettings.getTapZoneMode());
 
         int marginPx = appSettings.getMarginPaddingPx();
         typographyConfig.setPaddingLeftPx(marginPx);
@@ -698,6 +701,16 @@ public class ReaderActivity extends Activity {
             });
         }
 
+        updateTapZonesButtonText();
+        if (btnToggleTapZones != null) {
+            btnToggleTapZones.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    cycleTapZoneMode();
+                }
+            });
+        }
+
         // Подвкладка 2: Формат (Жирный/Обычный, Переносы слов TeX, Контраст E-Ink)
         updateContrastButtonText();
         if (btnToggleContrast != null) {
@@ -823,6 +836,7 @@ public class ReaderActivity extends Activity {
         // Полноразмерные зоны касания (Full-Row Clickable Targets для E-Ink тачскринов)
         setupRowClick(R.id.row_toggle_font_family, btnToggleFontFamily);
         setupRowClick(R.id.row_toggle_indent, btnToggleIndent);
+        setupRowClick(R.id.row_toggle_tap_zones, btnToggleTapZones);
         setupRowClick(R.id.row_toggle_contrast, btnToggleContrast);
         setupRowClick(R.id.row_toggle_hyphenation, btnToggleHyphenation);
         setupRowClick(R.id.row_toggle_eink_contrast, btnToggleEinkContrast);
@@ -1111,6 +1125,41 @@ public class ReaderActivity extends Activity {
         repaginateCurrentChapter();
     }
 
+    private void updateTapZonesButtonText() {
+        if (btnToggleTapZones == null) return;
+        String mode = typographyConfig.getTapZoneMode();
+        if (com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_LEFT_HANDED.equalsIgnoreCase(mode)) {
+            btnToggleTapZones.setText("Для левшей");
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_TOP_BACK_BOTTOM_FWD.equalsIgnoreCase(mode)) {
+            btnToggleTapZones.setText("Верх/Низ");
+        } else {
+            btnToggleTapZones.setText("Стандарт");
+        }
+    }
+
+    private void cycleTapZoneMode() {
+        String cur = typographyConfig.getTapZoneMode();
+        String next;
+        String hint;
+        if (com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_STANDARD.equalsIgnoreCase(cur)) {
+            next = com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_LEFT_HANDED;
+            hint = "Режим «Для левшей»:\n• Левый край (верх и низ 30%): Вперед\n• Левый край (центр 40%): Назад\n• Правый край: Вперед";
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_LEFT_HANDED.equalsIgnoreCase(cur)) {
+            next = com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_TOP_BACK_BOTTOM_FWD;
+            hint = "Режим «Верх / Низ»:\n• Верхние 30% экрана: Назад\n• Нижние 40% экрана: Вперед\n• Центр экрана: Меню";
+        } else {
+            next = com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_STANDARD;
+            hint = "Режим «Стандарт»:\n• Левые 30% экрана: Назад\n• Правые 30% экрана: Вперед\n• Центр экрана: Меню";
+        }
+        typographyConfig.setTapZoneMode(next);
+        appSettings.setTapZoneMode(next);
+        updateTapZonesButtonText();
+        if (readerCanvas != null) {
+            readerCanvas.setTypographyConfig(typographyConfig);
+        }
+        EinkNotice.show(ReaderActivity.this, "Зоны касания", hint);
+    }
+
     private void updateContrastButtonText() {
         if (btnToggleContrast == null) return;
         btnToggleContrast.setText(typographyConfig.isBoldText() ? "Жирный" : "Обычный");
@@ -1273,8 +1322,11 @@ public class ReaderActivity extends Activity {
 
     private void updateMenuControls() {
         if (chapters != null && currentChapterIndex < chapters.size()) {
-            Chapter ch = chapters.get(currentChapterIndex);
-            String title = ch.getTitle();
+            String title = getActiveChapterTitle();
+            if (title == null || title.trim().isEmpty()) {
+                Chapter ch = chapters.get(currentChapterIndex);
+                title = ch.getTitle();
+            }
             if (title == null || title.trim().isEmpty()) {
                 title = "Глава " + (currentChapterIndex + 1);
             }
@@ -2913,10 +2965,12 @@ public class ReaderActivity extends Activity {
         flattenAllTocNodes(nodes, flat);
         EpubParser.TocNode best = null;
         for (EpubParser.TocNode node : flat) {
-            if (node.spineIndex < curSpineIndex || (node.spineIndex == curSpineIndex && node.charOffset <= curCharOffset)) {
+            if (node.spineIndex == curSpineIndex && node.charOffset <= curCharOffset) {
                 best = node;
-            } else if (node.spineIndex > curSpineIndex) {
-                break;
+            } else if (node.spineIndex < curSpineIndex) {
+                if (best == null || best.spineIndex < node.spineIndex) {
+                    best = node;
+                }
             }
         }
         return best != null ? best.title : null;
@@ -2939,7 +2993,17 @@ public class ReaderActivity extends Activity {
                 String title = getActiveChapterTitle();
                 double percent = calculateCurrentGlobalPercent();
                 int totalChapters = chapters != null ? chapters.size() : 1;
-                readerCanvas.setPage(currentPages.get(currentPageIndex), globalPageIndex, totalBookPages, title, currentChapterIndex, totalChapters, percent);
+                readerCanvas.setPage(
+                        currentPages.get(currentPageIndex),
+                        globalPageIndex,
+                        totalBookPages,
+                        title,
+                        currentChapterIndex,
+                        totalChapters,
+                        percent,
+                        currentPageIndex + 1,
+                        currentPages.size()
+                );
             }
 
             if (!hasPerformedInitialRefresh) {

@@ -1061,4 +1061,133 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             android.util.Log.e("DatabaseHelper", "Failed to delete bookmark", e);
         }
     }
+
+    /**
+     * Экспортирует полную резервную копию базы данных SQLite, токена авторизации и настроек
+     * в общую папку /sdcard/Books/YandexBooks/backup/ для бесшовного отката на предыдущие версии (Zero Data Loss).
+     */
+    public synchronized boolean exportBackupToPublicStorage(Context context) {
+        if (context == null) return false;
+        try {
+            java.io.File extDir = android.os.Environment.getExternalStorageDirectory();
+            if (extDir == null || !extDir.canWrite()) return false;
+            java.io.File backupDir = new java.io.File(extDir, "Books/YandexBooks/backup");
+            if (!backupDir.exists()) {
+                backupDir.mkdirs();
+            }
+
+            // 1. Сбрасываем транзакции SQLite и копируем файл БД
+            java.io.File dbFile = context.getDatabasePath(DATABASE_NAME);
+            if (dbFile != null && dbFile.exists() && dbFile.length() > 0) {
+                java.io.File dstDb = new java.io.File(backupDir, DATABASE_NAME);
+                copyFileSafe(dbFile, dstDb);
+            }
+
+            // 2. Сохраняем токен и настройки в backup_meta.json
+            org.json.JSONObject meta = new org.json.JSONObject();
+            com.onyx.yandexbooks.core.auth.TokenStorage ts = new com.onyx.yandexbooks.core.auth.TokenStorage(context);
+            if (ts.isAuthorized()) {
+                meta.put("access_token", ts.getAccessToken());
+                if (ts.getRefreshToken() != null) meta.put("refresh_token", ts.getRefreshToken());
+                if (ts.getUserLogin() != null) meta.put("user_login", ts.getUserLogin());
+            }
+            AppSettings settings = new AppSettings(context);
+            meta.put("ui_scale", (double) settings.getUiScale());
+            meta.put("reader_mode", settings.getReaderMode());
+            meta.put("tap_zone_mode", settings.getTapZoneMode());
+            meta.put("font_size_sp", settings.getFontSizeSp());
+            meta.put("font_family", settings.getFontFamily());
+            meta.put("backup_timestamp", System.currentTimeMillis());
+
+            java.io.File metaFile = new java.io.File(backupDir, "backup_meta.json");
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(metaFile);
+            fos.write(meta.toString().getBytes("UTF-8"));
+            fos.flush();
+            fos.close();
+            return true;
+        } catch (Throwable t) {
+            android.util.Log.w("DatabaseHelper", "Backup export skipped: " + t.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Автоматически восстанавливает токен авторизации, настройки и базу данных SQLite
+     * из /sdcard/Books/YandexBooks/backup/, если приложение было переустановлено с нуля (например, при откате версии).
+     */
+    public synchronized boolean restoreBackupFromPublicStorageIfNeeded(Context context) {
+        if (context == null) return false;
+        try {
+            com.onyx.yandexbooks.core.auth.TokenStorage ts = new com.onyx.yandexbooks.core.auth.TokenStorage(context);
+            if (ts.isAuthorized() && getBooksCountByShelf("reading") + getBooksCountByShelf("to_read") > 0) {
+                return false; // Данные уже на месте
+            }
+
+            java.io.File extDir = android.os.Environment.getExternalStorageDirectory();
+            if (extDir == null || !extDir.exists()) return false;
+            java.io.File backupDir = new java.io.File(extDir, "Books/YandexBooks/backup");
+            if (!backupDir.exists()) return false;
+
+            boolean restoredAny = false;
+            java.io.File metaFile = new java.io.File(backupDir, "backup_meta.json");
+            if (metaFile.exists() && metaFile.length() > 0 && !ts.isAuthorized()) {
+                java.io.FileInputStream fis = new java.io.FileInputStream(metaFile);
+                java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(fis, "UTF-8"));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = br.readLine()) != null) sb.append(line);
+                br.close();
+                fis.close();
+
+                org.json.JSONObject meta = new org.json.JSONObject(sb.toString());
+                String token = meta.optString("access_token", "");
+                if (!token.isEmpty()) {
+                    ts.saveTokens(token, meta.optString("refresh_token", ""), 31536000L);
+                    ts.setUserLogin(meta.optString("user_login", ""));
+                    restoredAny = true;
+                }
+                AppSettings settings = new AppSettings(context);
+                if (meta.has("ui_scale")) settings.setUiScale((float) meta.optDouble("ui_scale", 1.0));
+                if (meta.has("reader_mode")) settings.setReaderMode(meta.optString("reader_mode", AppSettings.READER_MODE_ONYX));
+                if (meta.has("tap_zone_mode")) settings.setTapZoneMode(meta.optString("tap_zone_mode", AppSettings.TAP_ZONE_STANDARD));
+            }
+
+            java.io.File backupDb = new java.io.File(backupDir, DATABASE_NAME);
+            if (backupDb.exists() && backupDb.length() > 0 && (getBooksCountByShelf("reading") + getBooksCountByShelf("to_read") == 0)) {
+                try {
+                    close();
+                } catch (Throwable ignored) {}
+                java.io.File dstDb = context.getDatabasePath(DATABASE_NAME);
+                if (dstDb != null) {
+                    if (dstDb.getParentFile() != null && !dstDb.getParentFile().exists()) {
+                        dstDb.getParentFile().mkdirs();
+                    }
+                    copyFileSafe(backupDb, dstDb);
+                    restoredAny = true;
+                }
+            }
+            return restoredAny;
+        } catch (Throwable t) {
+            android.util.Log.w("DatabaseHelper", "Backup restore skipped: " + t.getMessage());
+            return false;
+        }
+    }
+
+    private static void copyFileSafe(java.io.File src, java.io.File dst) throws Exception {
+        java.io.FileInputStream in = null;
+        java.io.FileOutputStream out = null;
+        try {
+            in = new java.io.FileInputStream(src);
+            out = new java.io.FileOutputStream(dst);
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = in.read(buf)) > 0) {
+                out.write(buf, 0, len);
+            }
+            out.flush();
+        } finally {
+            if (out != null) try { out.close(); } catch (Throwable ignored) {}
+            if (in != null) try { in.close(); } catch (Throwable ignored) {}
+        }
+    }
 }

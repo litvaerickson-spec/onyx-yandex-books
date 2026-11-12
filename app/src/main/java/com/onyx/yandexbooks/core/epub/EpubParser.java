@@ -198,11 +198,15 @@ public class EpubParser {
                     cd.spineIndex = s;
                     cd.textContent = cleanText;
 
-                    // Название главы
-                    String title = tocFileTitleMap.get(href);
+                    // Название главы (приоритет полного пути href над коротким именем файла для многотомников)
+                    String normHref = resolveZipPath("", href);
+                    String title = tocFileTitleMap.get(normHref);
+                    if (title == null) {
+                        title = tocFileTitleMap.get(href);
+                    }
                     if (title == null) {
                         String fname = href.contains("/") ? href.substring(href.lastIndexOf('/') + 1) : href;
-                        title = tocFileTitleMap.get(fname);
+                        title = tocFileTitleMap.get("__short__:" + fname.toLowerCase());
                     }
                     if (title == null || title.isEmpty()) {
                         title = extractTitle(rawHtml, "Глава " + chIndex);
@@ -265,19 +269,42 @@ public class EpubParser {
     }
 
     private static void populateTocTitles(List<TocNode> nodes, Map<String, String> outMap) {
+        populateTocTitlesWithParent(nodes, null, outMap);
+    }
+
+    private static void populateTocTitlesWithParent(List<TocNode> nodes, String parentTitle, Map<String, String> outMap) {
         if (nodes == null) return;
         for (TocNode n : nodes) {
+            if (n.title != null && !n.title.isEmpty() && parentTitle != null && !parentTitle.isEmpty()) {
+                // В многотомниках ("Всадники Перна" 4-в-1) дополняем "Глава X" названием тома/книги,
+                // чтобы не путать Главу 5 Книги 1 и Главу 5 Книги 4
+                String lower = n.title.toLowerCase();
+                if ((lower.startsWith("глава ") || lower.startsWith("часть ") || lower.matches("^\\d+.*"))
+                        && !n.title.contains("•") && !n.title.contains(parentTitle)) {
+                    String shortParent = parentTitle.length() > 28 ? parentTitle.substring(0, 28).trim() + "…" : parentTitle.trim();
+                    n.title = shortParent + " • " + n.title;
+                }
+            }
             if (n.fileHref != null && !n.fileHref.isEmpty() && n.title != null && !n.title.isEmpty()) {
+                String normHref = resolveZipPath("", n.fileHref);
+                if (!normHref.isEmpty() && !outMap.containsKey(normHref)) {
+                    outMap.put(normHref, n.title);
+                }
                 if (!outMap.containsKey(n.fileHref)) {
                     outMap.put(n.fileHref, n.title);
                 }
                 String fname = n.fileHref.contains("/") ? n.fileHref.substring(n.fileHref.lastIndexOf('/') + 1) : n.fileHref;
-                if (!outMap.containsKey(fname)) {
-                    outMap.put(fname, n.title);
+                String shortKey = "__short__:" + fname.toLowerCase();
+                if (!outMap.containsKey(shortKey)) {
+                    outMap.put(shortKey, n.title);
+                } else {
+                    // Коллизия одноименных файлов в разных папках многотомника (Book1/ch05.xhtml vs Book4/ch05.xhtml) —
+                    // отключаем неточный поиск по короткому имени для этого файла!
+                    outMap.put(shortKey, "");
                 }
             }
             if (n.children != null && !n.children.isEmpty()) {
-                populateTocTitles(n.children, outMap);
+                populateTocTitlesWithParent(n.children, n.title, outMap);
             }
         }
     }
@@ -288,13 +315,22 @@ public class EpubParser {
         for (TocNode node : nodes) {
             int matchedChapter = -1;
 
-            // 1. Поиск прямого соответствия с главами
+            // 1. Поиск точного соответствия полного пути с главами (приоритет над коротким именем для многотомников)
             if (node.fileHref != null && !node.fileHref.isEmpty()) {
                 for (int i = 0; i < chapters.size(); i++) {
                     ChapterData cd = chapters.get(i);
-                    if (cd.fileHref != null && hrefsMatch(cd.fileHref, node.fileHref)) {
+                    if (cd.fileHref != null && hrefsExactOrSuffixMatch(cd.fileHref, node.fileHref)) {
                         matchedChapter = i;
                         break;
+                    }
+                }
+                if (matchedChapter < 0) {
+                    for (int i = 0; i < chapters.size(); i++) {
+                        ChapterData cd = chapters.get(i);
+                        if (cd.fileHref != null && hrefsMatch(cd.fileHref, node.fileHref)) {
+                            matchedChapter = i;
+                            break;
+                        }
                     }
                 }
             }
@@ -357,12 +393,27 @@ public class EpubParser {
         }
     }
 
+    private static boolean hrefsExactOrSuffixMatch(String a, String b) {
+        if (a == null || b == null) return false;
+        String ca = resolveZipPath("", a);
+        String cb = resolveZipPath("", b);
+        if (ca.isEmpty() || cb.isEmpty()) return false;
+        return ca.equalsIgnoreCase(cb) || ca.toLowerCase().endsWith("/" + cb.toLowerCase()) || cb.toLowerCase().endsWith("/" + ca.toLowerCase());
+    }
+
     private static boolean hrefsMatch(String a, String b) {
         if (a == null || b == null) return false;
+        if (hrefsExactOrSuffixMatch(a, b)) return true;
         String ca = a.contains("#") ? a.substring(0, a.indexOf('#')).trim() : a.trim();
         String cb = b.contains("#") ? b.substring(0, b.indexOf('#')).trim() : b.trim();
-        if (ca.equalsIgnoreCase(cb) || ca.endsWith("/" + cb) || cb.endsWith("/" + ca)) {
-            return true;
+        // Если оба пути содержат разные подпапки (например Book1/ch05.xhtml и Book4/ch05.xhtml),
+        // запрещаем ложное склеивание только по имени файла!
+        if (ca.contains("/") && cb.contains("/")) {
+            String dirA = ca.substring(0, ca.lastIndexOf('/'));
+            String dirB = cb.substring(0, cb.lastIndexOf('/'));
+            if (!dirA.equalsIgnoreCase(dirB) && !dirA.toLowerCase().endsWith("/" + dirB.toLowerCase()) && !dirB.toLowerCase().endsWith("/" + dirA.toLowerCase())) {
+                return false;
+            }
         }
         String fa = ca.contains("/") ? ca.substring(ca.lastIndexOf('/') + 1) : ca;
         String fb = cb.contains("/") ? cb.substring(cb.lastIndexOf('/') + 1) : cb;

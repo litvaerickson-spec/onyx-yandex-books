@@ -107,10 +107,10 @@
 
         <Button
             android:id="@+id/book_read_btn"
-            android:layout_width="64dp"
+            android:layout_width="wrap_content"
             android:layout_height="32dp"
             android:minHeight="0dp"
-            android:minWidth="0dp"
+            android:minWidth="74dp"
             android:text="@string/btn_read"
             android:textSize="12sp"
             android:textStyle="bold"
@@ -118,18 +118,18 @@
             android:background="@drawable/btn_eink_primary"
             android:includeFontPadding="false"
             android:singleLine="true"
-            android:paddingLeft="2dp"
-            android:paddingRight="2dp"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
             android:paddingTop="2dp"
             android:paddingBottom="2dp"
             android:layout_marginBottom="4dp" />
 
         <Button
             android:id="@+id/book_download_btn"
-            android:layout_width="64dp"
+            android:layout_width="wrap_content"
             android:layout_height="26dp"
             android:minHeight="0dp"
-            android:minWidth="0dp"
+            android:minWidth="74dp"
             android:text="О книге"
             android:textSize="11sp"
             android:textStyle="bold"
@@ -137,8 +137,8 @@
             android:background="@drawable/btn_eink"
             android:includeFontPadding="false"
             android:singleLine="true"
-            android:paddingLeft="2dp"
-            android:paddingRight="2dp"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
             android:paddingTop="2dp"
             android:paddingBottom="2dp" />
     </LinearLayout>

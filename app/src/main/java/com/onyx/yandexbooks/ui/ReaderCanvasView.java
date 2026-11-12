@@ -43,10 +43,15 @@ public class ReaderCanvasView extends View {
     private int globalPageIndex = 1;
     private int totalBookPages = 1;
     private int totalPages = 1;
+    private int chapterPageIndex = 1;
+    private int chapterTotalPages = 1;
     private String chapterTitle = "";
     private int currentChapterIndex = 0;
     private int totalChapters = 1;
     private double globalPercent = 0.0;
+    private String cachedBatteryAndTime = "";
+    private long lastStatusUpdateMs = 0L;
+    private final java.text.SimpleDateFormat timeFormat = new java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault());
     private OnReaderInteractionListener interactionListener;
     public interface OnCanvasSizeChangeListener {
         void onCanvasSizeChanged(int width, int height);
@@ -174,15 +179,47 @@ public class ReaderCanvasView extends View {
     }
 
     public void setPage(TextPaginator.Page page, int globalPageIndex, int totalBookPages, String chapterTitle, int currentChapterIndex, int totalChapters, double globalPercent) {
+        setPage(page, globalPageIndex, totalBookPages, chapterTitle, currentChapterIndex, totalChapters, globalPercent,
+                page != null ? (page.pageIndex + 1) : 1, Math.max(1, totalBookPages));
+    }
+
+    public void setPage(TextPaginator.Page page, int globalPageIndex, int totalBookPages, String chapterTitle, int currentChapterIndex, int totalChapters, double globalPercent, int chapterPageIndex, int chapterTotalPages) {
         this.currentPage = page;
         this.globalPageIndex = Math.max(1, globalPageIndex);
         this.totalBookPages = Math.max(1, totalBookPages);
         this.totalPages = Math.max(1, totalBookPages);
+        this.chapterPageIndex = Math.max(1, chapterPageIndex);
+        this.chapterTotalPages = Math.max(1, chapterTotalPages);
         this.chapterTitle = chapterTitle != null ? chapterTitle : "";
         this.currentChapterIndex = currentChapterIndex;
         this.totalChapters = Math.max(1, totalChapters);
         this.globalPercent = Math.max(0.0, Math.min(100.0, globalPercent));
         invalidate();
+    }
+
+    private String getStatusTimeAndBattery() {
+        long now = System.currentTimeMillis();
+        if (now - lastStatusUpdateMs > 20000L || cachedBatteryAndTime.isEmpty()) {
+            lastStatusUpdateMs = now;
+            String timeStr = timeFormat.format(new java.util.Date(now));
+            int batPct = -1;
+            try {
+                android.content.Intent intent = getContext().registerReceiver(null, new android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED));
+                if (intent != null) {
+                    int level = intent.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1);
+                    int scale = intent.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1);
+                    if (level >= 0 && scale > 0) {
+                        batPct = Math.round((level * 100f) / scale);
+                    }
+                }
+            } catch (Throwable ignored) {}
+            if (batPct >= 0) {
+                cachedBatteryAndTime = timeStr + " • " + batPct + "%";
+            } else {
+                cachedBatteryAndTime = timeStr;
+            }
+        }
+        return cachedBatteryAndTime;
     }
 
     @Override
@@ -327,14 +364,31 @@ public class ReaderCanvasView extends View {
             }
         }
 
-        // 2. Нижний колонтитул: Сквозная нумерация от всей книги и процент
+        // 2. Нижний колонтитул: Слева — время и заряд батареи; Справа — страница главы, сквозная страница книги и процент
         float footerY = getHeight() - 8;
-        String pageInfo = "Стр. " + globalPageIndex + " из " + totalBookPages + String.format(java.util.Locale.getDefault(), " (%.0f%%)", globalPercent);
+        int drawFooterY = Math.round(footerY);
+
+        String leftStatus = getStatusTimeAndBattery();
+        if (leftStatus != null && !leftStatus.isEmpty()) {
+            canvas.drawText(leftStatus, Math.round(config.getPaddingLeftPx()), drawFooterY, footerPaint);
+        }
+
+        String pageInfo = "Гл. " + chapterPageIndex + "/" + chapterTotalPages
+                + " • Стр. " + globalPageIndex + " из " + totalBookPages
+                + String.format(java.util.Locale.getDefault(), " (%.0f%%)", globalPercent);
         float pageInfoWidth = footerPaint.measureText(pageInfo);
+        float leftWidth = (leftStatus != null ? footerPaint.measureText(leftStatus) : 0f);
+        float availFooterW = getWidth() - config.getPaddingLeftPx() - config.getPaddingRightPx();
+        if (leftWidth + pageInfoWidth + 16f > availFooterW) {
+            // Компактный формат для крупных шрифтов или узких экранов
+            pageInfo = "Гл." + chapterPageIndex + "/" + chapterTotalPages
+                    + " • " + globalPageIndex + "/" + totalBookPages
+                    + String.format(java.util.Locale.getDefault(), " (%.0f%%)", globalPercent);
+            pageInfoWidth = footerPaint.measureText(pageInfo);
+        }
 
         // Страница и процент справа с привязкой к физической сетке пикселей
         int drawFooterX = Math.round(getWidth() - config.getPaddingRightPx() - pageInfoWidth);
-        int drawFooterY = Math.round(footerY);
         canvas.drawText(pageInfo, drawFooterX, drawFooterY, footerPaint);
     }
 
@@ -354,6 +408,7 @@ public class ReaderCanvasView extends View {
                 float deltaY = upY - touchDownY;
                 long duration = System.currentTimeMillis() - touchDownTime;
                 float width = getWidth();
+                float height = getHeight();
 
                 if (interactionListener != null) {
                     // 1. Определение горизонтального свайпа (смещение >= 35px, горизонталь преобладает над вертикалью)
@@ -366,16 +421,39 @@ public class ReaderCanvasView extends View {
                             interactionListener.onPageBackward();
                         }
                     } else if (duration < 700) {
-                        // 2. Дискретный тап по зонам (даже при мелком дрожании пальца на E-Ink тачскрине)
-                        if (upX < width * 0.30f) {
-                            // Левые 30% экрана: Назад
-                            interactionListener.onPageBackward();
-                        } else if (upX > width * 0.70f) {
-                            // Правые 30% экрана: Вперед
-                            interactionListener.onPageForward();
+                        String tapMode = (config != null) ? config.getTapZoneMode() : "standard";
+                        if ("left_handed".equalsIgnoreCase(tapMode)) {
+                            // Режим «Для левшей»: левый край делится по вертикали:
+                            // верхние 30% и нижние 30% слева -> Вперед; центр слева (40%) -> Назад!
+                            if (upX < width * 0.35f) {
+                                if (upY < height * 0.30f || upY > height * 0.70f) {
+                                    interactionListener.onPageForward();
+                                } else {
+                                    interactionListener.onPageBackward();
+                                }
+                            } else if (upX > width * 0.70f) {
+                                interactionListener.onPageForward();
+                            } else {
+                                interactionListener.onCenterTap();
+                            }
+                        } else if ("top_back_bottom_fwd".equalsIgnoreCase(tapMode)) {
+                            // Верхние 30% -> Назад, Нижние 40% -> Вперед, Центр -> Меню
+                            if (upY < height * 0.30f) {
+                                interactionListener.onPageBackward();
+                            } else if (upY > height * 0.60f) {
+                                interactionListener.onPageForward();
+                            } else {
+                                interactionListener.onCenterTap();
+                            }
                         } else {
-                            // Центральные 40% экрана: Меню ридера
-                            interactionListener.onCenterTap();
+                            // 2. Стандартный тап по зонам (левые 30% Назад, правые 30% Вперед, центр 40% Меню)
+                            if (upX < width * 0.30f) {
+                                interactionListener.onPageBackward();
+                            } else if (upX > width * 0.70f) {
+                                interactionListener.onPageForward();
+                            } else {
+                                interactionListener.onCenterTap();
+                            }
                         }
                     }
                 }

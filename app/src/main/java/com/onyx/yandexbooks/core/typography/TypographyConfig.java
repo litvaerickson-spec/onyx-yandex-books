@@ -35,6 +35,7 @@ public class TypographyConfig implements Serializable {
     private String customFontPath = null;
     private boolean isNightMode = false;
     private int epdFullRefreshInterval = 8; // Полный сброс артефактов E-Ink каждые 8 страниц
+    private String tapZoneMode = "standard"; // standard, left_handed, top_back_bottom_fwd
 
     public TypographyConfig() {}
 
@@ -103,4 +104,7 @@ public class TypographyConfig implements Serializable {
 
     public int getEpdFullRefreshInterval() { return epdFullRefreshInterval; }
     public void setEpdFullRefreshInterval(int epdFullRefreshInterval) { this.epdFullRefreshInterval = epdFullRefreshInterval; }
+
+    public String getTapZoneMode() { return tapZoneMode != null ? tapZoneMode : "standard"; }
+    public void setTapZoneMode(String tapZoneMode) { this.tapZoneMode = tapZoneMode != null ? tapZoneMode : "standard"; }
 }
