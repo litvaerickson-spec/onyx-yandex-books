@@ -697,13 +697,15 @@ public class CacheManager {
     public static final String[] ALREADER_PACKAGES = new String[]{
             "com.neverland.alreader",
             "com.neverland.alreaderx",
+            "com.neverland.alreaderxpro",
             "com.neverland.alreader.onyx",
             "ru.alreader"
     };
 
     public static final String[] NEOREADER_PACKAGES = new String[]{
             "com.onyx.kreader",
-            "com.onyx.reader"
+            "com.onyx.reader",
+            "cn.onyxsdk.neoreader"
     };
 
     private static void disableFileUriExposureIfNeeded() {
@@ -728,6 +730,26 @@ public class CacheManager {
                 return pkg;
             } catch (Throwable ignored) {}
         }
+        return null;
+    }
+
+    private static String findMatchingEpubHandler(Context context, android.content.Intent intent, String[] keywords) {
+        if (context == null || intent == null || keywords == null) return null;
+        try {
+            android.content.pm.PackageManager pm = context.getPackageManager();
+            java.util.List<android.content.pm.ResolveInfo> handlers = pm.queryIntentActivities(intent, 0);
+            if (handlers != null) {
+                for (android.content.pm.ResolveInfo ri : handlers) {
+                    if (ri.activityInfo == null || ri.activityInfo.packageName == null) continue;
+                    String pkg = ri.activityInfo.packageName.toLowerCase();
+                    for (String kw : keywords) {
+                        if (pkg.contains(kw)) {
+                            return ri.activityInfo.packageName;
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
         return null;
     }
 
@@ -774,9 +796,12 @@ public class CacheManager {
             } catch (Exception ignored) {}
         }
 
-        // 0.1. Если явно выбран AlReader или NeoReader — проверяем установленные пакеты
+        // 0.1. Если явно выбран AlReader или NeoReader — проверяем установленные пакеты и перечень обработчиков EPUB
         if (AppSettings.READER_MODE_ALREADER.equalsIgnoreCase(targetReaderMode)) {
             String alPkg = findInstalledPackage(activity, ALREADER_PACKAGES);
+            if (alPkg == null) {
+                alPkg = findMatchingEpubHandler(activity, intent, new String[]{"alreader", "neverland"});
+            }
             if (alPkg != null) {
                 try {
                     android.content.Intent direct = new android.content.Intent(intent);
@@ -785,8 +810,18 @@ public class CacheManager {
                     return true;
                 } catch (Exception ignored) {}
             }
+            // Если AlReader не обнаружен напрямую — показываем системный выбор приложений вместо молчаливого запуска NeoReader
+            try {
+                android.content.Intent chooser = android.content.Intent.createChooser(intent, "AlReader не найден — выберите ридер:");
+                chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                activity.startActivity(chooser);
+                return true;
+            } catch (Exception ignored) {}
         } else if (AppSettings.READER_MODE_NEOREADER.equalsIgnoreCase(targetReaderMode)) {
             String neoPkg = findInstalledPackage(activity, NEOREADER_PACKAGES);
+            if (neoPkg == null) {
+                neoPkg = findMatchingEpubHandler(activity, intent, new String[]{"kreader", "neoreader", "onyx.reader"});
+            }
             if (neoPkg != null) {
                 try {
                     android.content.Intent direct = new android.content.Intent(intent);

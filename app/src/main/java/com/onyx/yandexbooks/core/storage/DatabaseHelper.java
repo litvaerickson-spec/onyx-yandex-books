@@ -199,6 +199,11 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         }
     }
 
+    @Override
+    public void onDowngrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+        ensureSchemaMigration(db);
+    }
+
     public synchronized void saveBooks(List<Book> books, String shelfType) {
         SQLiteDatabase db = getWritableDatabase();
         db.beginTransaction();
@@ -1076,7 +1081,12 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 backupDir.mkdirs();
             }
 
-            // 1. Сбрасываем транзакции SQLite и копируем файл БД
+            // 1. Сбрасываем WAL/журнал SQLite и копируем файл БД
+            try {
+                SQLiteDatabase wdb = getWritableDatabase();
+                android.database.Cursor c = wdb.rawQuery("PRAGMA wal_checkpoint(FULL)", null);
+                if (c != null) c.close();
+            } catch (Throwable ignored) {}
             java.io.File dbFile = context.getDatabasePath(DATABASE_NAME);
             if (dbFile != null && dbFile.exists() && dbFile.length() > 0) {
                 java.io.File dstDb = new java.io.File(backupDir, DATABASE_NAME);
@@ -1150,6 +1160,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 if (meta.has("ui_scale")) settings.setUiScale((float) meta.optDouble("ui_scale", 1.0));
                 if (meta.has("reader_mode")) settings.setReaderMode(meta.optString("reader_mode", AppSettings.READER_MODE_ONYX));
                 if (meta.has("tap_zone_mode")) settings.setTapZoneMode(meta.optString("tap_zone_mode", AppSettings.TAP_ZONE_STANDARD));
+                if (meta.has("font_size_sp")) settings.setFontSizeSp((int) meta.optInt("font_size_sp", 18));
+                if (meta.has("font_family")) settings.setFontFamily(meta.optString("font_family", "serif"));
             }
 
             java.io.File backupDb = new java.io.File(backupDir, DATABASE_NAME);
@@ -1162,7 +1174,15 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     if (dstDb.getParentFile() != null && !dstDb.getParentFile().exists()) {
                         dstDb.getParentFile().mkdirs();
                     }
+                    // Удаляем остаточные WAL/SHM/Journal файлы от пустой инициализации
+                    for (String suffix : new String[]{"-wal", "-shm", "-journal"}) {
+                        java.io.File aux = new java.io.File(dstDb.getAbsolutePath() + suffix);
+                        if (aux.exists()) aux.delete();
+                    }
                     copyFileSafe(backupDb, dstDb);
+                    try {
+                        ensureSchemaMigration(getWritableDatabase());
+                    } catch (Throwable ignored) {}
                     restoredAny = true;
                 }
             }

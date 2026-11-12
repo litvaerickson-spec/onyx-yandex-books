@@ -100,6 +100,8 @@ public class MainActivity extends Activity {
 
     private static boolean sUpdateNotifiedThisSession = false;
     private static boolean sUpdateCheckedSuccessfully = false;
+    private boolean waitingStoragePermissionForRestore = false;
+    private long lastAutoBackupMs = 0L;
     private BroadcastReceiver networkReceiver;
 
     @Override
@@ -144,14 +146,13 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
         com.onyx.yandexbooks.core.ui.UiScaleHelper.applyViewTreeScale(findViewById(android.R.id.content), appSettings.getUiScale());
 
-        requestRuntimeStoragePermissionsIfNeeded();
-
         tokenStorage = new TokenStorage(this);
         dbHelper = DatabaseHelper.getInstance(this);
         // Автоматическое восстановление резервной копии после отката версии / переустановки
         if (dbHelper.restoreBackupFromPublicStorageIfNeeded(this)) {
             com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, appSettings.getUiScale());
         }
+        waitingStoragePermissionForRestore = !tokenStorage.isAuthorized() && requestRuntimeStoragePermissionsIfNeeded();
         apiClient = new YandexBooksApiClient(tokenStorage);
         cacheManager = new CacheManager(this, apiClient);
         syncManager = new SyncManager(this, apiClient);
@@ -192,10 +193,12 @@ public class MainActivity extends Activity {
         setupSearchActions();
         setupFooterActions();
 
-        checkAuthAndLoad();
+        if (!waitingStoragePermissionForRestore) {
+            checkAuthAndLoad();
+        }
     }
 
-    private void requestRuntimeStoragePermissionsIfNeeded() {
+    private boolean requestRuntimeStoragePermissionsIfNeeded() {
         if (android.os.Build.VERSION.SDK_INT >= 23) {
             try {
                 java.lang.reflect.Method checkSelf = android.content.Context.class.getMethod("checkSelfPermission", String.class);
@@ -206,8 +209,28 @@ public class MainActivity extends Activity {
                             "android.permission.WRITE_EXTERNAL_STORAGE",
                             "android.permission.READ_EXTERNAL_STORAGE"
                     }, 1002);
+                    return true;
                 }
             } catch (Throwable ignored) {}
+        }
+        return false;
+    }
+
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        if (requestCode == 1002) {
+            boolean wasWaiting = waitingStoragePermissionForRestore;
+            waitingStoragePermissionForRestore = false;
+            boolean granted = grantResults != null && grantResults.length > 0
+                    && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            if (granted && dbHelper != null) {
+                if (dbHelper.restoreBackupFromPublicStorageIfNeeded(this)) {
+                    com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, appSettings.getUiScale());
+                    updateReaderModeButton();
+                }
+            }
+            if (wasWaiting) {
+                checkAuthAndLoad();
+            }
         }
     }
 
@@ -320,22 +343,48 @@ public class MainActivity extends Activity {
         int padV = (int) (12 * density);
         root.setPadding(padH, padV, padH, padV);
 
+        LinearLayout headerRow = new LinearLayout(this);
+        headerRow.setOrientation(LinearLayout.HORIZONTAL);
+        headerRow.setGravity(Gravity.CENTER_VERTICAL);
+        headerRow.setPadding(0, 0, 0, (int) (6 * density));
+
         TextView titleView = new TextView(this);
         titleView.setText("Меню приложения");
         titleView.setTextSize(14);
         titleView.setTypeface(null, Typeface.BOLD);
         titleView.setTextColor(Color.BLACK);
         titleView.setGravity(Gravity.CENTER);
-        titleView.setPadding(0, 0, 0, (int) (6 * density));
-        root.addView(titleView);
+        titleView.setPadding((int) (28 * density), 0, 0, 0);
+        headerRow.addView(titleView, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+
+        Button btnTopClose = new Button(this);
+        btnTopClose.setText("X");
+        btnTopClose.setTextSize(12);
+        btnTopClose.setTypeface(null, Typeface.BOLD);
+        btnTopClose.setTextColor(Color.BLACK);
+        btnTopClose.setBackgroundResource(R.drawable.btn_eink);
+        btnTopClose.setPadding(0, 0, 0, 0);
+        btnTopClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        headerRow.addView(btnTopClose, new LinearLayout.LayoutParams((int) (30 * density), (int) (28 * density)));
+        root.addView(headerRow);
 
         View divider = new View(this);
         divider.setBackgroundColor(Color.BLACK);
         root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
 
+        final com.onyx.yandexbooks.core.eink.EinkScrollView menuScroll = new com.onyx.yandexbooks.core.eink.EinkScrollView(this);
+        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
+        scrollLp.setMargins(0, (int) (4 * density), 0, (int) (4 * density));
+        menuScroll.setLayoutParams(scrollLp);
+
         LinearLayout listLayout = new LinearLayout(this);
         listLayout.setOrientation(LinearLayout.VERTICAL);
-        listLayout.setPadding(0, (int) (6 * density), 0, (int) (6 * density));
+        listLayout.setPadding(0, (int) (2 * density), 0, (int) (2 * density));
 
         int doneCount = dbHelper.getBooksCountByShelf("done");
         Button btnShelfDone = createMenuButton("Прочитано (" + doneCount + ")", new View.OnClickListener() {
@@ -425,10 +474,11 @@ public class MainActivity extends Activity {
         }, density);
         listLayout.addView(btnLogoutItem);
 
-        root.addView(listLayout);
+        menuScroll.addView(listLayout);
+        root.addView(menuScroll);
 
         TextView tvBetaNotice = new TextView(this);
-        tvBetaNotice.setText("Яндекс Книги Lite v1.7.0-beta [BETA]");
+        tvBetaNotice.setText("Яндекс Книги Lite v1.6.1-beta [BETA]");
         tvBetaNotice.setTextSize(10);
         tvBetaNotice.setTextColor(Color.DKGRAY);
         tvBetaNotice.setGravity(Gravity.CENTER);
@@ -441,12 +491,13 @@ public class MainActivity extends Activity {
 
         Button btnClose = new Button(this);
         btnClose.setText("Свернуть меню");
-        btnClose.setTextSize(11.5f);
+        btnClose.setTextSize(11.0f);
         btnClose.setTypeface(null, Typeface.BOLD);
         btnClose.setTextColor(Color.BLACK);
         btnClose.setBackgroundResource(R.drawable.btn_eink);
-        btnClose.setPadding(0, 0, 0, 0);
+        btnClose.setPadding((int) (4 * density), 0, (int) (4 * density), 0);
         btnClose.setSingleLine(true);
+        btnClose.setEllipsize(android.text.TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams lpClose = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
         lpClose.setMargins(0, 0, (int) (3 * density), 0);
         btnClose.setLayoutParams(lpClose);
@@ -459,13 +510,14 @@ public class MainActivity extends Activity {
         bottomBtnRow.addView(btnClose);
 
         Button btnExitApp = new Button(this);
-        btnExitApp.setText("Выйти из приложения");
-        btnExitApp.setTextSize(11.5f);
+        btnExitApp.setText("Выйти из ПО");
+        btnExitApp.setTextSize(11.0f);
         btnExitApp.setTypeface(null, Typeface.BOLD);
         btnExitApp.setTextColor(Color.BLACK);
         btnExitApp.setBackgroundResource(R.drawable.btn_eink);
-        btnExitApp.setPadding(0, 0, 0, 0);
+        btnExitApp.setPadding((int) (4 * density), 0, (int) (4 * density), 0);
         btnExitApp.setSingleLine(true);
+        btnExitApp.setEllipsize(android.text.TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams lpExit = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
         lpExit.setMargins((int) (3 * density), 0, 0, 0);
         btnExitApp.setLayoutParams(lpExit);
@@ -482,9 +534,10 @@ public class MainActivity extends Activity {
         bottomBtnRow.addView(btnExitApp);
         root.addView(bottomBtnRow);
 
-        dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        final int targetW = (int) (dm.widthPixels * 0.88);
+        final int targetW = (int) (dm.widthPixels * 0.90);
+        final int targetH = Math.min((int) (dm.heightPixels * 0.86), (int) (460 * density));
         dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
             @Override
             public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
@@ -501,7 +554,7 @@ public class MainActivity extends Activity {
             @Override
             public void onShow(DialogInterface d) {
                 if (dialog.getWindow() != null) {
-                    dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    dialog.getWindow().setLayout(targetW, targetH);
                 }
                 EpdController.requestFullRefresh(MainActivity.this, root);
             }
@@ -517,7 +570,7 @@ public class MainActivity extends Activity {
         dialog.show();
 
         if (dialog.getWindow() != null) {
-            dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
+            dialog.getWindow().setLayout(targetW, targetH);
         }
     }
 
@@ -1544,6 +1597,18 @@ public class MainActivity extends Activity {
         EpdController.requestFullRefresh(this, booksListView);
     }
 
+    @Override
+    protected void onPause() {
+        super.onPause();
+        long now = System.currentTimeMillis();
+        if (tokenStorage != null && tokenStorage.isAuthorized() && dbHelper != null && (now - lastAutoBackupMs > 300000L)) {
+            lastAutoBackupMs = now;
+            try {
+                dbHelper.exportBackupToPublicStorage(this);
+            } catch (Throwable ignored) {}
+        }
+    }
+
     private void scrollShelfBy(int delta) {
         if (booksListView != null && currentBooks != null && !currentBooks.isEmpty()) {
             int current = booksListView.getFirstVisiblePosition();
@@ -2001,6 +2066,14 @@ public class MainActivity extends Activity {
                 EinkNotice.show(this, "Ридер", "Внешний ридер не найден. Открываем во встроенном ридере...");
                 openInLiteReader(book);
             }
+            return;
+        }
+
+        // Если книга уже скачана во внутренний кэш, но не удалось записать в /sdcard/Books/YandexBooks/ — не качаем повторно
+        if (cacheManager.isBookDownloaded(book.getUuid())) {
+            requestRuntimeStoragePermissionsIfNeeded();
+            EinkNotice.show(this, "Доступ к памяти", "Не удалось записать файл книги в /sdcard/Books/YandexBooks/ (проверьте разрешение памяти). Открываем во встроенном ридере...");
+            openInLiteReader(book);
             return;
         }
 

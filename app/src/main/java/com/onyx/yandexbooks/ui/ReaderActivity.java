@@ -2965,12 +2965,14 @@ public class ReaderActivity extends Activity {
         flattenAllTocNodes(nodes, flat);
         EpubParser.TocNode best = null;
         for (EpubParser.TocNode node : flat) {
-            if (node.spineIndex == curSpineIndex && node.charOffset <= curCharOffset) {
+            if (node.spineIndex < 0) continue;
+            boolean validSameSpine = (node.spineIndex == curSpineIndex && node.charOffset <= curCharOffset);
+            boolean earlierSpine = (node.spineIndex < curSpineIndex);
+            if (!validSameSpine && !earlierSpine) continue;
+            if (best == null
+                    || best.spineIndex < node.spineIndex
+                    || (best.spineIndex == node.spineIndex && best.charOffset <= node.charOffset)) {
                 best = node;
-            } else if (node.spineIndex < curSpineIndex) {
-                if (best == null || best.spineIndex < node.spineIndex) {
-                    best = node;
-                }
             }
         }
         return best != null ? best.title : null;

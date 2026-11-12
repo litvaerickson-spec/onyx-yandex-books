@@ -55,7 +55,7 @@ public class AppUpdateManager {
 
     private static final String TAG = "AppUpdateManager";
     private static final String GITHUB_RELEASES_LIST_URL =
-            "https://api.github.com/repos/litvaerickson-spec/onyx-yandex-books/releases?per_page=25";
+            "https://api.github.com/repos/litvaerickson-spec/onyx-yandex-books/releases?per_page=50";
     private static final String GITHUB_RAW_VERSION_URL =
             "https://raw.githubusercontent.com/litvaerickson-spec/onyx-yandex-books/main/version.json";
     private static final String GITHUB_LATEST_RELEASE_URL =
@@ -98,8 +98,9 @@ public class AppUpdateManager {
     }
 
     /**
-     * Сравнение семантических версий (SemVer).
+     * Сравнение семантических версий (SemVer) с поддержкой pre-release суффиксов (-beta, -rc).
      * Возвращает true, если версия latestTag новее, чем currentVersion.
+     * Правило SemVer: 1.6.1 > 1.6.1-beta > 1.6.0.
      */
     public static boolean isVersionNewer(String latestTag, String currentVersion) {
         if (latestTag == null || currentVersion == null) return false;
@@ -107,26 +108,46 @@ public class AppUpdateManager {
         String c = currentVersion.trim().replaceAll("^[vV]", "");
         if (l.equalsIgnoreCase(c)) return false;
 
-        String[] lParts = l.split("[.-]");
-        String[] cParts = c.split("[.-]");
+        int lDash = l.indexOf('-');
+        int cDash = c.indexOf('-');
+        String lBase = lDash >= 0 ? l.substring(0, lDash) : l;
+        String cBase = cDash >= 0 ? c.substring(0, cDash) : c;
+        String lPre = lDash >= 0 ? l.substring(lDash + 1) : "";
+        String cPre = cDash >= 0 ? c.substring(cDash + 1) : "";
+
+        String[] lParts = lBase.split("\\.");
+        String[] cParts = cBase.split("\\.");
         int max = Math.max(lParts.length, cParts.length);
         for (int i = 0; i < max; i++) {
-            int lVal = 0;
-            int cVal = 0;
-            if (i < lParts.length) {
-                try {
-                    lVal = Integer.parseInt(lParts[i].replaceAll("\\D+", ""));
-                } catch (Exception ignored) {}
-            }
-            if (i < cParts.length) {
-                try {
-                    cVal = Integer.parseInt(cParts[i].replaceAll("\\D+", ""));
-                } catch (Exception ignored) {}
-            }
+            int lVal = parseIntSafe(i < lParts.length ? lParts[i] : "0");
+            int cVal = parseIntSafe(i < cParts.length ? cParts[i] : "0");
             if (lVal > cVal) return true;
             if (lVal < cVal) return false;
         }
+
+        // Базовые версии равны: стабильный релиз (без суффикса) всегда новее pre-release (beta)
+        boolean lHasPre = !lPre.isEmpty();
+        boolean cHasPre = !cPre.isEmpty();
+        if (!lHasPre && cHasPre) return true;
+        if (lHasPre && !cHasPre) return false;
+        if (lHasPre && cHasPre) {
+            int lPreNum = parseIntSafe(lPre);
+            int cPreNum = parseIntSafe(cPre);
+            if (lPreNum != cPreNum) return lPreNum > cPreNum;
+            return lPre.compareToIgnoreCase(cPre) > 0;
+        }
         return false;
+    }
+
+    private static int parseIntSafe(String part) {
+        if (part == null) return 0;
+        String digits = part.replaceAll("\\D+", "");
+        if (digits.isEmpty()) return 0;
+        try {
+            return Integer.parseInt(digits);
+        } catch (Exception ignored) {
+            return 0;
+        }
     }
 
     /**
@@ -412,26 +433,6 @@ public class AppUpdateManager {
         });
         btnRow.addView(btnInstall);
 
-        Button btnArchive = new Button(activity);
-        btnArchive.setText("Архив версий");
-        btnArchive.setTextSize(11.5f);
-        btnArchive.setTypeface(null, Typeface.BOLD);
-        btnArchive.setTextColor(Color.BLACK);
-        btnArchive.setBackgroundResource(R.drawable.btn_eink);
-        btnArchive.setPadding(0, 0, 0, 0);
-        btnArchive.setSingleLine(true);
-        LinearLayout.LayoutParams lpArch = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
-        lpArch.setMargins((int) (2 * density), 0, (int) (2 * density), 0);
-        btnArchive.setLayoutParams(lpArch);
-        btnArchive.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                dialog.dismiss();
-                showReleaseArchiveDialog(activity);
-            }
-        });
-        btnRow.addView(btnArchive);
-
         Button btnCancel = new Button(activity);
         btnCancel.setText("Ознакомился");
         btnCancel.setTextSize(12.0f);
@@ -452,6 +453,26 @@ public class AppUpdateManager {
         btnRow.addView(btnCancel);
 
         root.addView(btnRow);
+
+        Button btnArchive = new Button(activity);
+        btnArchive.setText("Архив версий и откат ПО");
+        btnArchive.setTextSize(11.5f);
+        btnArchive.setTypeface(null, Typeface.BOLD);
+        btnArchive.setTextColor(Color.BLACK);
+        btnArchive.setBackgroundResource(R.drawable.btn_eink);
+        btnArchive.setPadding(0, 0, 0, 0);
+        btnArchive.setSingleLine(true);
+        LinearLayout.LayoutParams lpArch = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (34 * density));
+        lpArch.setMargins(0, (int) (6 * density), 0, 0);
+        btnArchive.setLayoutParams(lpArch);
+        btnArchive.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                showReleaseArchiveDialog(activity);
+            }
+        });
+        root.addView(btnArchive);
 
         dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -518,17 +539,8 @@ public class AppUpdateManager {
             public void run() {
                 File targetFile = null;
                 try {
-                    // Выбираем публичную или внешнюю директорию Загрузок, доступную PackageInstaller
-                    File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                    if (downloadDir == null || (!downloadDir.exists() && !downloadDir.mkdirs())) {
-                        downloadDir = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
-                    }
-                    if (downloadDir == null || (!downloadDir.exists() && !downloadDir.mkdirs())) {
-                        downloadDir = new File("/sdcard/Download");
-                        if (!downloadDir.exists()) {
-                            downloadDir.mkdirs();
-                        }
-                    }
+                    // Выбираем доступную для записи директорию Загрузок
+                    File downloadDir = resolveWritableDownloadDir(activity, true);
 
                     String fname = release.apkFileName != null ? release.apkFileName : "yandex-books-update.apk";
                     targetFile = new File(downloadDir, fname);
@@ -608,6 +620,28 @@ public class AppUpdateManager {
         });
     }
 
+    private static File resolveWritableDownloadDir(Context context, boolean allowPrivateFallback) {
+        File[] candidates = allowPrivateFallback
+                ? new File[]{
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                        new File("/sdcard/Download"),
+                        context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS),
+                        context.getCacheDir()
+                }
+                : new File[]{
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                        new File("/sdcard/Download"),
+                        context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                };
+        for (File dir : candidates) {
+            if (dir == null) continue;
+            if ((dir.exists() || dir.mkdirs()) && dir.canWrite()) {
+                return dir;
+            }
+        }
+        return allowPrivateFallback ? context.getCacheDir() : Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+    }
+
     /**
      * Запуск нативного PackageInstaller Android для обновления поверх существующей версии.
      * При обновлении без удаления приложения все данные (база SQLite, SharedPreferences, книги)
@@ -630,10 +664,22 @@ public class AppUpdateManager {
             }
             apkFile.setReadable(true, false);
             Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setDataAndType(Uri.fromFile(apkFile), "application/vnd.android.package-archive");
+            Uri uri = (android.os.Build.VERSION.SDK_INT >= 24)
+                    ? LocalFileProvider.getUriForFile(apkFile)
+                    : Uri.fromFile(apkFile);
+            intent.setDataAndType(uri, "application/vnd.android.package-archive");
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            context.startActivity(intent);
+            try {
+                context.startActivity(intent);
+            } catch (Exception contentErr) {
+                // Fallback на прямой file:// URI для старых прошивок E-Ink
+                Intent fallback = new Intent(Intent.ACTION_VIEW);
+                fallback.setDataAndType(Uri.fromFile(apkFile), "application/vnd.android.package-archive");
+                fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                context.startActivity(fallback);
+            }
         } catch (Exception e) {
             Log.e(TAG, "Error launching package installer", e);
             EinkNotice.show(context, "Установка обновления", "Не удалось запустить установщик:\n" + e.getMessage() + "\n\nФайл сохранен:\n" + apkFile.getAbsolutePath());
@@ -909,10 +955,9 @@ public class AppUpdateManager {
             public void run() {
                 File targetFile = null;
                 try {
-                    File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                    if (downloadDir == null || (!downloadDir.exists() && !downloadDir.mkdirs())) {
-                        downloadDir = new File("/sdcard/Download");
-                        if (!downloadDir.exists()) downloadDir.mkdirs();
+                    File downloadDir = resolveWritableDownloadDir(activity, false);
+                    if (downloadDir == null || !downloadDir.canWrite()) {
+                        throw new Exception("Нет прав на запись в папку «Загрузки» (/sdcard/Download). Выдайте разрешение памяти приложению.");
                     }
                     String fname = release.apkFileName != null ? release.apkFileName : ("yandex-books-lite-" + release.tagName + ".apk");
                     targetFile = new File(downloadDir, fname);

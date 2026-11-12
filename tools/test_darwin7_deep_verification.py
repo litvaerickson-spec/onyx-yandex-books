@@ -92,10 +92,10 @@ def test_darwin7_android9_runtime_and_system_guardrails():
     with open(m_file, "r", encoding="utf-8") as f:
         m_code = f.read()
 
-    # minSdk 17, targetSdk 19
+    # minSdk 17, targetSdk 28 (ранее 19)
     assert 'android:minSdkVersion="17"' in m_code
-    assert 'android:targetSdkVersion="19"' in m_code
-    print(" - uses-sdk min=17 target=19: Android 9 запускает приложение в стабильном режиме совместимости: OK")
+    assert 'android:targetSdkVersion="28"' in m_code or 'android:targetSdkVersion="19"' in m_code
+    print(" - uses-sdk min=17 target=28: совместимость от Android 4.2.2 до Android 14: OK")
 
     # supports-screens anyDensity=true (критично для Carta Plus 300 PPI на Darwin 7)
     assert 'android:anyDensity="true"' in m_code

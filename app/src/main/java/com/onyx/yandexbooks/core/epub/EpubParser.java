@@ -279,7 +279,10 @@ public class EpubParser {
                 // В многотомниках ("Всадники Перна" 4-в-1) дополняем "Глава X" названием тома/книги,
                 // чтобы не путать Главу 5 Книги 1 и Главу 5 Книги 4
                 String lower = n.title.toLowerCase();
-                if ((lower.startsWith("глава ") || lower.startsWith("часть ") || lower.matches("^\\d+.*"))
+                if ((lower.startsWith("глава ") || lower.startsWith("часть ")
+                        || lower.startsWith("chapter ") || lower.startsWith("part ")
+                        || lower.equals("пролог") || lower.equals("эпилог")
+                        || lower.matches("^\\d+.*"))
                         && !n.title.contains("•") && !n.title.contains(parentTitle)) {
                     String shortParent = parentTitle.length() > 28 ? parentTitle.substring(0, 28).trim() + "…" : parentTitle.trim();
                     n.title = shortParent + " • " + n.title;
@@ -534,24 +537,32 @@ public class EpubParser {
 
     private static int findSpineIndex(List<String> spineHrefs, String targetHref) {
         if (targetHref == null || targetHref.isEmpty()) return -1;
-        String cleanTarget = targetHref.trim();
-        if (cleanTarget.contains("#")) {
-            cleanTarget = cleanTarget.substring(0, cleanTarget.indexOf('#'));
+        String cleanTarget = resolveZipPath("", targetHref);
+        if (cleanTarget.isEmpty()) {
+            cleanTarget = targetHref.contains("#") ? targetHref.substring(0, targetHref.indexOf('#')).trim() : targetHref.trim();
         }
 
-        // 1. Точное совпадение
+        // 1. Точное или суффиксное совпадение нормализованных путей
         for (int i = 0; i < spineHrefs.size(); i++) {
-            String s = spineHrefs.get(i);
-            if (s.equalsIgnoreCase(cleanTarget) || s.endsWith("/" + cleanTarget) || cleanTarget.endsWith("/" + s)) {
+            String s = resolveZipPath("", spineHrefs.get(i));
+            if (s.equalsIgnoreCase(cleanTarget) || s.toLowerCase().endsWith("/" + cleanTarget.toLowerCase()) || cleanTarget.toLowerCase().endsWith("/" + s.toLowerCase())) {
                 return i;
             }
         }
 
-        // 2. Сопоставление только по имени файла
+        // 2. Сопоставление по имени файла только при отсутствии конфликтующих подпапок (многотомники)
         String targetFilename = cleanTarget.contains("/") ? cleanTarget.substring(cleanTarget.lastIndexOf('/') + 1) : cleanTarget;
+        String targetDir = cleanTarget.contains("/") ? cleanTarget.substring(0, cleanTarget.lastIndexOf('/')) : "";
         for (int i = 0; i < spineHrefs.size(); i++) {
-            String s = spineHrefs.get(i);
+            String s = resolveZipPath("", spineHrefs.get(i));
             String sFilename = s.contains("/") ? s.substring(s.lastIndexOf('/') + 1) : s;
+            String sDir = s.contains("/") ? s.substring(0, s.lastIndexOf('/')) : "";
+            if (!targetDir.isEmpty() && !sDir.isEmpty()
+                    && !targetDir.equalsIgnoreCase(sDir)
+                    && !targetDir.toLowerCase().endsWith("/" + sDir.toLowerCase())
+                    && !sDir.toLowerCase().endsWith("/" + targetDir.toLowerCase())) {
+                continue;
+            }
             if (sFilename.equalsIgnoreCase(targetFilename)) {
                 return i;
             }

@@ -243,12 +243,13 @@ public class ReaderCanvasView extends View {
         // 1. Верхний колонтитул: Название текущей главы
         float headerY = config.getPaddingTopPx() + 16;
         if (chapterTitle != null && !chapterTitle.trim().isEmpty()) {
-            String titleText = chapterTitle.trim();
+            String fullTitle = chapterTitle.trim();
+            String titleText = fullTitle;
             float maxHeaderWidth = getWidth() - config.getPaddingLeftPx() - config.getPaddingRightPx();
-            while (titleText.length() > 3 && headerPaint.measureText(titleText + "…") > maxHeaderWidth) {
-                titleText = titleText.substring(0, titleText.length() - 1);
-            }
-            if (titleText.length() < chapterTitle.trim().length()) {
+            if (headerPaint.measureText(titleText) > maxHeaderWidth) {
+                while (titleText.length() > 3 && headerPaint.measureText(titleText + "…") > maxHeaderWidth) {
+                    titleText = titleText.substring(0, titleText.length() - 1);
+                }
                 titleText += "…";
             }
             canvas.drawText(titleText, Math.round(config.getPaddingLeftPx()), Math.round(headerY), headerPaint);
@@ -385,6 +386,11 @@ public class ReaderCanvasView extends View {
                     + " • " + globalPageIndex + "/" + totalBookPages
                     + String.format(java.util.Locale.getDefault(), " (%.0f%%)", globalPercent);
             pageInfoWidth = footerPaint.measureText(pageInfo);
+            if (leftWidth + pageInfoWidth + 12f > availFooterW) {
+                pageInfo = "Гл." + chapterPageIndex + "/" + chapterTotalPages
+                        + String.format(java.util.Locale.getDefault(), " (%.0f%%)", globalPercent);
+                pageInfoWidth = footerPaint.measureText(pageInfo);
+            }
         }
 
         // Страница и процент справа с привязкой к физической сетке пикселей

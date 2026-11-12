@@ -25,7 +25,8 @@
             android:textSize="13sp"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
-            android:singleLine="true" />
+            android:singleLine="true"
+            android:ellipsize="end" />
 
         <Button
             android:id="@+id/btn_toggle_reader_mode"
