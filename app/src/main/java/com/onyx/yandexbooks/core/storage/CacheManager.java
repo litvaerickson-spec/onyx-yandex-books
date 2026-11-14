@@ -765,18 +765,11 @@ public class CacheManager {
         return openInSystemReader(activity, epubFile, percent, chapterIndex, mode);
     }
 
-    public static boolean openInSystemReader(android.app.Activity activity, File epubFile, double percent, int chapterIndex, String targetReaderMode) {
-        if (epubFile == null || !epubFile.exists()) {
-            return false;
-        }
-        disableFileUriExposureIfNeeded();
-        android.net.Uri uri = android.net.Uri.fromFile(epubFile);
-
+    private static android.content.Intent buildEpubViewIntent(android.net.Uri uri, double percent, int chapterIndex) {
         android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW);
         intent.setDataAndType(uri, "application/epub+zip");
         intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
-
         if (percent > 0.0) {
             intent.putExtra("percent", (float) percent);
             intent.putExtra("position", (int) Math.round(percent * 100.0));
@@ -785,12 +778,19 @@ public class CacheManager {
             intent.putExtra("chapter_index", Math.max(0, chapterIndex));
             intent.putExtra("org.geometerplus.zlibrary.ui.android.action.VIEW", uri);
         }
+        return intent;
+    }
+
+    private static boolean tryLaunchWithIntent(android.app.Activity activity, android.content.Intent intent,
+                                               android.net.Uri uri, double percent, String targetReaderMode) {
+        if (activity == null || intent == null) return false;
 
         // 0. Если явно запрошен системный выбор приложения (Chooser)
         if (AppSettings.READER_MODE_CHOOSER.equalsIgnoreCase(targetReaderMode)) {
             try {
                 android.content.Intent chooser = android.content.Intent.createChooser(intent, "Выберите приложение для чтения:");
                 chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                chooser.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 activity.startActivity(chooser);
                 return true;
             } catch (Exception ignored) {}
@@ -804,16 +804,19 @@ public class CacheManager {
             }
             if (alPkg != null) {
                 try {
+                    if ("content".equalsIgnoreCase(uri.getScheme())) {
+                        activity.grantUriPermission(alPkg, uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    }
                     android.content.Intent direct = new android.content.Intent(intent);
                     direct.setPackage(alPkg);
                     activity.startActivity(direct);
                     return true;
                 } catch (Exception ignored) {}
             }
-            // Если AlReader не обнаружен напрямую — показываем системный выбор приложений вместо молчаливого запуска NeoReader
             try {
                 android.content.Intent chooser = android.content.Intent.createChooser(intent, "AlReader не найден — выберите ридер:");
                 chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                chooser.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 activity.startActivity(chooser);
                 return true;
             } catch (Exception ignored) {}
@@ -824,6 +827,9 @@ public class CacheManager {
             }
             if (neoPkg != null) {
                 try {
+                    if ("content".equalsIgnoreCase(uri.getScheme())) {
+                        activity.grantUriPermission(neoPkg, uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    }
                     android.content.Intent direct = new android.content.Intent(intent);
                     direct.setPackage(neoPkg);
                     activity.startActivity(direct);
@@ -832,15 +838,15 @@ public class CacheManager {
             }
         }
 
-        // 1. Попытка открыть напрямую через системный Intent для EPUB
+        // 1. Прямой запуск системного обработчика (ловим также FileUriExposedException и SecurityException)
         try {
             activity.startActivity(intent);
             return true;
-        } catch (android.content.ActivityNotFoundException e) {
-            // 2. Попытка с общим MIME-типом или chooser
+        } catch (Exception e) {
             try {
                 android.content.Intent chooser = android.content.Intent.createChooser(intent, "Выберите приложение для чтения:");
                 chooser.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                chooser.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 activity.startActivity(chooser);
                 return true;
             } catch (Exception ex) {
@@ -848,6 +854,7 @@ public class CacheManager {
                     android.content.Intent fallback = new android.content.Intent(android.content.Intent.ACTION_VIEW);
                     fallback.setDataAndType(uri, "*/*");
                     fallback.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                    fallback.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
                     if (percent > 0.0) {
                         fallback.putExtra("percent", (float) percent);
                         fallback.putExtra("progress", (float) (percent / 100.0));
@@ -855,11 +862,28 @@ public class CacheManager {
                     activity.startActivity(fallback);
                     return true;
                 } catch (Exception e2) {
-                    Log.e(TAG, "No app found to open EPUB", e2);
+                    Log.e(TAG, "Intent launch failed for URI " + uri, e2);
                     return false;
                 }
             }
         }
+    }
+
+    public static boolean openInSystemReader(android.app.Activity activity, File epubFile, double percent, int chapterIndex, String targetReaderMode) {
+        if (activity == null || epubFile == null || !epubFile.exists()) {
+            return false;
+        }
+        boolean isAppPrivate = epubFile.getAbsolutePath().startsWith(activity.getFilesDir().getAbsolutePath());
+        if (!isAppPrivate) {
+            disableFileUriExposureIfNeeded();
+            android.net.Uri fileUri = android.net.Uri.fromFile(epubFile);
+            if (tryLaunchWithIntent(activity, buildEpubViewIntent(fileUri, percent, chapterIndex), fileUri, percent, targetReaderMode)) {
+                return true;
+            }
+        }
+        // ContentProvider URI (безопасно для Android 7–14 без FileUriExposedException и для внутреннего кэша)
+        android.net.Uri contentUri = com.onyx.yandexbooks.core.update.LocalFileProvider.getUriForFile(epubFile);
+        return tryLaunchWithIntent(activity, buildEpubViewIntent(contentUri, percent, chapterIndex), contentUri, percent, targetReaderMode);
     }
 
     public Bitmap loadImageFromEpub(String bookUuid, String zipPath, int reqWidth, int reqHeight) {

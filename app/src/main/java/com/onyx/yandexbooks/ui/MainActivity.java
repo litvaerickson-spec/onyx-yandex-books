@@ -2069,10 +2069,19 @@ public class MainActivity extends Activity {
             return;
         }
 
-        // Если книга уже скачана во внутренний кэш, но не удалось записать в /sdcard/Books/YandexBooks/ — не качаем повторно
+        // Если книга уже скачана во внутренний кэш, открываем её напрямую через LocalFileProvider (content://)
         if (cacheManager.isBookDownloaded(book.getUuid())) {
+            File privateEpub = cacheManager.getEpubFile(book.getUuid());
+            if (privateEpub != null && privateEpub.exists() && privateEpub.length() > 0) {
+                if (book.getPercent() > 0.0 && book.getPercent() < 99.0) {
+                    dbHelper.ensureCloudSyncBookmark(book.getUuid(), book.getCurrentChapterIndex(), 0, book.getPercent());
+                }
+                if (CacheManager.openInSystemReader(this, privateEpub, book.getPercent(), book.getCurrentChapterIndex(), readerMode)) {
+                    return;
+                }
+            }
             requestRuntimeStoragePermissionsIfNeeded();
-            EinkNotice.show(this, "Доступ к памяти", "Не удалось записать файл книги в /sdcard/Books/YandexBooks/ (проверьте разрешение памяти). Открываем во встроенном ридере...");
+            EinkNotice.show(this, "Ридер", "Внешний ридер не найден. Открываем во встроенном ридере...");
             openInLiteReader(book);
             return;
         }
@@ -2091,6 +2100,9 @@ public class MainActivity extends Activity {
                     dbHelper.ensureCloudSyncBookmark(book.getUuid(), book.getCurrentChapterIndex(), 0, book.getPercent());
                 }
                 File readyEpub = cacheManager.ensurePublicEpubFile(book.getUuid(), book.getTitle());
+                if (readyEpub == null || !readyEpub.exists()) {
+                    readyEpub = cacheManager.getEpubFile(book.getUuid());
+                }
                 if (readyEpub != null && readyEpub.exists()) {
                     boolean ok = CacheManager.openInSystemReader(MainActivity.this, readyEpub, book.getPercent(), book.getCurrentChapterIndex(), readerMode);
                     if (!ok) {
