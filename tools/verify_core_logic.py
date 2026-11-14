@@ -3385,14 +3385,14 @@ def test_v162_beta_appearance_footer_markdown_and_rollback():
         assert k in dbh, k
 
     upd = rd(jb + "core/update/AppUpdateManager.java")
-    for k in ("formatReleaseNotesRich", "openDownloadsFolder", "launchPackageUninstall", "MediaScannerConnection", "DownloadManager.ACTION_VIEW_DOWNLOADS", "Показать в Загрузках", "Удалить и откатить"):
+    for k in ("formatReleaseNotesRich", "openDownloadsFolder", "launchPackageUninstall", "MediaScannerConnection", "DownloadManager.ACTION_VIEW_DOWNLOADS", "Показать в Загрузках", "Удалить и откатить", "supportsAutoBackupRestore", "buildDowngradeRestoreNotice", "войти в аккаунт Яндекса", "внутреннем кэше"):
         assert k in upd, k
     assert "Установить поверх" not in upd, "Сломанная кнопка 'Установить поверх' при откате должна быть удалена!"
 
     rn = rd("RELEASE_NOTES.md")
     ch = rd("CHANGELOG.md")
-    assert "не рекомендуем пока обновляться" in rn and "1.6.0" in rn
-    assert "не рекомендуем пока обновляться" in ch and "v1.6.2-beta" in ch
+    assert "не рекомендуем пока обновляться" in rn and "1.6.0" in rn and "внутреннем кэше" in rn
+    assert "не рекомендуем пока обновляться" in ch and "v1.6.2-beta" in ch and "внутреннем кэше" in ch
 
     apk = os.path.join(PROJECT_DIR, "yandex-books-lite-v1.6.2-beta.apk")
     assert os.path.exists(apk)
