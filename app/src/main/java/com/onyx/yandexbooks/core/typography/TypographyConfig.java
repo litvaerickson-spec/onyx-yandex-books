@@ -17,14 +17,17 @@ public class TypographyConfig implements Serializable {
     private int paddingLeftPx = 18;
     private int paddingRightPx = 18;
     private int paddingTopPx = 12;
-    private int paddingBottomPx = 6;
+    private int paddingBottomPx = 16;
+
+    // Отступ нижнего колонтитула (часы, заряд батареи, страница) от физической рамки экрана в dp
+    private int footerBottomOffsetDp = 16;
 
     // Резерв высоты под верхний колонтитул (название текущей главы)
     private int headerReservedHeightPx = 26;
 
     // Резерв высоты под нижний колонтитул (номер страницы, глава, глобальный процент),
     // исключающий физическое наложение текста книги на строку статуса
-    private int footerReservedHeightPx = 20;
+    private int footerReservedHeightPx = 26;
 
     private boolean isHyphenationEnabled = true;
     private boolean isJustifyEnabled = true;
@@ -104,6 +107,13 @@ public class TypographyConfig implements Serializable {
 
     public int getEpdFullRefreshInterval() { return epdFullRefreshInterval; }
     public void setEpdFullRefreshInterval(int epdFullRefreshInterval) { this.epdFullRefreshInterval = epdFullRefreshInterval; }
+
+    public int getFooterBottomOffsetDp() { return footerBottomOffsetDp; }
+    public void setFooterBottomOffsetDp(int dp) {
+        if (dp < 6) dp = 6;
+        if (dp > 48) dp = 48;
+        this.footerBottomOffsetDp = dp;
+    }
 
     public String getTapZoneMode() { return tapZoneMode != null ? tapZoneMode : "standard"; }
     public void setTapZoneMode(String tapZoneMode) { this.tapZoneMode = tapZoneMode != null ? tapZoneMode : "standard"; }

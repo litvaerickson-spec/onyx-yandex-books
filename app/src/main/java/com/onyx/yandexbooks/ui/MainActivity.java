@@ -68,6 +68,8 @@ public class MainActivity extends Activity {
     private static final int REQUEST_AUTH = 1001;
 
     private EinkListView booksListView;
+    private LinearLayout mainHeaderBar, mainTabsBar, shelfFooterBar;
+    private TextView mainHeaderTitle;
     private Button tabReadingBtn, tabToReadBtn, tabCatalogBtn, tabSearchBtn;
     private Button btnToggleReaderMode, btnCheckUpdate, btnMainMenu;
     private LinearLayout searchBarContainer;
@@ -160,6 +162,10 @@ public class MainActivity extends Activity {
 
         booksListView = (EinkListView) findViewById(R.id.books_list_view);
         EpdController.configureEinkListView(this, booksListView);
+        mainHeaderBar = (LinearLayout) findViewById(R.id.main_header_bar);
+        mainHeaderTitle = (TextView) findViewById(R.id.main_header_title);
+        mainTabsBar = (LinearLayout) findViewById(R.id.main_tabs_bar);
+        shelfFooterBar = (LinearLayout) findViewById(R.id.shelf_footer_bar);
         tabReadingBtn = (Button) findViewById(R.id.tab_reading_btn);
         tabToReadBtn = (Button) findViewById(R.id.tab_to_read_btn);
         tabCatalogBtn = (Button) findViewById(R.id.tab_catalog_btn);
@@ -192,6 +198,7 @@ public class MainActivity extends Activity {
         setupHeaderActions();
         setupSearchActions();
         setupFooterActions();
+        applyMainVisualPreferences();
 
         if (!waitingStoragePermissionForRestore) {
             checkAuthAndLoad();
@@ -225,6 +232,7 @@ public class MainActivity extends Activity {
             if (granted && dbHelper != null) {
                 if (dbHelper.restoreBackupFromPublicStorageIfNeeded(this)) {
                     com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, appSettings.getUiScale());
+                    applyMainVisualPreferences();
                     updateReaderModeButton();
                 }
             }
@@ -429,11 +437,11 @@ public class MainActivity extends Activity {
         }, density);
         listLayout.addView(btnSync);
 
-        Button btnUiScale = createMenuButton("Масштаб интерфейса: " + getUiScaleLabel(), new View.OnClickListener() {
+        Button btnUiScale = createMenuButton("Внешний вид и интерфейс ПО", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 dialog.dismiss();
-                showUiScaleDialog();
+                showAppAppearanceDialog();
             }
         }, density);
         listLayout.addView(btnUiScale);
@@ -478,11 +486,12 @@ public class MainActivity extends Activity {
         root.addView(menuScroll);
 
         TextView tvBetaNotice = new TextView(this);
-        tvBetaNotice.setText("Яндекс Книги Lite v1.6.1-beta [BETA]");
-        tvBetaNotice.setTextSize(10);
-        tvBetaNotice.setTextColor(Color.DKGRAY);
+        tvBetaNotice.setText("Яндекс Книги Lite v1.6.2-beta [BETA]");
+        tvBetaNotice.setTextSize(11);
+        tvBetaNotice.setTypeface(null, Typeface.BOLD);
+        tvBetaNotice.setTextColor(Color.BLACK);
         tvBetaNotice.setGravity(Gravity.CENTER);
-        tvBetaNotice.setPadding(0, (int) (2 * density), 0, (int) (6 * density));
+        tvBetaNotice.setPadding(0, (int) (3 * density), 0, (int) (6 * density));
         root.addView(tvBetaNotice);
 
         LinearLayout bottomBtnRow = new LinearLayout(this);
@@ -571,6 +580,340 @@ public class MainActivity extends Activity {
 
         if (dialog.getWindow() != null) {
             dialog.getWindow().setLayout(targetW, targetH);
+        }
+    }
+
+    private void applyMainVisualPreferences() {
+        float density = getResources().getDisplayMetrics().density;
+        String mode = appSettings.getPanelSizeMode();
+
+        int headerBarDp = 44;
+        int headerBtnDp = 34;
+        float headerTitleSp = 14f;
+        float headerBtnSp = 12.5f;
+        int menuMinWDp = 76;
+        int tabsBarDp = 38;
+        int tabBtnDp = 32;
+        float tabSp = 11.5f;
+        int footerBarDp = 46;
+        int footerBtnDp = 34;
+        float footerTextSp = 12.5f;
+        float footerBtnSp = 12f;
+
+        if (com.onyx.yandexbooks.core.storage.AppSettings.PANEL_SIZE_COMPACT.equalsIgnoreCase(mode)) {
+            headerBarDp = 36; headerBtnDp = 28; headerTitleSp = 13f; headerBtnSp = 11f; menuMinWDp = 62;
+            tabsBarDp = 32; tabBtnDp = 28; tabSp = 11f;
+            footerBarDp = 38; footerBtnDp = 28; footerTextSp = 11.5f; footerBtnSp = 11f;
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.PANEL_SIZE_LARGE.equalsIgnoreCase(mode)) {
+            headerBarDp = 52; headerBtnDp = 42; headerTitleSp = 15.5f; headerBtnSp = 14f; menuMinWDp = 88;
+            tabsBarDp = 44; tabBtnDp = 38; tabSp = 13f;
+            footerBarDp = 54; footerBtnDp = 40; footerTextSp = 14f; footerBtnSp = 13.5f;
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.PANEL_SIZE_XLARGE.equalsIgnoreCase(mode)) {
+            headerBarDp = 60; headerBtnDp = 48; headerTitleSp = 17f; headerBtnSp = 15.5f; menuMinWDp = 100;
+            tabsBarDp = 50; tabBtnDp = 44; tabSp = 14f;
+            footerBarDp = 62; footerBtnDp = 46; footerTextSp = 15.5f; footerBtnSp = 15f;
+        }
+
+        setViewHeightPx(mainHeaderBar, Math.round(headerBarDp * density));
+        if (mainHeaderTitle != null) {
+            mainHeaderTitle.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, headerTitleSp);
+        }
+        stylePanelButton(btnToggleReaderMode, headerBtnDp, 60, headerBtnSp, 10, density);
+        stylePanelButton(btnCheckUpdate, headerBtnDp, 60, headerBtnSp, 10, density);
+        stylePanelButton(btnMainMenu, headerBtnDp, menuMinWDp, headerBtnSp, 12, density);
+
+        setViewHeightPx(mainTabsBar, Math.round(tabsBarDp * density));
+        Button[] tabs = new Button[]{tabReadingBtn, tabToReadBtn, tabCatalogBtn, tabSearchBtn};
+        for (Button t : tabs) {
+            stylePanelButton(t, tabBtnDp, 0, tabSp, 2, density);
+        }
+
+        setViewHeightPx(shelfFooterBar, Math.round(footerBarDp * density));
+        if (shelfFooterStatus != null) {
+            shelfFooterStatus.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, footerTextSp);
+        }
+        if (shelfPageIndicator != null) {
+            shelfPageIndicator.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, footerTextSp);
+        }
+        stylePanelButton(btnShelfPrevPage, footerBtnDp, 56, footerBtnSp, 10, density);
+        stylePanelButton(btnShelfNextPage, footerBtnDp, 56, footerBtnSp, 10, density);
+    }
+
+    private void setViewHeightPx(View v, int heightPx) {
+        if (v == null) return;
+        ViewGroup.LayoutParams lp = v.getLayoutParams();
+        if (lp != null && lp.height != heightPx) {
+            lp.height = heightPx;
+            v.setLayoutParams(lp);
+        }
+    }
+
+    private void stylePanelButton(Button btn, int heightDp, int minWidthDp, float textSp, int padHDp, float density) {
+        if (btn == null) return;
+        int hPx = Math.round(heightDp * density);
+        ViewGroup.LayoutParams lp = btn.getLayoutParams();
+        if (lp != null) {
+            lp.height = hPx;
+            btn.setLayoutParams(lp);
+        }
+        btn.setMinHeight(hPx);
+        btn.setMinimumHeight(hPx);
+        if (minWidthDp > 0) {
+            int minW = Math.round(minWidthDp * density);
+            btn.setMinWidth(minW);
+            btn.setMinimumWidth(minW);
+        }
+        btn.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, textSp);
+        int padH = Math.round(padHDp * density);
+        btn.setPadding(padH, 0, padH, 0);
+    }
+
+    private void showAppAppearanceDialog() {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setWindowAnimations(0);
+        }
+
+        final float density = getResources().getDisplayMetrics().density;
+        final DisplayMetrics dm = getResources().getDisplayMetrics();
+
+        final LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundResource(R.drawable.dialog_notice_bg);
+        int padH = (int) (14 * density);
+        int padV = (int) (12 * density);
+        root.setPadding(padH, padV, padH, padV);
+
+        TextView titleView = new TextView(this);
+        titleView.setText("Внешний вид и интерфейс ПО");
+        titleView.setTextSize(15);
+        titleView.setTypeface(null, Typeface.BOLD);
+        titleView.setTextColor(Color.BLACK);
+        titleView.setGravity(Gravity.CENTER);
+        titleView.setPadding(0, 0, 0, (int) (6 * density));
+        root.addView(titleView);
+
+        View divTop = new View(this);
+        divTop.setBackgroundColor(Color.BLACK);
+        root.addView(divTop, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(2, 2 * density)));
+
+        final com.onyx.yandexbooks.core.eink.EinkScrollView scroll = new com.onyx.yandexbooks.core.eink.EinkScrollView(this);
+        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
+        scrollLp.setMargins(0, (int) (6 * density), 0, (int) (6 * density));
+        scroll.setLayoutParams(scrollLp);
+
+        final LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+
+        // 1. Размер верхней/нижней панелей и кнопки «Меню»
+        addAppearanceSectionLabel(content, "1. Панели и кнопки («Меню», вкладки, статус версии):", density);
+        final String[] panelValues = new String[]{
+                com.onyx.yandexbooks.core.storage.AppSettings.PANEL_SIZE_COMPACT,
+                com.onyx.yandexbooks.core.storage.AppSettings.PANEL_SIZE_COMFORTABLE,
+                com.onyx.yandexbooks.core.storage.AppSettings.PANEL_SIZE_LARGE,
+                com.onyx.yandexbooks.core.storage.AppSettings.PANEL_SIZE_XLARGE
+        };
+        final String[] panelNames = new String[]{"Компактный", "Оптим. (Darwin)", "Крупный", "Максимум"};
+        final Button[] panelBtns = new Button[4];
+        for (int rowIdx = 0; rowIdx < 2; rowIdx++) {
+            LinearLayout row = createHorizontalOptionRow(density);
+            for (int col = 0; col < 2; col++) {
+                final int idx = rowIdx * 2 + col;
+                Button b = createOptionChipButton(panelNames[idx], density, col == 0);
+                panelBtns[idx] = b;
+                b.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        appSettings.setPanelSizeMode(panelValues[idx]);
+                        applyMainVisualPreferences();
+                        refreshChipGroup(panelBtns, panelValues, panelValues[idx]);
+                    }
+                });
+                row.addView(b);
+            }
+            content.addView(row);
+        }
+        refreshChipGroup(panelBtns, panelValues, appSettings.getPanelSizeMode());
+
+        // 2. Плотность карточек книг на полке
+        addAppearanceSectionLabel(content, "2. Карточки книг и кнопки на полке:", density);
+        final String[] cardValues = new String[]{
+                com.onyx.yandexbooks.core.storage.AppSettings.CARD_DENSITY_COMPACT,
+                com.onyx.yandexbooks.core.storage.AppSettings.CARD_DENSITY_NORMAL,
+                com.onyx.yandexbooks.core.storage.AppSettings.CARD_DENSITY_LARGE
+        };
+        final String[] cardNames = new String[]{"Комп.", "Стандарт", "Крупные"};
+        final Button[] cardBtns = new Button[3];
+        LinearLayout cardRow = createHorizontalOptionRow(density);
+        for (int i = 0; i < 3; i++) {
+            final int idx = i;
+            Button b = createOptionChipButton(cardNames[idx], density, i < 2);
+            cardBtns[idx] = b;
+            b.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    appSettings.setCardDensityMode(cardValues[idx]);
+                    if (adapter != null) adapter.notifyDataSetChanged();
+                    refreshChipGroup(cardBtns, cardValues, cardValues[idx]);
+                }
+            });
+            cardRow.addView(b);
+        }
+        content.addView(cardRow);
+        refreshChipGroup(cardBtns, cardValues, appSettings.getCardDensityMode());
+
+        // 3. Нижний отступ колонтитула в ридере Lite (от бортика)
+        addAppearanceSectionLabel(content, "3. Отступ часов/заряда в ридере Lite (от бортика):", density);
+        LinearLayout offsetRow = createHorizontalOptionRow(density);
+        final TextView offsetValView = new TextView(this);
+        offsetValView.setText(appSettings.getReaderFooterOffsetDp() + " dp");
+        offsetValView.setTextSize(13.5f);
+        offsetValView.setTypeface(null, Typeface.BOLD);
+        offsetValView.setTextColor(Color.BLACK);
+        offsetValView.setGravity(Gravity.CENTER);
+
+        Button btnMinusOffset = createOptionChipButton("- 4 dp", density, true);
+        btnMinusOffset.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                int next = appSettings.getReaderFooterOffsetDp() - 4;
+                appSettings.setReaderFooterOffsetDp(next);
+                offsetValView.setText(appSettings.getReaderFooterOffsetDp() + " dp");
+            }
+        });
+        Button btnPlusOffset = createOptionChipButton("+ 4 dp", density, false);
+        btnPlusOffset.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                int next = appSettings.getReaderFooterOffsetDp() + 4;
+                appSettings.setReaderFooterOffsetDp(next);
+                offsetValView.setText(appSettings.getReaderFooterOffsetDp() + " dp");
+            }
+        });
+        offsetRow.addView(btnMinusOffset);
+        offsetRow.addView(offsetValView, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f));
+        offsetRow.addView(btnPlusOffset);
+        content.addView(offsetRow);
+
+        // 4. Глобальный масштаб диалогов и текстов ОС
+        addAppearanceSectionLabel(content, "4. Общий масштаб текста и диалогов:", density);
+        Button btnGlobalScale = createMenuButton("Масштаб ОС: " + getUiScaleLabel() + "  (выбрать...)", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                showUiScaleDialog();
+            }
+        }, density);
+        content.addView(btnGlobalScale);
+
+        Button btnResetVisual = createMenuButton("Сбросить визуал по умолчанию (Darwin)", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                appSettings.setPanelSizeMode(com.onyx.yandexbooks.core.storage.AppSettings.PANEL_SIZE_COMFORTABLE);
+                appSettings.setCardDensityMode(com.onyx.yandexbooks.core.storage.AppSettings.CARD_DENSITY_NORMAL);
+                appSettings.setReaderFooterOffsetDp(com.onyx.yandexbooks.core.storage.AppSettings.DEFAULT_FOOTER_OFFSET_DP);
+                applyMainVisualPreferences();
+                if (adapter != null) adapter.notifyDataSetChanged();
+                refreshChipGroup(panelBtns, panelValues, appSettings.getPanelSizeMode());
+                refreshChipGroup(cardBtns, cardValues, appSettings.getCardDensityMode());
+                offsetValView.setText(appSettings.getReaderFooterOffsetDp() + " dp");
+            }
+        }, density);
+        content.addView(btnResetVisual);
+
+        scroll.addView(content);
+        root.addView(scroll);
+
+        View divBot = new View(this);
+        divBot.setBackgroundColor(Color.BLACK);
+        root.addView(divBot, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
+
+        Button btnDone = new Button(this);
+        btnDone.setText("Готово");
+        btnDone.setTextSize(13);
+        btnDone.setTypeface(null, Typeface.BOLD);
+        btnDone.setTextColor(Color.BLACK);
+        btnDone.setBackgroundResource(R.drawable.btn_eink_primary);
+        LinearLayout.LayoutParams lpDone = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (38 * density));
+        lpDone.setMargins(0, (int) (6 * density), 0, 0);
+        btnDone.setLayoutParams(lpDone);
+        btnDone.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        root.addView(btnDone);
+
+        dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        final int targetW = (int) (dm.widthPixels * 0.92);
+        final int targetH = Math.min((int) (dm.heightPixels * 0.86), (int) (490 * density));
+        dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override
+            public void onShow(DialogInterface d) {
+                if (dialog.getWindow() != null) {
+                    dialog.getWindow().setLayout(targetW, targetH);
+                }
+                EpdController.requestFullRefresh(MainActivity.this, root);
+            }
+        });
+        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface d) {
+                EpdController.requestFullRefresh(MainActivity.this, null);
+            }
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setLayout(targetW, targetH);
+        }
+    }
+
+    private void addAppearanceSectionLabel(LinearLayout parent, String text, float density) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextSize(12);
+        tv.setTypeface(null, Typeface.BOLD);
+        tv.setTextColor(Color.BLACK);
+        tv.setPadding(0, (int) (6 * density), 0, (int) (4 * density));
+        parent.addView(tv);
+    }
+
+    private LinearLayout createHorizontalOptionRow(float density) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (36 * density));
+        lp.setMargins(0, 0, 0, (int) (4 * density));
+        row.setLayoutParams(lp);
+        return row;
+    }
+
+    private Button createOptionChipButton(String text, float density, boolean addRightMargin) {
+        Button b = new Button(this);
+        b.setText(text);
+        b.setTextSize(11.5f);
+        b.setTypeface(null, Typeface.BOLD);
+        b.setTextColor(Color.BLACK);
+        b.setBackgroundResource(R.drawable.btn_eink);
+        b.setSingleLine(true);
+        b.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        b.setPadding((int) (4 * density), 0, (int) (4 * density), 0);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
+        if (addRightMargin) {
+            lp.setMargins(0, 0, (int) (4 * density), 0);
+        }
+        b.setLayoutParams(lp);
+        return b;
+    }
+
+    private void refreshChipGroup(Button[] buttons, String[] values, String activeValue) {
+        if (buttons == null || values == null) return;
+        for (int i = 0; i < buttons.length && i < values.length; i++) {
+            boolean sel = values[i].equalsIgnoreCase(activeValue);
+            buttons[i].setBackgroundResource(sel ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
         }
     }
 
@@ -2203,6 +2546,8 @@ public class MainActivity extends Activity {
 
             coverLoader.loadCover(cover, book.getUuid(), book.getCoverUrl(), book.getTitle());
 
+            applyCardDensityToRow(convertView, cover, title, author, progress, statusTag, readBtn, downloadBtn);
+
             downloadBtn.setText("О книге");
             downloadBtn.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -2235,6 +2580,57 @@ public class MainActivity extends Activity {
 
             return convertView;
         }
+    }
+
+    private void applyCardDensityToRow(View row, ImageView cover, TextView title, TextView author,
+                                       TextView progress, TextView statusTag, Button readBtn, Button downloadBtn) {
+        float density = getResources().getDisplayMetrics().density;
+        String mode = appSettings != null ? appSettings.getCardDensityMode()
+                : com.onyx.yandexbooks.core.storage.AppSettings.CARD_DENSITY_NORMAL;
+
+        int padV = 9;
+        int coverW = 64;
+        int coverH = 92;
+        float titleSp = 13.5f;
+        float authorSp = 11.5f;
+        float metaSp = 10.5f;
+        int readH = 34;
+        int detailsH = 28;
+        int btnMinW = 78;
+        float btnReadSp = 12f;
+        float btnDetSp = 11f;
+
+        if (com.onyx.yandexbooks.core.storage.AppSettings.CARD_DENSITY_COMPACT.equalsIgnoreCase(mode)) {
+            padV = 6; coverW = 50; coverH = 72;
+            titleSp = 12f; authorSp = 10.5f; metaSp = 9.5f;
+            readH = 28; detailsH = 24; btnMinW = 70; btnReadSp = 11f; btnDetSp = 10f;
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.CARD_DENSITY_LARGE.equalsIgnoreCase(mode)) {
+            padV = 12; coverW = 76; coverH = 110;
+            titleSp = 15f; authorSp = 12.5f; metaSp = 11.5f;
+            readH = 40; detailsH = 34; btnMinW = 88; btnReadSp = 13.5f; btnDetSp = 12.5f;
+        }
+
+        int pH = Math.round(10 * density);
+        int pV = Math.round(padV * density);
+        row.setPadding(pH, pV, pH, pV);
+
+        if (cover != null && cover.getLayoutParams() != null) {
+            ViewGroup.LayoutParams clp = cover.getLayoutParams();
+            int cw = Math.round(coverW * density);
+            int ch = Math.round(coverH * density);
+            if (clp.width != cw || clp.height != ch) {
+                clp.width = cw;
+                clp.height = ch;
+                cover.setLayoutParams(clp);
+            }
+        }
+        if (title != null) title.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, titleSp);
+        if (author != null) author.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, authorSp);
+        if (progress != null) progress.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, metaSp);
+        if (statusTag != null) statusTag.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, metaSp);
+
+        stylePanelButton(readBtn, readH, btnMinW, btnReadSp, 10, density);
+        stylePanelButton(downloadBtn, detailsH, btnMinW, btnDetSp, 10, density);
     }
 
     private void showBookDetailsDialog(final Book book) {

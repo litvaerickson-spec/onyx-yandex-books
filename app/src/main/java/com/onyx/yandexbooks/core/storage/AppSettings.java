@@ -42,6 +42,22 @@ public class AppSettings {
     public static final float UI_SCALE_180 = 1.80f;         // 180% (Планшеты 10.3")
     public static final float UI_SCALE_200 = 2.00f;         // 200% (Максимум для 10.3" 300 PPI)
 
+    public static final String KEY_PANEL_SIZE_MODE = "panel_size_mode";
+    public static final String PANEL_SIZE_COMPACT = "compact";
+    public static final String PANEL_SIZE_COMFORTABLE = "comfortable";
+    public static final String PANEL_SIZE_LARGE = "large";
+    public static final String PANEL_SIZE_XLARGE = "xlarge";
+
+    public static final String KEY_CARD_DENSITY_MODE = "card_density_mode";
+    public static final String CARD_DENSITY_COMPACT = "compact";
+    public static final String CARD_DENSITY_NORMAL = "normal";
+    public static final String CARD_DENSITY_LARGE = "large";
+
+    public static final String KEY_FOOTER_OFFSET_DP = "reader_footer_offset_dp";
+    public static final int DEFAULT_FOOTER_OFFSET_DP = 16;
+    public static final int MIN_FOOTER_OFFSET_DP = 6;
+    public static final int MAX_FOOTER_OFFSET_DP = 48;
+
     private final SharedPreferences prefs;
 
     public AppSettings(Context context) {
@@ -145,6 +161,38 @@ public class AppSettings {
 
     public void setUiScale(float scale) {
         prefs.edit().putFloat(KEY_UI_SCALE, scale).apply();
+    }
+
+    public String getPanelSizeMode() {
+        return prefs.getString(KEY_PANEL_SIZE_MODE, PANEL_SIZE_COMFORTABLE);
+    }
+
+    public void setPanelSizeMode(String mode) {
+        String safe = (mode != null) ? mode : PANEL_SIZE_COMFORTABLE;
+        prefs.edit().putString(KEY_PANEL_SIZE_MODE, safe).apply();
+    }
+
+    public String getCardDensityMode() {
+        return prefs.getString(KEY_CARD_DENSITY_MODE, CARD_DENSITY_NORMAL);
+    }
+
+    public void setCardDensityMode(String mode) {
+        String safe = (mode != null) ? mode : CARD_DENSITY_NORMAL;
+        prefs.edit().putString(KEY_CARD_DENSITY_MODE, safe).apply();
+    }
+
+    public int getReaderFooterOffsetDp() {
+        return clampFooterOffsetDp(prefs.getInt(KEY_FOOTER_OFFSET_DP, DEFAULT_FOOTER_OFFSET_DP));
+    }
+
+    public void setReaderFooterOffsetDp(int offsetDp) {
+        prefs.edit().putInt(KEY_FOOTER_OFFSET_DP, clampFooterOffsetDp(offsetDp)).apply();
+    }
+
+    public static int clampFooterOffsetDp(int offsetDp) {
+        if (offsetDp < MIN_FOOTER_OFFSET_DP) return MIN_FOOTER_OFFSET_DP;
+        if (offsetDp > MAX_FOOTER_OFFSET_DP) return MAX_FOOTER_OFFSET_DP;
+        return offsetDp;
     }
 
     public int getInt(String key, int defValue) { return prefs.getInt(key, defValue); }

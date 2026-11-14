@@ -321,7 +321,15 @@ public class ReaderCanvasView extends View {
             float startX = config.getPaddingLeftPx();
             float currentY = config.getPaddingTopPx() + config.getHeaderReservedHeightPx() - fm.top;
             float maxAllowedX = getWidth() - config.getPaddingRightPx();
-            float screenLimitY = getHeight() - config.getPaddingBottomPx() - config.getFooterReservedHeightPx();
+            Paint.FontMetrics ffm = footerPaint.getFontMetrics();
+            int offsetDp = (config != null) ? config.getFooterBottomOffsetDp() : 16;
+            float bottomSafePx = Math.max(dpToPx(offsetDp), config.getPaddingBottomPx());
+            float footerY = getHeight() - bottomSafePx - Math.max(0f, ffm.bottom);
+            float footerTopLimitY = footerY + ffm.top - dpToPx(6f);
+            float screenLimitY = Math.min(
+                    getHeight() - config.getPaddingBottomPx() - config.getFooterReservedHeightPx(),
+                    footerTopLimitY
+            );
 
             // Отрисовка строк текущей страницы (строки уже гарантированно рассчитаны TextPaginator)
             for (TextPaginator.Line line : currentPage.lines) {
@@ -366,7 +374,10 @@ public class ReaderCanvasView extends View {
         }
 
         // 2. Нижний колонтитул: Слева — время и заряд батареи; Справа — страница главы, сквозная страница книги и процент
-        float footerY = getHeight() - 8;
+        Paint.FontMetrics ffm = footerPaint.getFontMetrics();
+        int offsetDp = (config != null) ? config.getFooterBottomOffsetDp() : 16;
+        float bottomSafePx = Math.max(dpToPx(offsetDp), config != null ? config.getPaddingBottomPx() : 0f);
+        float footerY = getHeight() - bottomSafePx - Math.max(0f, ffm.bottom);
         int drawFooterY = Math.round(footerY);
 
         String leftStatus = getStatusTimeAndBattery();
@@ -470,5 +481,9 @@ public class ReaderCanvasView extends View {
 
     private float spToPx(int sp) {
         return sp * getResources().getDisplayMetrics().scaledDensity;
+    }
+
+    private float dpToPx(float dp) {
+        return dp * getResources().getDisplayMetrics().density;
     }
 }

@@ -2,6 +2,7 @@ package com.onyx.yandexbooks.core.update;
 
 import android.app.Activity;
 import android.app.Dialog;
+import android.app.DownloadManager;
 import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -9,6 +10,7 @@ import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Environment;
 import android.graphics.drawable.ColorDrawable;
@@ -313,27 +315,205 @@ public class AppUpdateManager {
     }
 
     /**
-     * Очищает Markdown-разметку, спецсимволы и эмодзи из описания релиза для четкого E-Ink отображения.
+     * Очищает Markdown-разметку, блочные цитаты (>), хэштеги заголовков (#/##/###), теги [!WARNING]
+     * и спецсимволы эмодзи из описания релиза в чистый читаемый текст (безопасно для JVM и E-Ink).
      */
     public static String cleanReleaseNotes(String raw) {
-        if (raw == null || raw.trim().isEmpty()) {
+        java.util.List<MarkdownLine> lines = preprocessReleaseMarkdownLines(raw);
+        if (lines.isEmpty()) {
             return "Улучшение стабильности, интерфейса и синхронизации.";
         }
-        // Убираем заголовки markdown (#, ##, ###)
-        String text = raw.replaceAll("(?m)^#+\\s*", "");
-        // Убираем жирный/курсивный шрифт: **текст**, *текст*, `код`
-        text = text.replaceAll("\\*\\*(.*?)\\*\\*", "$1");
-        text = text.replaceAll("\\*(.*?)\\*", "$1");
-        text = text.replaceAll("`([^`]+)`", "$1");
-        // Убираем markdown-ссылки [текст](url) -> текст
-        text = text.replaceAll("\\[([^\\]]+)\\]\\([^\\)]+\\)", "$1");
-        // Удаляем эмодзи и спецсимволы, ломающие рендеринг на E-Ink
-        text = text.replaceAll("[\\uD83C-\\uDBFF\\uDC00-\\uDFFF\\u2600-\\u27BF]", "");
-        // Заменяем маркеры списков (- и *) на аккуратный круглый маркер •
-        text = text.replaceAll("(?m)^\\s*[-*]\\s+", "• ");
-        // Убираем избыточные пустые строки
-        text = text.replaceAll("\n{3,}", "\n\n");
-        return text.trim();
+        StringBuilder sb = new StringBuilder();
+        for (MarkdownLine line : lines) {
+            String plain = stripInlineBoldMarkers(line.text);
+            if (sb.length() > 0 && !plain.isEmpty()) {
+                sb.append("\n");
+            }
+            sb.append(plain);
+        }
+        String res = sb.toString().replaceAll("\n{3,}", "\n\n").trim();
+        return res.isEmpty() ? "Улучшение стабильности, интерфейса и синхронизации." : res;
+    }
+
+    /**
+     * Форматирует Markdown-описание релиза для E-Ink TextView с настоящим жирным начертанием
+     * заголовков (#/##/###), предупреждений [!WARNING] и **выделений**, полностью убирая
+     * сырые служебные символы Markdown.
+     */
+    public static CharSequence formatReleaseNotesRich(String raw) {
+        try {
+            java.util.List<MarkdownLine> lines = preprocessReleaseMarkdownLines(raw);
+            if (lines.isEmpty()) {
+                return "Улучшение стабильности, интерфейса и синхронизации.";
+            }
+            android.text.SpannableStringBuilder ssb = new android.text.SpannableStringBuilder();
+            for (int i = 0; i < lines.size(); i++) {
+                MarkdownLine ml = lines.get(i);
+                if (ssb.length() > 0 && ml.text.isEmpty()) {
+                    // Сохраняем единичный пустой абзац для читаемости
+                    if (ssb.length() >= 2 && ssb.charAt(ssb.length() - 1) == '\n' && ssb.charAt(ssb.length() - 2) == '\n') {
+                        continue;
+                    }
+                    ssb.append('\n');
+                    continue;
+                }
+                if (ssb.length() > 0 && ssb.charAt(ssb.length() - 1) != '\n') {
+                    ssb.append('\n');
+                }
+                int lineStart = ssb.length();
+                appendBoldParsedLine(ssb, ml.text, ml.isHeading || ml.isWarning);
+                int lineEnd = ssb.length();
+                if (ml.isHeading && lineEnd > lineStart) {
+                    ssb.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), lineStart, lineEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    ssb.setSpan(new android.text.style.RelativeSizeSpan(1.08f), lineStart, lineEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                } else if (ml.isWarning && lineEnd > lineStart) {
+                    ssb.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), lineStart, lineEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                }
+            }
+            while (ssb.length() > 0 && (ssb.charAt(ssb.length() - 1) == '\n' || ssb.charAt(ssb.length() - 1) == ' ')) {
+                ssb.delete(ssb.length() - 1, ssb.length());
+            }
+            return ssb.length() == 0 ? "Улучшение стабильности, интерфейса и синхронизации." : ssb;
+        } catch (Throwable ignored) {
+            // Fallback для окружения без Android Framework (например, JVM unit-тесты)
+            return cleanReleaseNotes(raw);
+        }
+    }
+
+    private static final class MarkdownLine {
+        final String text;
+        final boolean isHeading;
+        final boolean isWarning;
+        MarkdownLine(String text, boolean isHeading, boolean isWarning) {
+            this.text = text;
+            this.isHeading = isHeading;
+            this.isWarning = isWarning;
+        }
+    }
+
+    private static java.util.List<MarkdownLine> preprocessReleaseMarkdownLines(String raw) {
+        java.util.List<MarkdownLine> out = new java.util.ArrayList<>();
+        if (raw == null || raw.trim().isEmpty()) return out;
+
+        String normalized = raw.replace("\r\n", "\n").replace("\r", "\n");
+        String[] rawLines = normalized.split("\n", -1);
+        boolean inQuoteAlert = false;
+
+        for (String rLine : rawLines) {
+            String line = rLine.trim();
+            boolean isQuoted = false;
+            while (line.startsWith(">")) {
+                isQuoted = true;
+                line = line.substring(1).trim();
+            }
+            if (!isQuoted) {
+                inQuoteAlert = false;
+            }
+            if (line.equalsIgnoreCase("[!WARNING]") || line.equalsIgnoreCase("[!IMPORTANT]")
+                    || line.equalsIgnoreCase("[!CAUTION]") || line.equalsIgnoreCase("[!NOTE]")) {
+                inQuoteAlert = true;
+                continue;
+            }
+            // Убираем горизонтальные разделители --- / ***
+            if (line.matches("^[-*_]{3,}$")) {
+                if (!out.isEmpty() && !out.get(out.size() - 1).text.isEmpty()) {
+                    out.add(new MarkdownLine("", false, false));
+                }
+                continue;
+            }
+
+            boolean isHeading = false;
+            if (line.matches("^#{1,6}\\s+.*")) {
+                isHeading = true;
+                line = line.replaceFirst("^#{1,6}\\s+", "").trim();
+            } else if (line.startsWith("#")) {
+                isHeading = true;
+                line = line.replaceFirst("^#+\\s*", "").trim();
+            }
+
+            // Очищаем ссылки [текст](url), inline `код`, маркеры списков и эмодзи
+            line = line.replaceAll("\\[([^\\]]+)\\]\\([^\\)]+\\)", "$1");
+            line = line.replaceAll("`([^`]+)`", "$1");
+            line = line.replaceAll("\\\\([_*#\\[\\]()~`>-])", "$1");
+            line = line.replaceAll("^[\\s]*[-*]\\s+", "• ");
+            line = stripEmojiChars(line).trim();
+            // Заменяем одиночные курсивные *слово* (после сохранения **bold**)
+            line = replaceSingleAsteriskItalics(line);
+
+            if (line.isEmpty()) {
+                if (!out.isEmpty() && !out.get(out.size() - 1).text.isEmpty()) {
+                    out.add(new MarkdownLine("", false, false));
+                }
+                continue;
+            }
+            out.add(new MarkdownLine(line, isHeading, isQuoted || inQuoteAlert));
+        }
+        while (!out.isEmpty() && out.get(out.size() - 1).text.isEmpty()) {
+            out.remove(out.size() - 1);
+        }
+        return out;
+    }
+
+    private static String stripEmojiChars(String s) {
+        if (s == null || s.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder(s.length());
+        int i = 0;
+        int len = s.length();
+        while (i < len) {
+            int cp = Character.codePointAt(s, i);
+            i += Character.charCount(cp);
+            if (cp == 0xFE0F || cp == 0x200D
+                    || (cp >= 0x2600 && cp <= 0x27BF)
+                    || (cp >= 0x1F000 && cp <= 0x1FAFF)) {
+                continue;
+            }
+            sb.appendCodePoint(cp);
+        }
+        return sb.toString();
+    }
+
+    private static String replaceSingleAsteriskItalics(String s) {
+        if (s == null || s.indexOf('*') < 0) return s;
+        // Временно экранируем двойные звездочки **, чистим одиночные *, возвращаем **
+        String token = "\u0007BOLD\u0007";
+        String tmp = s.replace("**", token);
+        tmp = tmp.replaceAll("\\*([^*]+)\\*", "$1").replace("*", "");
+        return tmp.replace(token, "**");
+    }
+
+    private static String stripInlineBoldMarkers(String s) {
+        if (s == null) return "";
+        return s.replace("**", "");
+    }
+
+    private static void appendBoldParsedLine(android.text.SpannableStringBuilder ssb, String line, boolean alreadyAllBold) {
+        if (line == null || line.isEmpty()) return;
+        int pos = 0;
+        int len = line.length();
+        while (pos < len) {
+            int open = line.indexOf("**", pos);
+            if (open < 0) {
+                ssb.append(line.substring(pos));
+                break;
+            }
+            int close = line.indexOf("**", open + 2);
+            if (close < 0) {
+                // Непарная **: добавляем без неё
+                ssb.append(line.substring(pos).replace("**", ""));
+                break;
+            }
+            if (open > pos) {
+                ssb.append(line.substring(pos, open));
+            }
+            String inner = line.substring(open + 2, close);
+            int spanStart = ssb.length();
+            ssb.append(inner);
+            int spanEnd = ssb.length();
+            if (!alreadyAllBold && spanEnd > spanStart) {
+                ssb.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), spanStart, spanEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            pos = close + 2;
+        }
     }
 
     /**
@@ -395,7 +575,7 @@ public class AppUpdateManager {
         scrollView.setLayoutParams(scrollLp);
 
         TextView notesView = new TextView(activity);
-        notesView.setText(cleanReleaseNotes(release.body));
+        notesView.setText(formatReleaseNotesRich(release.body));
         notesView.setTextSize(13);
         notesView.setTextColor(Color.BLACK);
         notesView.setLineSpacing(3f, 1.25f);
@@ -910,27 +1090,24 @@ public class AppUpdateManager {
 
     /**
      * Подтверждение и выполнение безопасного отката (Downgrade) на предыдущую версию.
-     * Сохраняет резервную копию БД/токена в /sdcard/Books/YandexBooks/backup/ и скачивает выбранный APK в /sdcard/Download/.
+     * Перед скачиванием выполняет checkpoint WAL-журнала БД, проверяет резервную копию в
+     * /sdcard/Books/YandexBooks/backup/ и сохраняет APK выбранной версии в /sdcard/Download/.
      */
     private void confirmAndPerformDowngrade(final Activity activity, final ReleaseInfo targetRelease) {
-        String msg = "Вы выбрали возврат на предыдущую версию " + targetRelease.tagName + ".\n\n" +
-                "1. Приложение автоматически сохранит резервную копию ваших книг, прогресса и авторизации в /sdcard/Books/YandexBooks/backup/.\n" +
-                "2. Скачает установочный файл " + targetRelease.apkFileName + " в папку «Загрузки» (/sdcard/Download/).\n" +
-                "3. Так как система Android не позволяет устанавливать старую версию поверх новой без удаления, вам будет предложено удалить текущую версию и запустить скачанный файл из папки «Загрузки».";
+        String msg = "Вы выбрали откат на версию " + targetRelease.tagName + ".\n\n" +
+                "1. Приложение сохранит проверенную резервную копию ваших книг, закладок, прогресса и сессии в /sdcard/Books/YandexBooks/backup/.\n" +
+                "2. Скачает файл " + targetRelease.apkFileName + " в папку «Загрузки» (/sdcard/Download/). Если такой файл уже скачан, повторное скачивание не потребуется.\n" +
+                "3. Политика безопасности Android запрещает устанавливать старую версию поверх новой (возникает ошибка «Приложение не установлено»). Поэтому после сохранения резервной копии и файла вам достаточно удалить текущую версию и открыть скачанный APK в «Загрузках» — данные восстановятся автоматически при первом запуске.";
 
         EinkNotice.showConfirm(
                 activity,
                 "Откат на " + targetRelease.tagName,
                 msg,
-                "Скачать и откатить",
+                "Сохранить копию и скачать",
                 "Отмена",
                 new Runnable() {
                     @Override
                     public void run() {
-                        try {
-                            com.onyx.yandexbooks.core.storage.DatabaseHelper.getInstance(activity)
-                                    .exportBackupToPublicStorage(activity);
-                        } catch (Throwable ignored) {}
                         downloadAndInstallDowngradeApk(activity, targetRelease);
                     }
                 },
@@ -942,8 +1119,8 @@ public class AppUpdateManager {
         if (activity == null || activity.isFinishing()) return;
 
         final ProgressDialog progressDialog = new ProgressDialog(activity);
-        progressDialog.setTitle("Откат версии");
-        progressDialog.setMessage("Скачивание " + release.tagName + " в Загрузки...");
+        progressDialog.setTitle("Подготовка отката " + release.tagName);
+        progressDialog.setMessage("Сохранение резервной копии и подготовка APK...");
         progressDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
         progressDialog.setMax(100);
         progressDialog.setProgress(0);
@@ -953,82 +1130,127 @@ public class AppUpdateManager {
         executor.execute(new Runnable() {
             @Override
             public void run() {
-                File targetFile = null;
                 try {
+                    final com.onyx.yandexbooks.core.storage.DatabaseHelper.BackupSummary backupSummary =
+                            com.onyx.yandexbooks.core.storage.DatabaseHelper.getInstance(activity)
+                                    .exportBackupWithSummary(activity);
+                    if (backupSummary == null || !backupSummary.success) {
+                        throw new Exception("Не удалось сохранить резервную копию в /sdcard/Books/YandexBooks/backup/. Проверьте разрешение доступа к памяти в настройках Android.");
+                    }
+
                     File downloadDir = resolveWritableDownloadDir(activity, false);
                     if (downloadDir == null || !downloadDir.canWrite()) {
                         throw new Exception("Нет прав на запись в папку «Загрузки» (/sdcard/Download). Выдайте разрешение памяти приложению.");
                     }
-                    String fname = release.apkFileName != null ? release.apkFileName : ("yandex-books-lite-" + release.tagName + ".apk");
-                    targetFile = new File(downloadDir, fname);
+                    final String fname = release.apkFileName != null ? release.apkFileName : ("yandex-books-lite-" + release.tagName + ".apk");
+                    final File targetFile = new File(downloadDir, fname);
 
-                    OkHttpClient client = HttpClientFactory.getClient();
-                    Request request = new Request.Builder()
-                            .url(release.apkDownloadUrl)
-                            .header("User-Agent", "OnyxYandexBooks-App/" + getCurrentVersionName(activity))
-                            .build();
+                    boolean alreadyDownloaded = targetFile.exists()
+                            && release.apkSize > 0
+                            && targetFile.length() == release.apkSize;
 
-                    Response response = client.newCall(request).execute();
-                    if (!response.isSuccessful()) {
-                        throw new Exception("HTTP " + response.code());
-                    }
-
-                    long contentLength = response.body().contentLength();
-                    if (contentLength <= 0 && release.apkSize > 0) contentLength = release.apkSize;
-
-                    InputStream in = response.body().byteStream();
-                    FileOutputStream out = new FileOutputStream(targetFile);
-                    byte[] buffer = new byte[8192];
-                    long totalRead = 0;
-                    int read;
-                    while ((read = in.read(buffer)) != -1) {
-                        out.write(buffer, 0, read);
-                        totalRead += read;
-                        if (contentLength > 0) {
-                            final int pct = (int) ((totalRead * 100) / contentLength);
-                            mainHandler.post(new Runnable() {
-                                @Override
-                                public void run() {
-                                    if (progressDialog.isShowing()) {
-                                        progressDialog.setProgress(pct);
-                                    }
+                    if (!alreadyDownloaded) {
+                        mainHandler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (progressDialog.isShowing()) {
+                                    progressDialog.setMessage("Скачивание " + fname + " в Загрузки...");
                                 }
-                            });
+                            }
+                        });
+
+                        OkHttpClient client = HttpClientFactory.getClient();
+                        Request request = new Request.Builder()
+                                .url(release.apkDownloadUrl)
+                                .header("User-Agent", "OnyxYandexBooks-App/" + getCurrentVersionName(activity))
+                                .build();
+
+                        Response response = client.newCall(request).execute();
+                        if (!response.isSuccessful()) {
+                            throw new Exception("HTTP " + response.code());
                         }
+
+                        long contentLength = response.body().contentLength();
+                        if (contentLength <= 0 && release.apkSize > 0) contentLength = release.apkSize;
+
+                        InputStream in = response.body().byteStream();
+                        FileOutputStream out = new FileOutputStream(targetFile);
+                        byte[] buffer = new byte[8192];
+                        long totalRead = 0;
+                        int read;
+                        while ((read = in.read(buffer)) != -1) {
+                            out.write(buffer, 0, read);
+                            totalRead += read;
+                            if (contentLength > 0) {
+                                final int pct = (int) ((totalRead * 100) / contentLength);
+                                mainHandler.post(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        if (progressDialog.isShowing()) {
+                                            progressDialog.setProgress(pct);
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                        out.flush();
+                        out.close();
+                        in.close();
+                    } else {
+                        mainHandler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (progressDialog.isShowing()) {
+                                    progressDialog.setProgress(100);
+                                }
+                            }
+                        });
                     }
-                    out.flush();
-                    out.close();
-                    in.close();
                     targetFile.setReadable(true, false);
 
-                    final File finalFile = targetFile;
+                    try {
+                        MediaScannerConnection.scanFile(
+                                activity.getApplicationContext(),
+                                new String[]{targetFile.getAbsolutePath()},
+                                new String[]{"application/vnd.android.package-archive"},
+                                null
+                        );
+                    } catch (Throwable ignored) {}
+
+                    final String loginLabel = (backupSummary.userLogin != null && !backupSummary.userLogin.isEmpty())
+                            ? backupSummary.userLogin : "сохранена";
+                    final String readyMsg = "Резервная копия проверена и сохранена:\n" +
+                            "• Книг в базе: " + backupSummary.booksCount + "\n" +
+                            "• Закладок и прогресса: " + backupSummary.bookmarksCount + "\n" +
+                            "• Аккаунт: " + loginLabel + "\n\n" +
+                            "Установочный файл " + release.tagName + " находится в папке «Загрузки»:\n" +
+                            targetFile.getAbsolutePath() + "\n\n" +
+                            "Как завершить откат в 2 шага:\n" +
+                            "1. Нажмите «Удалить и откатить» и подтвердите удаление текущей версии.\n" +
+                            "2. Откройте файл " + fname + " в «Загрузках» и нажмите «Установить».\n\n" +
+                            "При первом запуске старая версия сама найдет и восстановит ваши книги, закладки и вход.";
+
                     mainHandler.post(new Runnable() {
                         @Override
                         public void run() {
                             if (progressDialog.isShowing()) progressDialog.dismiss();
                             EinkNotice.showConfirm(
                                     activity,
-                                    "Файл " + release.tagName + " готов",
-                                    "Резервная копия данных сохранена.\nAPK-файл сохранен в:\n" + finalFile.getAbsolutePath() + "\n\nНажмите «Удалить текущую», подтвердите удаление, а затем установите скачанный APK из папки «Загрузки» (Download).",
-                                    "Удалить текущую",
-                                    "Установить поверх",
+                                    "Готово к откату на " + release.tagName,
+                                    readyMsg,
+                                    "Удалить и откатить",
+                                    "Показать в Загрузках",
                                     new Runnable() {
                                         @Override
                                         public void run() {
-                                            try {
-                                                Intent uninstall = new Intent(Intent.ACTION_DELETE);
-                                                uninstall.setData(Uri.parse("package:" + activity.getPackageName()));
-                                                uninstall.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                                                activity.startActivity(uninstall);
-                                            } catch (Exception e) {
-                                                installApk(activity, finalFile);
-                                            }
+                                            openDownloadsFolder(activity, targetFile, true);
+                                            launchPackageUninstall(activity, targetFile);
                                         }
                                     },
                                     new Runnable() {
                                         @Override
                                         public void run() {
-                                            installApk(activity, finalFile);
+                                            openDownloadsFolder(activity, targetFile, false);
                                         }
                                     }
                             );
@@ -1039,11 +1261,45 @@ public class AppUpdateManager {
                         @Override
                         public void run() {
                             if (progressDialog.isShowing()) progressDialog.dismiss();
-                            EinkNotice.show(activity, "Ошибка отката", "Не удалось скачать версию " + release.tagName + ":\n" + e.getMessage());
+                            EinkNotice.show(activity, "Ошибка отката", "Не удалось подготовить откат на версию " + release.tagName + ":\n" + e.getMessage());
                         }
                     });
                 }
             }
         });
+    }
+
+    private void openDownloadsFolder(Activity activity, File apkFile, boolean silentFallback) {
+        if (activity == null || activity.isFinishing()) return;
+        try {
+            Intent dl = new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS);
+            dl.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            activity.startActivity(dl);
+        } catch (Exception e) {
+            if (!silentFallback) {
+                EinkNotice.show(
+                        activity,
+                        "Папка «Загрузки»",
+                        "Файл уже сохранен на устройстве:\n" + apkFile.getAbsolutePath() +
+                                "\n\nОткройте стандартный диспетчер файлов Onyx («Память» -> «Download») и запустите этот файл после удаления текущей версии."
+                );
+            }
+        }
+    }
+
+    private void launchPackageUninstall(Activity activity, File fallbackApk) {
+        if (activity == null || activity.isFinishing()) return;
+        try {
+            Intent uninstall = new Intent(Intent.ACTION_DELETE);
+            uninstall.setData(Uri.parse("package:" + activity.getPackageName()));
+            uninstall.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            activity.startActivity(uninstall);
+        } catch (Exception e) {
+            EinkNotice.show(
+                    activity,
+                    "Удаление не запущено",
+                    "Удалите текущую версию через «Настройки» -> «Приложения», затем откройте файл:\n" + fallbackApk.getAbsolutePath()
+            );
+        }
     }
 }

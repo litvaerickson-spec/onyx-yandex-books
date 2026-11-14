@@ -128,6 +128,7 @@ public class ReaderActivity extends Activity {
     private Button btnToggleLineSpacing;
     private Button btnToggleMargins;
     private Button btnToggleVertMargins;
+    private Button btnToggleFooterOffset;
     private Button btnToggleOrientation;
 
     private String bookUuid;
@@ -261,6 +262,7 @@ public class ReaderActivity extends Activity {
         btnToggleLineSpacing = (Button) findViewById(R.id.btn_toggle_line_spacing);
         btnToggleMargins = (Button) findViewById(R.id.btn_toggle_margins);
         btnToggleVertMargins = (Button) findViewById(R.id.btn_toggle_vert_margins);
+        btnToggleFooterOffset = (Button) findViewById(R.id.btn_toggle_footer_offset);
         btnToggleOrientation = (Button) findViewById(R.id.btn_toggle_orientation);
 
         if (readerBookTitleTop != null) {
@@ -280,6 +282,7 @@ public class ReaderActivity extends Activity {
         typographyConfig.setVerticalMarginMode(appSettings.getVerticalMarginMode());
         typographyConfig.setNightMode(appSettings.isNightMode());
         typographyConfig.setTapZoneMode(appSettings.getTapZoneMode());
+        applyFooterOffsetToConfig();
 
         int marginPx = appSettings.getMarginPaddingPx();
         typographyConfig.setPaddingLeftPx(marginPx);
@@ -809,6 +812,16 @@ public class ReaderActivity extends Activity {
             });
         }
 
+        updateFooterOffsetButtonText();
+        if (btnToggleFooterOffset != null) {
+            btnToggleFooterOffset.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    cycleFooterOffsetMode();
+                }
+            });
+        }
+
         updateOrientationButtonText();
         if (btnToggleOrientation != null) {
             btnToggleOrientation.setOnClickListener(new View.OnClickListener() {
@@ -844,6 +857,7 @@ public class ReaderActivity extends Activity {
         setupRowClick(R.id.row_toggle_line_spacing, btnToggleLineSpacing);
         setupRowClick(R.id.row_toggle_margins, btnToggleMargins);
         setupRowClick(R.id.row_toggle_vert_margins, btnToggleVertMargins);
+        setupRowClick(R.id.row_toggle_footer_offset, btnToggleFooterOffset);
         setupRowClick(R.id.row_toggle_orientation, btnToggleOrientation);
     }
 
@@ -1262,7 +1276,72 @@ public class ReaderActivity extends Activity {
         }
         typographyConfig.setVerticalMarginMode(next);
         appSettings.setVerticalMarginMode(next);
+        applyFooterOffsetToConfig();
         updateVertMarginButtonText();
+        if (readerCanvas != null) readerCanvas.setTypographyConfig(typographyConfig);
+        repaginateCurrentChapter();
+    }
+
+    private TypographyConfig cloneTypographyConfig(TypographyConfig src) {
+        TypographyConfig dst = new TypographyConfig();
+        if (src == null) return dst;
+        dst.setFontSizeSp(src.getFontSizeSp());
+        dst.setFontFamily(src.getFontFamily());
+        dst.setLineSpacingMultiplier(src.getLineSpacingMultiplier());
+        dst.setParagraphIndentPx(src.getParagraphIndentPx());
+        dst.setContrastMode(src.getContrastMode());
+        dst.setVerticalMarginMode(src.getVerticalMarginMode());
+        dst.setPaddingLeftPx(src.getPaddingLeftPx());
+        dst.setPaddingRightPx(src.getPaddingRightPx());
+        dst.setPaddingTopPx(src.getPaddingTopPx());
+        dst.setPaddingBottomPx(src.getPaddingBottomPx());
+        dst.setFooterBottomOffsetDp(src.getFooterBottomOffsetDp());
+        dst.setFooterReservedHeightPx(src.getFooterReservedHeightPx());
+        dst.setHyphenationEnabled(src.isHyphenationEnabled());
+        dst.setJustifyEnabled(src.isJustifyEnabled());
+        dst.setBoldText(src.isBoldText());
+        dst.setNightMode(src.isNightMode());
+        dst.setTapZoneMode(src.getTapZoneMode());
+        return dst;
+    }
+
+    private void applyFooterOffsetToConfig() {
+        if (typographyConfig == null || appSettings == null) return;
+        int offsetDp = appSettings.getReaderFooterOffsetDp();
+        typographyConfig.setFooterBottomOffsetDp(offsetDp);
+        float density = getResources().getDisplayMetrics().density;
+        int offsetPx = Math.round(offsetDp * density);
+        typographyConfig.setPaddingBottomPx(Math.max(typographyConfig.getPaddingBottomPx(), offsetPx));
+        typographyConfig.setFooterReservedHeightPx(Math.max(26, Math.round(22 * density)));
+    }
+
+    private void updateFooterOffsetButtonText() {
+        if (btnToggleFooterOffset == null || appSettings == null) return;
+        int dp = appSettings.getReaderFooterOffsetDp();
+        if (dp <= 10) {
+            btnToggleFooterOffset.setText(dp + " dp (Малый)");
+        } else if (dp <= 18) {
+            btnToggleFooterOffset.setText(dp + " dp (Darwin)");
+        } else if (dp <= 28) {
+            btnToggleFooterOffset.setText(dp + " dp (Крупный)");
+        } else {
+            btnToggleFooterOffset.setText(dp + " dp (Макс.)");
+        }
+    }
+
+    private void cycleFooterOffsetMode() {
+        int cur = appSettings.getReaderFooterOffsetDp();
+        int next;
+        if (cur < 14) next = 16;
+        else if (cur < 22) next = 24;
+        else if (cur < 30) next = 32;
+        else if (cur < 38) next = 40;
+        else next = 8;
+
+        appSettings.setReaderFooterOffsetDp(next);
+        typographyConfig.setVerticalMarginMode(typographyConfig.getVerticalMarginMode());
+        applyFooterOffsetToConfig();
+        updateFooterOffsetButtonText();
         if (readerCanvas != null) readerCanvas.setTypographyConfig(typographyConfig);
         repaginateCurrentChapter();
     }
@@ -2569,21 +2648,7 @@ public class ReaderActivity extends Activity {
         lastPaginatedWidth = w;
         lastPaginatedHeight = h;
 
-        final TypographyConfig configCopy = new TypographyConfig();
-        configCopy.setFontSizeSp(typographyConfig.getFontSizeSp());
-        configCopy.setFontFamily(typographyConfig.getFontFamily());
-        configCopy.setLineSpacingMultiplier(typographyConfig.getLineSpacingMultiplier());
-        configCopy.setParagraphIndentPx(typographyConfig.getParagraphIndentPx());
-        configCopy.setPaddingLeftPx(typographyConfig.getPaddingLeftPx());
-        configCopy.setPaddingRightPx(typographyConfig.getPaddingRightPx());
-        configCopy.setPaddingTopPx(typographyConfig.getPaddingTopPx());
-        configCopy.setPaddingBottomPx(typographyConfig.getPaddingBottomPx());
-        configCopy.setFooterReservedHeightPx(typographyConfig.getFooterReservedHeightPx());
-        configCopy.setHyphenationEnabled(typographyConfig.isHyphenationEnabled());
-        configCopy.setJustifyEnabled(typographyConfig.isJustifyEnabled());
-        configCopy.setBoldText(typographyConfig.isBoldText());
-        configCopy.setContrastMode(typographyConfig.getContrastMode());
-        configCopy.setVerticalMarginMode(typographyConfig.getVerticalMarginMode());
+        final TypographyConfig configCopy = cloneTypographyConfig(typographyConfig);
 
         final long taskId = paginationTaskId.incrementAndGet();
 
@@ -2746,21 +2811,7 @@ public class ReaderActivity extends Activity {
                                     w = getResources().getDisplayMetrics().widthPixels;
                                     h = getResources().getDisplayMetrics().heightPixels;
                                 }
-                                TypographyConfig cfg = new TypographyConfig();
-                                cfg.setFontSizeSp(typographyConfig.getFontSizeSp());
-                                cfg.setFontFamily(typographyConfig.getFontFamily());
-                                cfg.setLineSpacingMultiplier(typographyConfig.getLineSpacingMultiplier());
-                                cfg.setParagraphIndentPx(typographyConfig.getParagraphIndentPx());
-                                cfg.setPaddingLeftPx(typographyConfig.getPaddingLeftPx());
-                                cfg.setPaddingRightPx(typographyConfig.getPaddingRightPx());
-                                cfg.setPaddingTopPx(typographyConfig.getPaddingTopPx());
-                                cfg.setPaddingBottomPx(typographyConfig.getPaddingBottomPx());
-                                cfg.setFooterReservedHeightPx(typographyConfig.getFooterReservedHeightPx());
-                                cfg.setHyphenationEnabled(typographyConfig.isHyphenationEnabled());
-                                cfg.setJustifyEnabled(typographyConfig.isJustifyEnabled());
-                                cfg.setBoldText(typographyConfig.isBoldText());
-                                cfg.setContrastMode(typographyConfig.getContrastMode());
-                                cfg.setVerticalMarginMode(typographyConfig.getVerticalMarginMode());
+                                TypographyConfig cfg = cloneTypographyConfig(typographyConfig);
 
                                 List<TextPaginator.Page> pages = paginator.paginate(text, w, h, paint, cfg);
                                 if (pages != null && !pages.isEmpty()) {
@@ -2815,21 +2866,7 @@ public class ReaderActivity extends Activity {
         final int screenWidth = w;
         final int screenHeight = h;
 
-        final TypographyConfig configCopy = new TypographyConfig();
-        configCopy.setFontSizeSp(typographyConfig.getFontSizeSp());
-        configCopy.setFontFamily(typographyConfig.getFontFamily());
-        configCopy.setLineSpacingMultiplier(typographyConfig.getLineSpacingMultiplier());
-        configCopy.setParagraphIndentPx(typographyConfig.getParagraphIndentPx());
-        configCopy.setPaddingLeftPx(typographyConfig.getPaddingLeftPx());
-        configCopy.setPaddingRightPx(typographyConfig.getPaddingRightPx());
-        configCopy.setPaddingTopPx(typographyConfig.getPaddingTopPx());
-        configCopy.setPaddingBottomPx(typographyConfig.getPaddingBottomPx());
-        configCopy.setFooterReservedHeightPx(typographyConfig.getFooterReservedHeightPx());
-        configCopy.setHyphenationEnabled(typographyConfig.isHyphenationEnabled());
-        configCopy.setJustifyEnabled(typographyConfig.isJustifyEnabled());
-        configCopy.setBoldText(typographyConfig.isBoldText());
-        configCopy.setContrastMode(typographyConfig.getContrastMode());
-        configCopy.setVerticalMarginMode(typographyConfig.getVerticalMarginMode());
+        final TypographyConfig configCopy = cloneTypographyConfig(typographyConfig);
 
         final long taskId = paginationTaskId.incrementAndGet();
 

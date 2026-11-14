@@ -1067,30 +1067,44 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         }
     }
 
+    public static class BackupSummary {
+        public boolean success;
+        public int booksCount;
+        public int bookmarksCount;
+        public String userLogin;
+        public long dbBytes;
+        public String backupPath;
+    }
+
     /**
      * Экспортирует полную резервную копию базы данных SQLite, токена авторизации и настроек
-     * в общую папку /sdcard/Books/YandexBooks/backup/ для бесшовного отката на предыдущие версии (Zero Data Loss).
+     * в общую папку /sdcard/Books/YandexBooks/backup/ и возвращает проверенную сводку (Zero Data Loss).
      */
-    public synchronized boolean exportBackupToPublicStorage(Context context) {
-        if (context == null) return false;
+    public synchronized BackupSummary exportBackupWithSummary(Context context) {
+        BackupSummary summary = new BackupSummary();
+        if (context == null) return summary;
         try {
             java.io.File extDir = android.os.Environment.getExternalStorageDirectory();
-            if (extDir == null || !extDir.canWrite()) return false;
+            if (extDir == null || !extDir.canWrite()) return summary;
             java.io.File backupDir = new java.io.File(extDir, "Books/YandexBooks/backup");
             if (!backupDir.exists()) {
                 backupDir.mkdirs();
             }
+            summary.backupPath = backupDir.getAbsolutePath();
 
-            // 1. Сбрасываем WAL/журнал SQLite и копируем файл БД
+            // 1. Сбрасываем WAL/журнал SQLite, считаем статистику и копируем файл БД
             try {
                 SQLiteDatabase wdb = getWritableDatabase();
                 android.database.Cursor c = wdb.rawQuery("PRAGMA wal_checkpoint(FULL)", null);
                 if (c != null) c.close();
+                summary.booksCount = countTableRows(wdb, "books");
+                summary.bookmarksCount = countTableRows(wdb, "bookmarks");
             } catch (Throwable ignored) {}
             java.io.File dbFile = context.getDatabasePath(DATABASE_NAME);
+            java.io.File dstDb = new java.io.File(backupDir, DATABASE_NAME);
             if (dbFile != null && dbFile.exists() && dbFile.length() > 0) {
-                java.io.File dstDb = new java.io.File(backupDir, DATABASE_NAME);
                 copyFileSafe(dbFile, dstDb);
+                summary.dbBytes = dstDb.length();
             }
 
             // 2. Сохраняем токен и настройки в backup_meta.json
@@ -1099,7 +1113,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             if (ts.isAuthorized()) {
                 meta.put("access_token", ts.getAccessToken());
                 if (ts.getRefreshToken() != null) meta.put("refresh_token", ts.getRefreshToken());
-                if (ts.getUserLogin() != null) meta.put("user_login", ts.getUserLogin());
+                if (ts.getUserLogin() != null) {
+                    meta.put("user_login", ts.getUserLogin());
+                    summary.userLogin = ts.getUserLogin();
+                }
             }
             AppSettings settings = new AppSettings(context);
             meta.put("ui_scale", (double) settings.getUiScale());
@@ -1107,6 +1124,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             meta.put("tap_zone_mode", settings.getTapZoneMode());
             meta.put("font_size_sp", settings.getFontSizeSp());
             meta.put("font_family", settings.getFontFamily());
+            meta.put("panel_size_mode", settings.getPanelSizeMode());
+            meta.put("card_density_mode", settings.getCardDensityMode());
+            meta.put("reader_footer_offset_dp", settings.getReaderFooterOffsetDp());
+            meta.put("books_count", summary.booksCount);
             meta.put("backup_timestamp", System.currentTimeMillis());
 
             java.io.File metaFile = new java.io.File(backupDir, "backup_meta.json");
@@ -1114,11 +1135,30 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             fos.write(meta.toString().getBytes("UTF-8"));
             fos.flush();
             fos.close();
-            return true;
+
+            summary.success = metaFile.exists() && metaFile.length() > 0
+                    && ((dbFile == null || !dbFile.exists()) || (dstDb.exists() && dstDb.length() > 0));
+            return summary;
         } catch (Throwable t) {
             android.util.Log.w("DatabaseHelper", "Backup export skipped: " + t.getMessage());
-            return false;
+            return summary;
         }
+    }
+
+    private int countTableRows(SQLiteDatabase db, String table) {
+        android.database.Cursor c = null;
+        try {
+            c = db.rawQuery("SELECT COUNT(*) FROM " + table, null);
+            if (c != null && c.moveToFirst()) return c.getInt(0);
+        } catch (Throwable ignored) {
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
+        }
+        return 0;
+    }
+
+    public synchronized boolean exportBackupToPublicStorage(Context context) {
+        return exportBackupWithSummary(context).success;
     }
 
     /**
@@ -1162,6 +1202,9 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 if (meta.has("tap_zone_mode")) settings.setTapZoneMode(meta.optString("tap_zone_mode", AppSettings.TAP_ZONE_STANDARD));
                 if (meta.has("font_size_sp")) settings.setFontSizeSp((int) meta.optInt("font_size_sp", 18));
                 if (meta.has("font_family")) settings.setFontFamily(meta.optString("font_family", "serif"));
+                if (meta.has("panel_size_mode")) settings.setPanelSizeMode(meta.optString("panel_size_mode", AppSettings.PANEL_SIZE_COMFORTABLE));
+                if (meta.has("card_density_mode")) settings.setCardDensityMode(meta.optString("card_density_mode", AppSettings.CARD_DENSITY_NORMAL));
+                if (meta.has("reader_footer_offset_dp")) settings.setReaderFooterOffsetDp(meta.optInt("reader_footer_offset_dp", AppSettings.DEFAULT_FOOTER_OFFSET_DP));
             }
 
             java.io.File backupDb = new java.io.File(backupDir, DATABASE_NAME);
