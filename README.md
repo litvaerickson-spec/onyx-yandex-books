@@ -5,13 +5,15 @@
 # 📚 Яндекс Книги Lite для Onyx Boox
 
 [![Latest Release](https://img.shields.io/github/v/release/litvaerickson-spec/onyx-yandex-books?style=for-the-badge&logo=github&color=brightgreen)](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/latest)
-[![Version](https://img.shields.io/badge/Version-v2.0.0_Stable-blue?style=for-the-badge&logo=android)](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/tag/v2.0.0)
+[![Version](https://img.shields.io/badge/Version-v2.0.0-blue?style=for-the-badge&logo=android)](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/tag/v2.0.0)
 [![Android](https://img.shields.io/badge/Android-4.2.2%20--%2014%2B-gray?style=for-the-badge&logo=android)](https://github.com/litvaerickson-spec/onyx-yandex-books)
 [![E-Ink](https://img.shields.io/badge/Screen-E--Ink%20Carta%20Plus-white?style=for-the-badge)](https://github.com/litvaerickson-spec/onyx-yandex-books)
 [![RAM Footprint](https://img.shields.io/badge/RAM_Usage-15--20_MB-brightgreen?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
 
-> **Стабильный мажорный релиз v2.0.0 легковесного клиента сервиса «Яндекс Книги»** для электронных книг **Onyx Boox** (Darwin 1–7, Vasco da Gama, Faust, Monte Cristo, Livingstone, Leaf, Poke, Palma, Nova, Note, Tab, Go 10.3), Bigme B6 и любых ридеров/планшетов на базе **Android 4.2.2 – Android 14+**: с **гибридным книжным форматированием EPUB и встроенными шрифтами**, **всплывающими сносками и кликабельными ссылками**, **цитатами, заметками и экспортом в Markdown (.md)**, **настраиваемой сеткой тапов 3×3**, **дизерингом обложек Флойда–Стейнберга**, **полкой «Мои файлы» (`user_books`)**, **мобильным GraphQL Gateway + каноническим EPUB CFI**, **прямой интеграцией NeoReader / AlReader**, **масштабированием интерфейса 100%–200%**, **архивом версий и резервным копированием с безопасным откатом**.
+> **Мажорный релиз v2.0.0 легковесного клиента сервиса «Яндекс Книги»** для электронных книг **Onyx Boox** (Darwin 1–7, Vasco da Gama, Faust, Monte Cristo, Livingstone, Leaf, Poke, Palma, Nova, Note, Tab, Go 10.3), Bigme B6 и любых ридеров/планшетов на базе **Android 4.2.2 – Android 14+**: с **гибридным книжным форматированием EPUB и встроенными шрифтами**, **всплывающими сносками и кликабельными ссылками**, **цитатами, заметками и экспортом в Markdown (.md)**, **настраиваемой сеткой тапов 3×3**, **дизерингом обложек Флойда–Стейнберга**, **полкой «Мои файлы» (`user_books`)**, **мобильным GraphQL Gateway + каноническим EPUB CFI**, **прямой интеграцией NeoReader / AlReader**, **масштабированием интерфейса 100%–200%**, **архивом версий и резервным копированием с безопасным откатом**.
+>
+> **Статус тестирования:** основные сценарии работы, чтение EPUB, интерфейс и откат проверены в изолированных эмуляторах Android 4.2.2–9.0 с профилями экранов Onyx Boox (`758×1024` и `1072×1448`). На отдельных физических ридерах (включая устройства на Android 10–14) часть новых функций может требовать уточнений — в приложении встроен «Архив версий и откат ПО» для быстрого возврата на предыдущий выпуск.
 
 > [!IMPORTANT]
 > **⚖️ Правовой статус и отказ от ответственности / Legal Disclaimer & Educational Use:**
@@ -26,7 +28,7 @@
 
 ### 📥 Загрузка и установка
 
-* 🚀 **Стабильный релиз (`v2.0.0`):** [**Страница релизов на GitHub (Releases)**](https://github.com/litvaerickson-spec/onyx-yandex-books/releases)
+* 🚀 **Актуальный выпуск (`v2.0.0`):** [**Страница релизов на GitHub (Releases)**](https://github.com/litvaerickson-spec/onyx-yandex-books/releases)
 * 🔐 **Контрольные суммы (SHA-256):** [`CHECKSUMS.md`](CHECKSUMS.md) и [`SHA256SUMS`](SHA256SUMS)
 * 🔄 **Обновление по воздуху (OTA без провода):** прямо на устройстве через **«Меню» → «Обновление ПО»** (или нажатием на строку статуса внизу экрана)
 * 📖 **Подробное руководство пользователя:** [`docs/guides/user_guide.md`](docs/guides/user_guide.md)
@@ -37,7 +39,7 @@
 
 ## 📊 Сравнение: Официальный клиент vs Яндекс Книги Lite v2.0.0
 
-| Параметр | Официальное приложение «Яндекс Книги» | Яндекс Книги Lite (v2.0.0 Stable) |
+| Параметр | Официальное приложение «Яндекс Книги» | Яндекс Книги Lite (v2.0.0) |
 | :--- | :--- | :--- |
 | **Поддержка ОС Android** | ⚠️ Android 7+ с сервисами Google | ✅ **Android 4.2.2 – Android 14+ (`minSdk 17`, `targetSdk 28`, 4 ABI)** |
 | **Потребление ОЗУ (RAM)** | ⚠️ 280–340 МБ (тормоза и вылеты на 512 МБ / 1 ГБ) | 🚀 **15–20 МБ (мгновенный отклик)** |
@@ -49,14 +51,14 @@
 | **Физические боковые кнопки** | ⚠️ Вызывают полосу громкости `VolumePanel` | ✅ **Полный перехват скан-кодов Onyx, `VolumePanel` подавлен, защита от залипания** |
 | **Обложки и иллюстрации E-Ink** | Цветовой бандинг (резкие ступеньки) | **Диффузный дизеринг Флойда–Стейнберга для 16 градаций серого** |
 | **Синхронизация со смартфоном** | Только внутри официального клиента | **Двусторонняя (`api-gateway` GraphQL + канонический EPUB CFI с OPF spine, «Мои файлы», аудио-текст)** |
-| **Счётчик страниц внизу** | Прыгает по главам | **Стабильный сквозной `Стр. X из Y (Z%)` с дисковым кэшем `page_counts.json` + отступ часов** |
+| **Счётчик страниц внизу** | Прыгает по главам | **Сквозной `Стр. X из Y (Z%)` с дисковым кэшем `page_counts.json` + отступ часов** |
 | **Масштабирование интерфейса** | Фиксированное (мелко на 10.3" 300 DPI) | **7 ступеней масштаба (`100%`–`200%`) + настройка размера панелей и плотности карточек** |
 | **Внешние программы чтения** | Отсутствуют | **Цикл `Lite → NeoReader → AlReader → Выбор` через `LocalFileProvider`** |
 | **OTA, бэкап и откат ПО** | Google Play | **OTA с GitHub + автобэкап БД и 21 настройки + «Архив версий и откат ПО»** |
 
 ---
 
-## 🏛️ Ключевые возможности стабильного релиза v2.0.0
+## 🏛️ Ключевые возможности релиза v2.0.0
 
 ```mermaid
 flowchart TD
