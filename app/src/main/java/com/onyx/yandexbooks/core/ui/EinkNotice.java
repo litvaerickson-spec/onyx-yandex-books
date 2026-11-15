@@ -58,6 +58,21 @@ public final class EinkNotice {
     private EinkNotice() {}
 
     /**
+     * Форматирует текст уведомлений для E-Ink экрана через единый парсер:
+     * преобразует **выделения** и заголовки в жирный шрифт и убирает сырые символы Markdown и эмодзи.
+     */
+    public static CharSequence formatNotificationMessage(String message) {
+        if (message == null) return "";
+        String trimmed = message.trim();
+        if (trimmed.isEmpty()) return "";
+        try {
+            return com.onyx.yandexbooks.core.update.AppUpdateManager.formatReleaseNotesRich(trimmed);
+        } catch (Throwable ignored) {
+            return trimmed.replace("**", "");
+        }
+    }
+
+    /**
      * Показать стандартное уведомление с заголовком «Уведомление» и кнопкой «ОК».
      */
     public static void show(Context context, String message) {
@@ -154,7 +169,7 @@ public final class EinkNotice {
             root.addView(scrollView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             TextView messageView = new TextView(activity);
-            messageView.setText(message.trim());
+            messageView.setText(formatNotificationMessage(message));
             messageView.setTextSize(13.5f);
             messageView.setTypeface(null, Typeface.NORMAL);
             messageView.setTextColor(Color.BLACK);
@@ -350,7 +365,7 @@ public final class EinkNotice {
             scrollView.setLayoutParams(scrollLp);
 
             TextView messageView = new TextView(activity);
-            messageView.setText(message.trim());
+            messageView.setText(formatNotificationMessage(message));
             messageView.setTextSize(13.5f);
             messageView.setTypeface(null, Typeface.NORMAL);
             messageView.setTextColor(Color.BLACK);

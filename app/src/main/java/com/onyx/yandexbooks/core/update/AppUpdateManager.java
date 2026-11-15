@@ -365,7 +365,7 @@ public class AppUpdateManager {
                 int lineEnd = ssb.length();
                 if (ml.isHeading && lineEnd > lineStart) {
                     ssb.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), lineStart, lineEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                    ssb.setSpan(new android.text.style.RelativeSizeSpan(1.08f), lineStart, lineEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    ssb.setSpan(new android.text.style.RelativeSizeSpan(1.14f), lineStart, lineEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 } else if (ml.isWarning && lineEnd > lineStart) {
                     ssb.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), lineStart, lineEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                 }
@@ -445,6 +445,9 @@ public class AppUpdateManager {
                     out.add(new MarkdownLine("", false, false));
                 }
                 continue;
+            }
+            if (isHeading && !out.isEmpty() && !out.get(out.size() - 1).text.isEmpty()) {
+                out.add(new MarkdownLine("", false, false));
             }
             out.add(new MarkdownLine(line, isHeading, isQuoted || inQuoteAlert));
         }
@@ -579,6 +582,7 @@ public class AppUpdateManager {
         notesView.setTextSize(13);
         notesView.setTextColor(Color.BLACK);
         notesView.setLineSpacing(3f, 1.25f);
+        notesView.setPadding(0, (int) (2 * density), 0, (int) (4 * density));
         scrollView.addView(notesView);
         root.addView(scrollView);
 
@@ -1099,11 +1103,11 @@ public class AppUpdateManager {
 
     private static String buildDowngradeRestoreNotice(String targetTag) {
         if (supportsAutoBackupRestore(targetTag)) {
-            return "• Авторизация, полки и закладки: версия " + targetTag + " автоматически подхватит резервную копию из /sdcard/Books/YandexBooks/backup/ при первом запуске (после выдачи доступа к памяти).\n" +
-                    "• Внимание про книги в кэше: скачанные книги, которые хранились только во внутреннем кэше самой программы, система Android удалит при удалении текущей версии — их потребуется скачать заново (файлы в общей памяти /sdcard/ останутся).";
+            return "• **Авторизация, полки и закладки:** версия " + targetTag + " автоматически подхватит резервную копию из /sdcard/Books/YandexBooks/backup/ при первом запуске (после выдачи доступа к памяти).\n" +
+                    "• **Внимание про книги в кэше:** скачанные книги, которые хранились только во внутреннем кэше самой программы, система Android удалит при удалении текущей версии — их потребуется скачать заново (файлы в общей памяти /sdcard/ останутся).";
         }
-        return "• ⚠️ Важно для версии " + targetTag + ": стабильная версия 1.6.0 и более ранние сборки НЕ умеют автоматически подтягивать авторизацию и настройки из резервной копии. После её установки потребуется заново войти в аккаунт Яндекса (затем полки и облачный прогресс загрузятся с сервера).\n" +
-                "• ⚠️ Внимание про книги в кэше: скачанные книги, которые хранились во внутреннем кэше самой программы, при удалении текущей версии будут удалены системой Android — их нужно будет скачать повторно (резервная копия базы и файлы в общей памяти /sdcard/ сохранятся).";
+        return "• **Важно для версии " + targetTag + ":** стабильная версия 1.6.0 и более ранние сборки НЕ умеют автоматически подтягивать авторизацию и настройки из резервной копии. После её установки потребуется заново войти в аккаунт Яндекса (затем полки и облачный прогресс загрузятся с сервера).\n" +
+                "• **Внимание про книги в кэше:** скачанные книги, которые хранились во внутреннем кэше самой программы, при удалении текущей версии будут удалены системой Android — их нужно будет скачать повторно (резервная копия базы и файлы в общей памяти /sdcard/ сохранятся).";
     }
 
     /**
