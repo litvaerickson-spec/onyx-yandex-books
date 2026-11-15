@@ -329,10 +329,10 @@ def _run_tests(args):
     if "yandex-books-lite-v1.6.1-beta.apk" not in dl_files:
         raise AssertionError("Downloaded APK yandex-books-lite-v1.6.1-beta.apk not found in /sdcard/Download!")
     bk_content = shell("cat /sdcard/Books/YandexBooks/backup/*.json", check=False)
-    for setting_key in ("dither_covers_enabled", "edge_brightness_swipe", "audio_sync_enabled"):
+    for setting_key in ("dither_covers_enabled", "edge_brightness_swipe", "audio_sync_enabled", "use_epub_fonts"):
         if setting_key not in bk_content:
-            raise AssertionError(f"v1.6.7-beta setting '{setting_key}' missing from live Android backup!")
-    print("[check] Live Android backup includes v1.6.7-beta settings (dither/edge_brightness/audio_sync): OK")
+            raise AssertionError(f"v1.7.0-beta setting '{setting_key}' missing from live Android backup!")
+    print("[check] Live Android backup includes v1.7.0-beta settings (dither/edge_brightness/audio_sync/use_epub_fonts): OK")
 
     # Verify DownloadProvider DB directly on real Android OS!
     dm_query = shell("content query --uri content://downloads/my_downloads", check=False)

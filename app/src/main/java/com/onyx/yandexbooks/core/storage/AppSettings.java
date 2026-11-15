@@ -130,6 +130,7 @@ public class AppSettings {
     public static final String KEY_DITHER_COVERS = "dither_covers_enabled";
     public static final String KEY_EDGE_BRIGHTNESS_SWIPE = "edge_brightness_swipe";
     public static final String KEY_AUDIO_SYNC_ENABLED = "audio_sync_enabled";
+    public static final String KEY_USE_EPUB_FONTS = "use_epub_fonts";
 
     public int getFontSizeSp() { return prefs.getInt(KEY_FONT_SIZE, 18); }
     public void setFontSizeSp(int size) { prefs.edit().putInt(KEY_FONT_SIZE, size).apply(); }
@@ -166,6 +167,9 @@ public class AppSettings {
 
     public boolean isAudioSyncEnabled() { return prefs.getBoolean(KEY_AUDIO_SYNC_ENABLED, true); }
     public void setAudioSyncEnabled(boolean enabled) { prefs.edit().putBoolean(KEY_AUDIO_SYNC_ENABLED, enabled).apply(); }
+
+    public boolean isUseEpubFonts() { return prefs.getBoolean(KEY_USE_EPUB_FONTS, false); }
+    public void setUseEpubFonts(boolean enabled) { prefs.edit().putBoolean(KEY_USE_EPUB_FONTS, enabled).apply(); }
 
     public int getEdgeFrontlightCold() { return clampBrightness(prefs.getInt("edge_frontlight_cold", 50)); }
     public void setEdgeFrontlightCold(int level) { prefs.edit().putInt("edge_frontlight_cold", clampBrightness(level)).apply(); }

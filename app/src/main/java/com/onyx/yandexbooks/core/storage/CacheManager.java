@@ -121,6 +121,174 @@ public class CacheManager {
         return new File(bDir, "footnotes.json");
     }
 
+    public File getEpubFontsDir(String bookUuid) {
+        File bDir = new File(booksDir, bookUuid);
+        if (!bDir.exists()) {
+            bDir.mkdirs();
+        }
+        return new File(bDir, "epub_fonts");
+    }
+
+    private File getBookFile(String bookUuid, String fileName) {
+        File bDir = new File(booksDir, bookUuid);
+        if (!bDir.exists()) {
+            bDir.mkdirs();
+        }
+        return new File(bDir, fileName);
+    }
+
+    private void writeTextFile(File file, String text) {
+        if (file == null || text == null) return;
+        FileOutputStream fos = null;
+        OutputStreamWriter writer = null;
+        try {
+            fos = new FileOutputStream(file);
+            writer = new OutputStreamWriter(fos, "UTF-8");
+            writer.write(text);
+        } catch (Exception e) {
+            Log.e(TAG, "Error writing file " + file.getName(), e);
+        } finally {
+            if (writer != null) {
+                try { writer.close(); } catch (Throwable ignored) {}
+            }
+            if (fos != null) {
+                try { fos.close(); } catch (Throwable ignored) {}
+            }
+        }
+    }
+
+    private String readTextFile(File file) {
+        if (file == null || !file.exists() || file.length() == 0) return null;
+        FileInputStream fis = null;
+        BufferedReader reader = null;
+        try {
+            fis = new FileInputStream(file);
+            reader = new BufferedReader(new InputStreamReader(fis, "UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (reader != null) {
+                try { reader.close(); } catch (Throwable ignored) {}
+            }
+            if (fis != null) {
+                try { fis.close(); } catch (Throwable ignored) {}
+            }
+        }
+    }
+
+    public boolean isFormattedCacheCurrent(String bookUuid) {
+        if (bookUuid == null) return true;
+        File flag = getBookFile(bookUuid, "format_v170.flag");
+        return flag.exists() && flag.length() > 0;
+    }
+
+    public void markFormattedCacheCurrent(String bookUuid) {
+        if (bookUuid == null) return;
+        writeTextFile(getBookFile(bookUuid, "format_v170.flag"), "v1.7.0");
+    }
+
+    public void saveBookEpubFonts(String bookUuid, Map<String, String> fonts) {
+        if (bookUuid == null || fonts == null) return;
+        try {
+            JSONObject obj = new JSONObject();
+            for (Map.Entry<String, String> e : fonts.entrySet()) {
+                if (e.getKey() != null && e.getValue() != null) {
+                    obj.put(e.getKey(), e.getValue());
+                }
+            }
+            writeTextFile(getBookFile(bookUuid, "epub_fonts.json"), obj.toString());
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving epub fonts map", e);
+        }
+    }
+
+    public Map<String, String> loadBookEpubFonts(String bookUuid) {
+        Map<String, String> map = new HashMap<>();
+        if (bookUuid == null) return map;
+        File metaFile = getBookFile(bookUuid, "epub_fonts.json");
+        String raw = readTextFile(metaFile);
+        if ((raw == null || raw.isEmpty())) {
+            File epub = getEpubFile(bookUuid);
+            if (epub != null && epub.exists() && epub.length() > 0) {
+                java.util.zip.ZipFile zip = null;
+                try {
+                    zip = new java.util.zip.ZipFile(epub);
+                    map = com.onyx.yandexbooks.core.epub.EpubFormatting.extractEpubFonts(zip, getEpubFontsDir(bookUuid));
+                    saveBookEpubFonts(bookUuid, map);
+                } catch (Throwable ignored) {
+                } finally {
+                    if (zip != null) {
+                        try { zip.close(); } catch (Throwable ignored) {}
+                    }
+                }
+            }
+            return map;
+        }
+        try {
+            JSONObject obj = new JSONObject(raw);
+            Iterator<String> keys = obj.keys();
+            while (keys.hasNext()) {
+                String k = keys.next();
+                String v = obj.optString(k, "");
+                if (!k.isEmpty() && !v.isEmpty() && new File(v).exists()) {
+                    map.put(k, v);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error loading epub fonts map", e);
+        }
+        return map;
+    }
+
+    public void savePageCountsCache(String bookUuid, String sig, int[] counts) {
+        if (bookUuid == null || sig == null || counts == null) return;
+        try {
+            JSONObject obj = new JSONObject();
+            obj.put("sig", sig);
+            JSONArray arr = new JSONArray();
+            for (int c : counts) {
+                arr.put(c);
+            }
+            obj.put("counts", arr);
+            writeTextFile(getBookFile(bookUuid, "page_counts.json"), obj.toString());
+        } catch (Exception ignored) {}
+    }
+
+    public int[] loadPageCountsCache(String bookUuid, String expectedSig, int expectedLen) {
+        if (bookUuid == null || expectedSig == null || expectedLen <= 0) return null;
+        String raw = readTextFile(getBookFile(bookUuid, "page_counts.json"));
+        if (raw == null || raw.isEmpty()) return null;
+        try {
+            JSONObject obj = new JSONObject(raw);
+            if (!expectedSig.equals(obj.optString("sig", ""))) return null;
+            JSONArray arr = obj.optJSONArray("counts");
+            if (arr == null || arr.length() != expectedLen) return null;
+            int[] out = new int[expectedLen];
+            for (int i = 0; i < expectedLen; i++) {
+                int c = arr.optInt(i, 0);
+                if (c <= 0) return null;
+                out[i] = c;
+            }
+            return out;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    public void invalidatePageCountsCache(String bookUuid) {
+        if (bookUuid == null) return;
+        File f = getBookFile(bookUuid, "page_counts.json");
+        if (f.exists()) {
+            f.delete();
+        }
+    }
+
     public void saveFootnotes(String bookUuid, Map<String, String> footnotes) {
         if (bookUuid == null || footnotes == null) return;
         FileOutputStream fos = null;
@@ -450,7 +618,10 @@ public class CacheManager {
                 chIndex = Integer.parseInt(cleanId);
             } catch (Exception ignored) {}
 
-            EpubParser.ParseResult parsed = EpubParser.parseEpubFull(epub);
+            EpubParser.ParseResult parsed = EpubParser.parseEpubFull(epub, getEpubFontsDir(bookUuid));
+            if (parsed != null && parsed.epubFonts != null && !parsed.epubFonts.isEmpty()) {
+                saveBookEpubFonts(bookUuid, parsed.epubFonts);
+            }
             if (parsed == null || parsed.chapters == null || parsed.chapters.isEmpty()) return null;
 
             EpubParser.ChapterData targetCd = null;
@@ -515,13 +686,15 @@ public class CacheManager {
         }
 
         try {
-            EpubParser.ParseResult parsed = EpubParser.parseEpubFull(epubFile);
+            EpubParser.ParseResult parsed = EpubParser.parseEpubFull(epubFile, getEpubFontsDir(bookUuid));
             if (parsed == null || parsed.chapters.isEmpty()) {
                 return YandexBooksApiClient.DownloadResult.error("Не удалось извлечь главы из книги");
             }
 
             saveTocTree(bookUuid, parsed.tocTree);
             saveFootnotes(bookUuid, parsed.footnotes);
+            saveBookEpubFonts(bookUuid, parsed.epubFonts);
+            invalidatePageCountsCache(bookUuid);
 
             List<Chapter> chapters = new ArrayList<>();
             for (int i = 0; i < parsed.chapters.size(); i++) {
@@ -537,6 +710,7 @@ public class CacheManager {
                 chapters.add(ch);
             }
 
+            markFormattedCacheCurrent(bookUuid);
             dbHelper.saveChapters(bookUuid, chapters);
             dbHelper.updateBookDownloaded(bookUuid, true);
             exportToPublicBooksDir(epubFile, bookTitle);
@@ -562,13 +736,15 @@ public class CacheManager {
                     @Override
                     protected List<Chapter> doInBackground(Void... voids) {
                         try {
-                            EpubParser.ParseResult parsed = EpubParser.parseEpubFull(downloadedFile);
+                            EpubParser.ParseResult parsed = EpubParser.parseEpubFull(downloadedFile, getEpubFontsDir(bookUuid));
                             if (parsed == null || parsed.chapters.isEmpty()) {
                                 return null;
                             }
 
                             saveTocTree(bookUuid, parsed.tocTree);
                             saveFootnotes(bookUuid, parsed.footnotes);
+                            saveBookEpubFonts(bookUuid, parsed.epubFonts);
+                            invalidatePageCountsCache(bookUuid);
 
                             List<Chapter> chapters = new ArrayList<>();
                             for (int i = 0; i < parsed.chapters.size(); i++) {
@@ -584,6 +760,7 @@ public class CacheManager {
                                 chapters.add(ch);
                             }
 
+                            markFormattedCacheCurrent(bookUuid);
                             dbHelper.saveChapters(bookUuid, chapters);
                             dbHelper.updateBookDownloaded(bookUuid, true);
 
@@ -629,8 +806,8 @@ public class CacheManager {
         final File epub = getEpubFile(bookUuid);
         List<Chapter> chapters = dbHelper.getChapters(bookUuid);
 
-        // Если EPUB файл уже на устройстве, но список глав пуст или подозрительно мал (1 глава, миграция якорного оглавления TOC):
-        if (epub.exists() && epub.length() > 0 && (chapters == null || chapters.size() <= 1)) {
+        // Если EPUB файл уже на устройстве, но список глав неполный или кэш от старой версии без форматирования v1.7.0:
+        if (epub.exists() && epub.length() > 0 && ((chapters == null || chapters.size() <= 1) || !isFormattedCacheCurrent(bookUuid))) {
             reparseAndSaveBook(bookUuid, bookTitle, callback);
             return;
         }
@@ -672,11 +849,13 @@ public class CacheManager {
                 @Override
                 protected List<Chapter> doInBackground(Void... voids) {
                     try {
-                        EpubParser.ParseResult parsed = EpubParser.parseEpubFull(epub);
+                        EpubParser.ParseResult parsed = EpubParser.parseEpubFull(epub, getEpubFontsDir(bookUuid));
                         if (parsed == null || parsed.chapters.isEmpty()) return null;
 
                         saveTocTree(bookUuid, parsed.tocTree);
                         saveFootnotes(bookUuid, parsed.footnotes);
+                        saveBookEpubFonts(bookUuid, parsed.epubFonts);
+                        invalidatePageCountsCache(bookUuid);
 
                         List<Chapter> newChapters = new ArrayList<>();
                         for (int i = 0; i < parsed.chapters.size(); i++) {
@@ -690,6 +869,7 @@ public class CacheManager {
                             ch.setTitle(cd.title);
                             newChapters.add(ch);
                         }
+                        markFormattedCacheCurrent(bookUuid);
                         dbHelper.saveChapters(bookUuid, newChapters);
                         dbHelper.updateBookDownloaded(bookUuid, true);
                         return newChapters;

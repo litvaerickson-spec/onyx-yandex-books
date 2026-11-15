@@ -97,14 +97,19 @@ public class EpubParser {
         public List<TocNode> tocTree = new ArrayList<>();
         public String coverImagePath = null;
         public Map<String, String> footnotes = new HashMap<>();
+        public Map<String, String> epubFonts = new HashMap<>();
     }
 
     public static List<ChapterData> parseEpub(File epubFile) {
-        ParseResult result = parseEpubFull(epubFile);
+        ParseResult result = parseEpubFull(epubFile, null);
         return result.chapters;
     }
 
     public static ParseResult parseEpubFull(File epubFile) {
+        return parseEpubFull(epubFile, null);
+    }
+
+    public static ParseResult parseEpubFull(File epubFile, File destFontsDir) {
         ParseResult result = new ParseResult();
         if (epubFile == null || !epubFile.exists() || epubFile.length() == 0) {
             Log.e(TAG, "EPUB file does not exist or is empty");
@@ -171,8 +176,9 @@ public class EpubParser {
             Map<String, String> tocFileTitleMap = new HashMap<>();
             populateTocTitles(tocTree, tocFileTitleMap);
 
-            // 4. Загрузка глав непосредственно из spine
+            // 4. Загрузка глав непосредственно из spine с сохранением HTML/CSS разметки и ссылок
             Map<Integer, String> rawHtmlCache = new HashMap<>();
+            Map<String, String> cssFileCache = new HashMap<>();
             List<ChapterData> chapters = new ArrayList<>();
 
             if (chapterHrefs.size() == 1) {
@@ -191,13 +197,14 @@ public class EpubParser {
                     if (rawHtml == null) rawHtml = "";
                     rawHtmlCache.put(s, rawHtml);
 
-                    String cleanText = cleanHtmlText(rawHtml, href);
+                    EpubFormatting.CssSheet cssSheet = EpubFormatting.buildCssSheet(zip, rawHtml, href, cssFileCache);
+                    String richText = EpubFormatting.extractRichHtmlText(rawHtml, href, cssSheet);
 
                     ChapterData cd = new ChapterData();
                     cd.id = "ch_" + chIndex;
                     cd.fileHref = href;
                     cd.spineIndex = s;
-                    cd.textContent = cleanText;
+                    cd.textContent = richText;
 
                     // Название главы (приоритет полного пути href над коротким именем файла для многотомников)
                     String normHref = resolveZipPath("", href);
@@ -240,6 +247,11 @@ public class EpubParser {
 
             // 5. Извлечение интерактивных сносок для всплывающего просмотра без потери страницы
             extractFootnotes(zip, chapters, chapterHrefs, rawHtmlCache, result.footnotes);
+
+            // 5.1 Извлечение встроенных в EPUB шрифтов (опционально включаются в настройках)
+            if (destFontsDir != null) {
+                result.epubFonts = EpubFormatting.extractEpubFonts(zip, destFontsDir);
+            }
 
             // 6. Если оглавление TOC было пустым, генерируем базовое оглавление из глав
             if (tocTree.isEmpty()) {
@@ -380,7 +392,7 @@ public class EpubParser {
                 if (rawHtml != null) {
                     int anchorTagStart = findAnchorOffset(rawHtml, node.anchor);
                     if (anchorTagStart > 0 && anchorTagStart < rawHtml.length()) {
-                        String leadingText = cleanHtmlText(rawHtml.substring(0, anchorTagStart));
+                        String leadingText = EpubFormatting.extractRichHtmlText(rawHtml.substring(0, anchorTagStart), node.fileHref, null);
                         node.charOffset = leadingText.length();
                     } else {
                         node.charOffset = 0;
@@ -456,8 +468,9 @@ public class EpubParser {
         }
 
         if (headings.size() >= 2) {
+            EpubFormatting.CssSheet cssSheet = EpubFormatting.buildCssSheet(zip, rawHtml, href, null);
             if (headings.get(0).start > 100) {
-                String front = cleanHtmlText(rawHtml.substring(0, headings.get(0).start));
+                String front = EpubFormatting.extractRichHtmlText(rawHtml.substring(0, headings.get(0).start), href, cssSheet);
                 if (front.length() > 30) {
                     ChapterData cd0 = new ChapterData();
                     cd0.id = "ch_0";
@@ -472,13 +485,13 @@ public class EpubParser {
                 int from = headings.get(i).start;
                 int to = (i + 1 < headings.size()) ? headings.get(i + 1).start : rawHtml.length();
                 String chHtml = rawHtml.substring(from, to);
-                String clean = cleanHtmlText(chHtml);
-                if (clean.length() > 10) {
+                String formatted = EpubFormatting.extractRichHtmlText(chHtml, href, cssSheet);
+                if (formatted.length() > 10) {
                     ChapterData cd = new ChapterData();
                     cd.id = "ch_" + (list.size() + 1);
                     cd.fileHref = href;
                     cd.title = TocNode.normalizeTitle(headings.get(i).title);
-                    cd.textContent = clean;
+                    cd.textContent = formatted;
                     list.add(cd);
                 }
             }
@@ -968,7 +981,7 @@ public class EpubParser {
         return null;
     }
 
-    private static String extractTitle(String html, String defaultTitle) {
+    static String extractTitle(String html, String defaultTitle) {
         if (html == null || html.isEmpty()) return defaultTitle;
         try {
             Pattern p1 = Pattern.compile("<h1[^>]*>(.*?)</h1>", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
@@ -1348,6 +1361,26 @@ public class EpubParser {
         }
     }
 
+    static String extractElementOrSectionById(String html, String targetId, String targetHref) {
+        String exact = extractElementTextById(html, targetId, targetHref, "");
+        if (exact != null && exact.length() >= 8) {
+            return exact;
+        }
+        int anchorPos = findAnchorOffset(html, targetId);
+        if (anchorPos >= 0 && anchorPos < html.length()) {
+            int end = Math.min(html.length(), anchorPos + 3500);
+            String slice = html.substring(anchorPos, end);
+            String clean = EpubFormatting.stripFormattingTokens(EpubFormatting.extractRichHtmlText(slice, targetHref, null))
+                    .replaceAll("\\[IMG:[^\\]]+\\]", "")
+                    .trim();
+            if (clean.length() > 1200) {
+                clean = clean.substring(0, 1197).trim() + "…";
+            }
+            if (!clean.isEmpty()) return clean;
+        }
+        return exact;
+    }
+
     private static String extractElementTextById(String html, String targetId, String targetHref, String bareMarker) {
         if (html == null || targetId == null || targetId.isEmpty()) return null;
         try {
@@ -1385,15 +1418,17 @@ public class EpubParser {
             String clean = cleanHtmlText(rawInner, targetHref).replaceAll("\\s+", " ").trim();
             if (clean.isEmpty()) return null;
 
-            String bracketPrefix = "[" + bareMarker + "]";
-            if (clean.startsWith(bracketPrefix)) {
-                clean = clean.substring(bracketPrefix.length()).trim();
-            } else if (clean.startsWith(bareMarker + ".")) {
-                clean = clean.substring(bareMarker.length() + 1).trim();
-            } else if (clean.startsWith(bareMarker + ")")) {
-                clean = clean.substring(bareMarker.length() + 1).trim();
-            } else if (clean.startsWith(bareMarker + " ")) {
-                clean = clean.substring(bareMarker.length() + 1).trim();
+            if (bareMarker != null && !bareMarker.isEmpty()) {
+                String bracketPrefix = "[" + bareMarker + "]";
+                if (clean.startsWith(bracketPrefix)) {
+                    clean = clean.substring(bracketPrefix.length()).trim();
+                } else if (clean.startsWith(bareMarker + ".")) {
+                    clean = clean.substring(bareMarker.length() + 1).trim();
+                } else if (clean.startsWith(bareMarker + ")")) {
+                    clean = clean.substring(bareMarker.length() + 1).trim();
+                } else if (clean.startsWith(bareMarker + " ")) {
+                    clean = clean.substring(bareMarker.length() + 1).trim();
+                }
             }
             if (clean.startsWith("^") || clean.startsWith("↑") || clean.startsWith("←")) {
                 clean = clean.substring(1).trim();

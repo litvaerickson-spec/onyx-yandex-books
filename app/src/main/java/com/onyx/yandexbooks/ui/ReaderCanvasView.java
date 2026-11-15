@@ -66,6 +66,10 @@ public class ReaderCanvasView extends View {
         void onFootnoteTap(String marker, String noteText);
     }
 
+    public interface OnLinkTapListener {
+        void onLinkTap(String target, String label);
+    }
+
     public interface OnEdgeBrightnessGestureListener {
         void onEdgeBrightnessChanged(boolean isWarmEdge, int newPercent);
     }
@@ -82,13 +86,35 @@ public class ReaderCanvasView extends View {
         }
     }
 
+    private static class LinkHitbox {
+        final RectF bounds;
+        final String target;
+        final String label;
+
+        LinkHitbox(RectF bounds, String target, String label) {
+            this.bounds = bounds;
+            this.target = target;
+            this.label = label;
+        }
+    }
+
     private ImageLoader imageLoader;
     private OnCanvasSizeChangeListener sizeChangeListener;
     private OnFootnoteTapListener footnoteTapListener;
+    private OnLinkTapListener linkTapListener;
     private OnEdgeBrightnessGestureListener edgeBrightnessListener;
 
     private Map<String, String> footnotesMap;
     private final List<FootnoteHitbox> footnoteHitboxes = new ArrayList<>();
+    private final List<LinkHitbox> linkHitboxes = new ArrayList<>();
+    private final Paint runPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint decorPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private Typeface baseBookTypeface;
+    private Typeface epubRegularTf;
+    private Typeface epubBoldTf;
+    private Typeface epubItalicTf;
+    private Typeface epubBoldItalicTf;
+    private String epubFontsSignature = "";
     private static final Pattern FOOTNOTE_MARKER_PATTERN = Pattern.compile("\\[(\\d{1,4}|\\*{1,3})\\]");
 
     // Координаты и время для распознавания жестов свайпа, сносок и боковых свайпов подсветки
@@ -188,7 +214,12 @@ public class ReaderCanvasView extends View {
         textPaint.setDither(false);
         textPaint.setFakeBoldText(config.isBoldText());
 
-        Typeface baseTf = FontHelper.getTypeface(getContext(), config.getFontFamily());
+        Typeface baseTf = null;
+        if (config.isUseEpubFonts() && epubRegularTf != null) {
+            baseTf = epubRegularTf;
+        } else {
+            baseTf = FontHelper.getTypeface(getContext(), config.getFontFamily());
+        }
         textPaint.setTypeface(baseTf);
 
         if ("high".equalsIgnoreCase(config.getContrastMode())) {
@@ -205,7 +236,7 @@ public class ReaderCanvasView extends View {
         headerPaint.setColor(textColor);
         footerPaint.setColor(textColor);
 
-        if (config.getCustomFontPath() != null) {
+        if (!config.isUseEpubFonts() && config.getCustomFontPath() != null) {
             File fontFile = new File(config.getCustomFontPath());
             if (fontFile.exists()) {
                 try {
@@ -214,6 +245,7 @@ public class ReaderCanvasView extends View {
                 } catch (Exception ignored) {}
             }
         }
+        baseBookTypeface = textPaint.getTypeface();
         invalidate();
     }
 
@@ -236,6 +268,38 @@ public class ReaderCanvasView extends View {
 
     public void setOnFootnoteTapListener(OnFootnoteTapListener listener) {
         this.footnoteTapListener = listener;
+    }
+
+    public void setOnLinkTapListener(OnLinkTapListener listener) {
+        this.linkTapListener = listener;
+    }
+
+    public void setEpubFontPaths(Map<String, String> fontPaths) {
+        String sig = fontPaths != null ? fontPaths.toString() : "";
+        if (sig.equals(epubFontsSignature)) {
+            return;
+        }
+        epubFontsSignature = sig;
+        epubRegularTf = loadTypefaceFromPath(fontPaths != null ? fontPaths.get("regular") : null);
+        epubBoldTf = loadTypefaceFromPath(fontPaths != null ? fontPaths.get("bold") : null);
+        epubItalicTf = loadTypefaceFromPath(fontPaths != null ? fontPaths.get("italic") : null);
+        epubBoldItalicTf = loadTypefaceFromPath(fontPaths != null ? fontPaths.get("bold_italic") : null);
+        if (epubRegularTf == null && epubItalicTf != null) epubRegularTf = epubItalicTf;
+        if (epubRegularTf == null && epubBoldTf != null) epubRegularTf = epubBoldTf;
+        if (config != null) {
+            setTypographyConfig(config);
+        }
+    }
+
+    private Typeface loadTypefaceFromPath(String path) {
+        if (path == null || path.isEmpty()) return null;
+        try {
+            File f = new File(path);
+            if (f.exists() && f.length() > 0) {
+                return Typeface.createFromFile(f);
+            }
+        } catch (Throwable ignored) {}
+        return null;
     }
 
     public void setOnEdgeBrightnessGestureListener(OnEdgeBrightnessGestureListener listener) {
@@ -306,6 +370,9 @@ public class ReaderCanvasView extends View {
         // Фон для E-Ink Carta (Чистый белый или глубокий черный для ночи)
         canvas.drawColor(bgColor);
         footnoteHitboxes.clear();
+        linkHitboxes.clear();
+        decorPaint.setColor(textColor);
+        decorPaint.setStyle(Paint.Style.STROKE);
         textPaint.setColor(textColor);
         headerPaint.setColor(textColor);
         footerPaint.setColor(textColor);
@@ -407,51 +474,121 @@ public class ReaderCanvasView extends View {
                     footerTopLimitY
             );
 
-            // Отрисовка строк текущей страницы (строки уже гарантированно рассчитаны TextPaginator)
+            // Отрисовка строк текущей страницы (поддержка гибридного форматирования v1.7.0)
+            boolean isFirstRenderedLine = true;
             for (TextPaginator.Line line : currentPage.lines) {
-                if (currentY + fm.bottom > screenLimitY + 4) {
+                float scaledLineHeight = lineHeight * line.fontScale;
+                if (!isFirstRenderedLine && line.extraTopPx > 0f) {
+                    currentY += line.extraTopPx;
+                }
+                if (currentY + (fm.bottom * line.fontScale) > screenLimitY + 4f) {
                     break; // Предотвращаем выход за пределы отведенной области
                 }
 
                 if (line.text.isEmpty()) {
-                    currentY += lineHeight * 0.6f; // Компактный отступ между авторскими смысловыми секциями
+                    currentY += scaledLineHeight;
+                    isFirstRenderedLine = false;
                     continue;
                 }
 
-                String drawText = line.text;
-                if (drawText.indexOf('\uFFFC') >= 0 || drawText.indexOf('\uFFFD') >= 0) {
-                    drawText = drawText.replace("\uFFFC", "").replace("\uFFFD", "");
-                }
+                float contentStartX = startX + line.leftInsetPx;
+                float contentAvailWidth = Math.max(40f, maxAllowedX - contentStartX);
+                float totalRunsWidth = measureRunsWidth(line.runs, line.fontScale);
 
-                float lineX = startX + (line.isParagraphStart ? config.getParagraphIndentPx() : 0);
-
-                if (config.isJustifyEnabled() && line.wordSpacing > 0 && !line.isLastLineOfParagraph) {
-                    // Отрисовка с выравниванием по ширине (Justify)
-                    String[] words = drawText.split(" ");
-                    float wordX = lineX;
-                    int drawY = Math.round(currentY);
-                    for (int i = 0; i < words.length; i++) {
-                        int drawX = Math.round(wordX);
-                        canvas.drawText(words[i], drawX, drawY, textPaint);
-                        collectWordFootnoteHitboxes(canvas, words[i], wordX, drawY, textPaint, fm);
-                        wordX += textPaint.measureText(words[i]) + textPaint.measureText(" ") + line.wordSpacing;
-                        if (wordX > maxAllowedX + 4f) {
-                            break;
-                        }
-                    }
+                float lineX;
+                if (line.alignment == TextPaginator.ALIGN_CENTER) {
+                    lineX = contentStartX + Math.max(0f, (contentAvailWidth - totalRunsWidth) / 2f);
+                } else if (line.alignment == TextPaginator.ALIGN_RIGHT) {
+                    lineX = Math.max(contentStartX, maxAllowedX - totalRunsWidth);
                 } else {
-                    // Стандартная отрисовка влево с соблюдением правого поля
-                    int drawX = Math.round(lineX);
-                    int drawY = Math.round(currentY);
-                    canvas.drawText(drawText, drawX, drawY, textPaint);
-                    collectWordFootnoteHitboxes(canvas, drawText, lineX, drawY, textPaint, fm);
+                    lineX = contentStartX + line.indentPx;
                 }
 
-                currentY += lineHeight;
+                int drawY = Math.round(currentY);
+                if (line.drawQuoteBar) {
+                    decorPaint.setStrokeWidth(Math.max(2f, dpToPx(2f)));
+                    float barX = startX + Math.max(4f, line.leftInsetPx * 0.42f);
+                    float barTop = currentY + (fm.top * line.fontScale) * 0.85f;
+                    float barBottom = currentY + (fm.bottom * line.fontScale) * 0.90f;
+                    canvas.drawLine(barX, barTop, barX, barBottom, decorPaint);
+                }
+
+                boolean isJustified = (line.alignment == TextPaginator.ALIGN_JUSTIFY)
+                        && line.wordSpacing > 0f
+                        && !line.isLastLineOfParagraph;
+
+                float curX = lineX;
+                for (int rIdx = 0; rIdx < line.runs.size(); rIdx++) {
+                    TextPaginator.LineRun run = line.runs.get(rIdx);
+                    String runText = run.text;
+                    if (runText.indexOf('\uFFFC') >= 0 || runText.indexOf('\uFFFD') >= 0) {
+                        runText = runText.replace("\uFFFC", "").replace("\uFFFD", "");
+                    }
+                    if (runText.isEmpty()) continue;
+
+                    configureRunPaint(run.style, line.fontScale, textColor);
+                    Paint.FontMetrics rfm = runPaint.getFontMetrics();
+                    float segStartX = curX;
+
+                    if (isJustified && runText.indexOf(' ') >= 0) {
+                        int segPos = 0;
+                        int rLen = runText.length();
+                        while (segPos < rLen) {
+                            int spIdx = runText.indexOf(' ', segPos);
+                            if (spIdx < 0) {
+                                String part = runText.substring(segPos);
+                                canvas.drawText(part, Math.round(curX), drawY, runPaint);
+                                collectWordFootnoteHitboxes(canvas, part, curX, drawY, runPaint, rfm);
+                                curX += runPaint.measureText(part);
+                                break;
+                            } else {
+                                if (spIdx > segPos) {
+                                    String part = runText.substring(segPos, spIdx);
+                                    canvas.drawText(part, Math.round(curX), drawY, runPaint);
+                                    collectWordFootnoteHitboxes(canvas, part, curX, drawY, runPaint, rfm);
+                                    curX += runPaint.measureText(part);
+                                }
+                                curX += runPaint.measureText(" ") + line.wordSpacing;
+                                segPos = spIdx + 1;
+                            }
+                        }
+                    } else {
+                        canvas.drawText(runText, Math.round(curX), drawY, runPaint);
+                        collectWordFootnoteHitboxes(canvas, runText, curX, drawY, runPaint, rfm);
+                        curX += runPaint.measureText(runText);
+                    }
+
+                    float segEndX = curX;
+                    if ((run.style & TextPaginator.STYLE_UNDERLINE) != 0 || run.linkTarget != null) {
+                        float uY = drawY + Math.max(1.5f, rfm.descent * 0.45f);
+                        decorPaint.setStrokeWidth(Math.max(1f, dpToPx(1f)));
+                        canvas.drawLine(segStartX, uY, segEndX, uY, decorPaint);
+                    }
+                    if ((run.style & TextPaginator.STYLE_STRIKE) != 0) {
+                        float sY = drawY + (rfm.ascent * 0.35f);
+                        decorPaint.setStrokeWidth(Math.max(1f, dpToPx(1f)));
+                        canvas.drawLine(segStartX, sY, segEndX, sY, decorPaint);
+                    }
+                    if (run.linkTarget != null && !run.linkTarget.trim().isEmpty()) {
+                        float pad = dpToPx(4f);
+                        linkHitboxes.add(new LinkHitbox(
+                                new RectF(segStartX - pad * 0.5f, drawY + rfm.top - pad, segEndX + pad * 0.5f, drawY + rfm.bottom + pad),
+                                run.linkTarget,
+                                run.linkLabel != null ? run.linkLabel : runText
+                        ));
+                    }
+
+                    if (curX > maxAllowedX + 12f) {
+                        break;
+                    }
+                }
+
+                currentY += scaledLineHeight + line.extraBottomPx;
+                isFirstRenderedLine = false;
             }
         }
 
-        // 2. Нижний колонтитул: Слева — время и заряд батареи; Справа — страница главы, сквозная страница книги и процент
+        // 2. Нижний колонтитул: Слева — время и заряд батареи; Справа — только сквозная страница всей книги и процент
         Paint.FontMetrics ffm = footerPaint.getFontMetrics();
         int offsetDp = (config != null) ? config.getFooterBottomOffsetDp() : 16;
         float bottomSafePx = Math.max(dpToPx(offsetDp), config != null ? config.getPaddingBottomPx() : 0f);
@@ -463,23 +600,16 @@ public class ReaderCanvasView extends View {
             canvas.drawText(leftStatus, Math.round(config.getPaddingLeftPx()), drawFooterY, footerPaint);
         }
 
-        String pageInfo = "Гл. " + chapterPageIndex + "/" + chapterTotalPages
-                + " • Стр. " + globalPageIndex + " из " + totalBookPages
+        String pageInfo = "Стр. " + globalPageIndex + " из " + totalBookPages
                 + String.format(java.util.Locale.getDefault(), " (%.0f%%)", globalPercent);
         float pageInfoWidth = footerPaint.measureText(pageInfo);
         float leftWidth = (leftStatus != null ? footerPaint.measureText(leftStatus) : 0f);
         float availFooterW = getWidth() - config.getPaddingLeftPx() - config.getPaddingRightPx();
         if (leftWidth + pageInfoWidth + 16f > availFooterW) {
             // Компактный формат для крупных шрифтов или узких экранов
-            pageInfo = "Гл." + chapterPageIndex + "/" + chapterTotalPages
-                    + " • " + globalPageIndex + "/" + totalBookPages
+            pageInfo = globalPageIndex + "/" + totalBookPages
                     + String.format(java.util.Locale.getDefault(), " (%.0f%%)", globalPercent);
             pageInfoWidth = footerPaint.measureText(pageInfo);
-            if (leftWidth + pageInfoWidth + 12f > availFooterW) {
-                pageInfo = "Гл." + chapterPageIndex + "/" + chapterTotalPages
-                        + String.format(java.util.Locale.getDefault(), " (%.0f%%)", globalPercent);
-                pageInfoWidth = footerPaint.measureText(pageInfo);
-            }
         }
 
         // Страница и процент справа с привязкой к физической сетке пикселей
@@ -490,6 +620,86 @@ public class ReaderCanvasView extends View {
         if (brightnessHudText != null && !brightnessHudText.isEmpty()) {
             drawBrightnessHud(canvas, brightnessHudText, isNight);
         }
+    }
+
+    private void configureRunPaint(int style, float fontScale, int textColor) {
+        runPaint.set(textPaint);
+        runPaint.setColor(textColor);
+        runPaint.setTextSize(textPaint.getTextSize() * fontScale);
+
+        boolean bold = (style & TextPaginator.STYLE_BOLD) != 0;
+        boolean italic = (style & TextPaginator.STYLE_ITALIC) != 0;
+        boolean mono = (style & TextPaginator.STYLE_MONO) != 0;
+
+        if (mono) {
+            int tfStyle = (bold && italic) ? Typeface.BOLD_ITALIC
+                    : (bold ? Typeface.BOLD : (italic ? Typeface.ITALIC : Typeface.NORMAL));
+            runPaint.setTypeface(Typeface.create(Typeface.MONOSPACE, tfStyle));
+            return;
+        }
+
+        boolean useEpub = (config != null && config.isUseEpubFonts());
+        if (useEpub) {
+            if (bold && italic && epubBoldItalicTf != null) {
+                runPaint.setTypeface(epubBoldItalicTf);
+                return;
+            }
+            if (bold && epubBoldTf != null) {
+                runPaint.setTypeface(epubBoldTf);
+                return;
+            }
+            if (italic && epubItalicTf != null) {
+                runPaint.setTypeface(epubItalicTf);
+                return;
+            }
+            if (epubRegularTf != null) {
+                int tfStyle = (bold && italic) ? Typeface.BOLD_ITALIC
+                        : (bold ? Typeface.BOLD : (italic ? Typeface.ITALIC : Typeface.NORMAL));
+                Typeface derived = Typeface.create(epubRegularTf, tfStyle);
+                runPaint.setTypeface(derived);
+                if (bold && derived.getStyle() != Typeface.BOLD && derived.getStyle() != Typeface.BOLD_ITALIC) {
+                    runPaint.setFakeBoldText(true);
+                }
+                if (italic && !derived.isItalic()) {
+                    runPaint.setTextSkewX(-0.22f);
+                }
+                return;
+            }
+        }
+
+        if (baseBookTypeface != null) {
+            int wantStyle = baseBookTypeface.getStyle();
+            if (bold) wantStyle |= Typeface.BOLD;
+            if (italic) wantStyle |= Typeface.ITALIC;
+            if (wantStyle != baseBookTypeface.getStyle()) {
+                Typeface derived = Typeface.create(baseBookTypeface, wantStyle);
+                runPaint.setTypeface(derived);
+                if (bold && !derived.isBold()) {
+                    runPaint.setFakeBoldText(true);
+                }
+                if (italic && !derived.isItalic()) {
+                    runPaint.setTextSkewX(-0.22f);
+                }
+            } else {
+                runPaint.setTypeface(baseBookTypeface);
+            }
+        } else {
+            int tfStyle = (bold && italic) ? Typeface.BOLD_ITALIC
+                    : (bold ? Typeface.BOLD : (italic ? Typeface.ITALIC : Typeface.NORMAL));
+            runPaint.setTypeface(Typeface.defaultFromStyle(tfStyle));
+        }
+    }
+
+    private float measureRunsWidth(List<TextPaginator.LineRun> runs, float fontScale) {
+        if (runs == null || runs.isEmpty()) return 0f;
+        int color = textPaint.getColor();
+        float total = 0f;
+        for (int i = 0; i < runs.size(); i++) {
+            TextPaginator.LineRun r = runs.get(i);
+            configureRunPaint(r.style, fontScale, color);
+            total += runPaint.measureText(r.text);
+        }
+        return total;
     }
 
     private String resolveFootnoteText(String marker) {
@@ -644,14 +854,25 @@ public class ReaderCanvasView extends View {
                             interactionListener.onPageBackward();
                         }
                     } else if (duration < 700) {
-                        // 1.1 Проверка попадания в кликабельную сноску ДО зон перелистывания (не теряя страницу)
+                        // 1.1 Проверка попадания в кликабельную сноску или гиперссылку ДО зон перелистывания (не теряя страницу)
                         float tapSlop = dpToPx(16f);
-                        if (footnoteTapListener != null && Math.abs(deltaX) < tapSlop && Math.abs(deltaY) < tapSlop) {
-                            for (int i = 0; i < footnoteHitboxes.size(); i++) {
-                                FootnoteHitbox hb = footnoteHitboxes.get(i);
-                                if (hb.bounds.contains(upX, upY)) {
-                                    footnoteTapListener.onFootnoteTap(hb.marker, hb.noteText);
-                                    return true;
+                        if (Math.abs(deltaX) < tapSlop && Math.abs(deltaY) < tapSlop) {
+                            if (footnoteTapListener != null) {
+                                for (int i = 0; i < footnoteHitboxes.size(); i++) {
+                                    FootnoteHitbox hb = footnoteHitboxes.get(i);
+                                    if (hb.bounds.contains(upX, upY)) {
+                                        footnoteTapListener.onFootnoteTap(hb.marker, hb.noteText);
+                                        return true;
+                                    }
+                                }
+                            }
+                            if (linkTapListener != null) {
+                                for (int i = 0; i < linkHitboxes.size(); i++) {
+                                    LinkHitbox lhb = linkHitboxes.get(i);
+                                    if (lhb.bounds.contains(upX, upY)) {
+                                        linkTapListener.onLinkTap(lhb.target, lhb.label);
+                                        return true;
+                                    }
                                 }
                             }
                         }

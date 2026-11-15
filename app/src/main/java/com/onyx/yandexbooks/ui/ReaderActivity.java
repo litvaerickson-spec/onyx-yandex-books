@@ -1,10 +1,13 @@
 package com.onyx.yandexbooks.ui;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.DialogInterface;
+import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
+import android.net.Uri;
 import java.io.File;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -43,6 +46,7 @@ import com.onyx.yandexbooks.core.eink.EinkListView;
 import com.onyx.yandexbooks.core.eink.EinkScrollView;
 import com.onyx.yandexbooks.core.eink.EpdController;
 import com.onyx.yandexbooks.core.eink.HardwareKeyHandler;
+import com.onyx.yandexbooks.core.epub.EpubFormatting;
 import com.onyx.yandexbooks.core.epub.EpubParser;
 import com.onyx.yandexbooks.core.storage.CacheManager;
 import com.onyx.yandexbooks.core.storage.DatabaseHelper;
@@ -128,6 +132,7 @@ public class ReaderActivity extends Activity {
     private Button btnToggleHyphenation; // Переносы слов TeX
     private Button btnToggleEinkContrast; // Контраст E-Ink
     private Button btnToggleNightMode; // Цветовая тема (Светлая / Тёмная)
+    private Button btnToggleEpubFonts; // Шрифт книги из EPUB (v1.7.0)
 
     // Элементы подвкладки «Между строк»
     private Button btnToggleLineSpacing;
@@ -153,13 +158,17 @@ public class ReaderActivity extends Activity {
 
     // Сквозной подсчет страниц книги от общего объема
     private int[] chapterPageCounts;
+    private boolean[] chapterPageExact;
     private int totalBookPages = 1;
     private int globalPageIndex = 1;
     private double avgCharsPerPage = 750.0;
 
     // Фоновый исполнитель пагинации: полностью исключает блокировку UI-потока и ANR
     private final ExecutorService paginationExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService prepaginationExecutor = Executors.newSingleThreadExecutor();
     private final AtomicLong paginationTaskId = new AtomicLong(0);
+    private final AtomicLong prepaginationTaskId = new AtomicLong(0);
+    private String currentPrepagConfigSig = "";
     private volatile boolean isPaginating = false;
     private int lastPaginatedWidth = 0;
     private int lastPaginatedHeight = 0;
@@ -272,6 +281,7 @@ public class ReaderActivity extends Activity {
         btnToggleHyphenation = (Button) findViewById(R.id.btn_toggle_hyphenation);
         btnToggleEinkContrast = (Button) findViewById(R.id.btn_toggle_eink_contrast);
         btnToggleNightMode = (Button) findViewById(R.id.btn_toggle_night_mode);
+        btnToggleEpubFonts = (Button) findViewById(R.id.btn_toggle_epub_fonts);
 
         // Контролы подвкладки «Между строк»
         btnToggleLineSpacing = (Button) findViewById(R.id.btn_toggle_line_spacing);
@@ -297,6 +307,8 @@ public class ReaderActivity extends Activity {
         typographyConfig.setVerticalMarginMode(appSettings.getVerticalMarginMode());
         typographyConfig.setNightMode(appSettings.isNightMode());
         typographyConfig.setTapZoneMode(appSettings.getTapZoneMode());
+        typographyConfig.setUseEpubFonts(appSettings.isUseEpubFonts());
+        typographyConfig.setDensityScale(getResources().getDisplayMetrics().density);
         applyFooterOffsetToConfig();
 
         int marginPx = appSettings.getMarginPaddingPx();
@@ -314,6 +326,10 @@ public class ReaderActivity extends Activity {
         cacheManager = new CacheManager(this, apiClient);
         dbHelper = DatabaseHelper.getInstance(this);
         syncManager = new SyncManager(this, apiClient);
+
+        if (readerCanvas != null && bookUuid != null) {
+            readerCanvas.setEpubFontPaths(cacheManager.loadBookEpubFonts(bookUuid));
+        }
 
         if (readerCanvas != null) {
             readerCanvas.setImageLoader(new ReaderCanvasView.ImageLoader() {
@@ -409,6 +425,13 @@ public class ReaderActivity extends Activity {
             @Override
             public void onFootnoteTap(String marker, String noteText) {
                 EinkNotice.show(ReaderActivity.this, "Сноска " + marker, noteText);
+            }
+        });
+
+        readerCanvas.setOnLinkTapListener(new ReaderCanvasView.OnLinkTapListener() {
+            @Override
+            public void onLinkTap(final String target, final String label) {
+                handleCanvasLinkTap(target, label);
             }
         });
 
@@ -857,6 +880,30 @@ public class ReaderActivity extends Activity {
             });
         }
 
+        updateEpubFontsButtonText();
+        if (btnToggleEpubFonts != null) {
+            btnToggleEpubFonts.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    boolean next = !typographyConfig.isUseEpubFonts();
+                    typographyConfig.setUseEpubFonts(next);
+                    appSettings.setUseEpubFonts(next);
+                    updateEpubFontsButtonText();
+                    Map<String, String> bookFonts = (cacheManager != null && bookUuid != null)
+                            ? cacheManager.loadBookEpubFonts(bookUuid) : null;
+                    if (readerCanvas != null) {
+                        readerCanvas.setEpubFontPaths(bookFonts);
+                        readerCanvas.setTypographyConfig(typographyConfig);
+                    }
+                    if (next && (bookFonts == null || bookFonts.isEmpty())) {
+                        EinkNotice.show(ReaderActivity.this, "Шрифт книги (EPUB)",
+                                "Режим включён, однако в этом файле EPUB не обнаружены встроенные шрифты (.ttf / .otf) — используется выбранный шрифт из настроек.");
+                    }
+                    repaginateCurrentChapter();
+                }
+            });
+        }
+
         // Подвкладка 3: Между строк (Межстрочный интервал, Боковые поля, Верх/низ поля)
         updateLineSpacingButtonText();
         if (btnToggleLineSpacing != null) {
@@ -932,6 +979,7 @@ public class ReaderActivity extends Activity {
         setupRowClick(R.id.row_toggle_hyphenation, btnToggleHyphenation);
         setupRowClick(R.id.row_toggle_eink_contrast, btnToggleEinkContrast);
         setupRowClick(R.id.row_toggle_night_mode, btnToggleNightMode);
+        setupRowClick(R.id.row_toggle_epub_fonts, btnToggleEpubFonts);
         setupRowClick(R.id.row_toggle_line_spacing, btnToggleLineSpacing);
         setupRowClick(R.id.row_toggle_margins, btnToggleMargins);
         setupRowClick(R.id.row_toggle_vert_margins, btnToggleVertMargins);
@@ -1287,6 +1335,11 @@ public class ReaderActivity extends Activity {
         btnToggleNightMode.setText(typographyConfig.isNightMode() ? "Тёмная" : "Светлая");
     }
 
+    private void updateEpubFontsButtonText() {
+        if (btnToggleEpubFonts == null || typographyConfig == null) return;
+        btnToggleEpubFonts.setText(typographyConfig.isUseEpubFonts() ? "Из EPUB" : "Из настроек");
+    }
+
     private void updateLineSpacingButtonText() {
         if (btnToggleLineSpacing == null) return;
         btnToggleLineSpacing.setText(String.format(Locale.US, "%.2fx", typographyConfig.getLineSpacingMultiplier()));
@@ -1395,6 +1448,8 @@ public class ReaderActivity extends Activity {
         dst.setBoldText(src.isBoldText());
         dst.setNightMode(src.isNightMode());
         dst.setTapZoneMode(src.getTapZoneMode());
+        dst.setUseEpubFonts(src.isUseEpubFonts());
+        dst.setDensityScale(src.getDensityScale());
         return dst;
     }
 
@@ -2196,6 +2251,7 @@ public class ReaderActivity extends Activity {
         if (chapters == null || chapters.isEmpty()) {
             chapterLengths = new long[0];
             chapterPageCounts = new int[0];
+            chapterPageExact = new boolean[0];
             totalBookLength = 0;
             totalBookPages = 1;
             globalPageIndex = 1;
@@ -2204,6 +2260,9 @@ public class ReaderActivity extends Activity {
         chapterLengths = new long[chapters.size()];
         if (chapterPageCounts == null || chapterPageCounts.length != chapters.size()) {
             chapterPageCounts = new int[chapters.size()];
+        }
+        if (chapterPageExact == null || chapterPageExact.length != chapters.size()) {
+            chapterPageExact = new boolean[chapters.size()];
         }
         totalBookLength = 0;
         for (int i = 0; i < chapters.size(); i++) {
@@ -2215,7 +2274,131 @@ public class ReaderActivity extends Activity {
             chapterLengths[i] = len;
             totalBookLength += len;
         }
+
+        // Проверяем точный кэш постраничной разбивки для текущих настроек экрана (v1.7.0)
+        int[] dims = resolveReaderCanvasDims();
+        String sig = buildPrepagSignature(dims[0], dims[1], typographyConfig);
+        currentPrepagConfigSig = sig;
+        int[] cachedCounts = (cacheManager != null && bookUuid != null)
+                ? cacheManager.loadPageCountsCache(bookUuid, sig, chapters.size()) : null;
+        if (cachedCounts != null && cachedCounts.length == chapters.size()) {
+            for (int i = 0; i < chapters.size(); i++) {
+                chapterPageCounts[i] = Math.max(1, cachedCounts[i]);
+                chapterPageExact[i] = true;
+            }
+        } else {
+            for (int i = 0; i < chapters.size(); i++) {
+                chapterPageExact[i] = false;
+            }
+            prepaginateBookInBackground(dims[0], dims[1], sig);
+        }
         recalculateTotalBookPages();
+    }
+
+    private int[] resolveReaderCanvasDims() {
+        int w = readerCanvas != null ? readerCanvas.getWidth() : 0;
+        int h = readerCanvas != null ? readerCanvas.getHeight() : 0;
+        if (w <= 0 || h <= 0) {
+            DisplayMetrics dm = getResources().getDisplayMetrics();
+            w = dm.widthPixels;
+            h = dm.heightPixels;
+        }
+        return new int[]{Math.max(100, w), Math.max(100, h)};
+    }
+
+    private String buildPrepagSignature(int screenW, int screenH, TypographyConfig cfg) {
+        if (cfg == null) return screenW + "x" + screenH;
+        return screenW + "x" + screenH
+                + "|fs=" + cfg.getFontSizeSp()
+                + "|ff=" + cfg.getFontFamily()
+                + "|ls=" + String.format(Locale.US, "%.2f", cfg.getLineSpacingMultiplier())
+                + "|in=" + cfg.getParagraphIndentPx()
+                + "|bold=" + (cfg.isBoldText() ? 1 : 0)
+                + "|hyph=" + (cfg.isHyphenationEnabled() ? 1 : 0)
+                + "|pl=" + cfg.getPaddingLeftPx()
+                + "|pr=" + cfg.getPaddingRightPx()
+                + "|pt=" + cfg.getPaddingTopPx()
+                + "|pb=" + cfg.getPaddingBottomPx()
+                + "|fr=" + cfg.getFooterReservedHeightPx()
+                + "|epubf=" + (cfg.isUseEpubFonts() ? 1 : 0);
+    }
+
+    private void prepaginateBookInBackground(final int screenW, final int screenH, final String sig) {
+        if (chapters == null || chapters.isEmpty() || cacheManager == null || bookUuid == null || readerCanvas == null) {
+            return;
+        }
+        final long myTaskId = prepaginationTaskId.incrementAndGet();
+        final List<Chapter> chaptersSnap = new ArrayList<>(chapters);
+        final TypographyConfig cfgCopy = cloneTypographyConfig(typographyConfig);
+        final Paint basePaint = new Paint(readerCanvas.getTextPaint());
+        final String bookId = bookUuid;
+
+        prepaginationExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    int n = chaptersSnap.size();
+                    final int[] exactCounts = new int[n];
+                    TextPaginator bgPaginator = new TextPaginator();
+                    for (int i = 0; i < n; i++) {
+                        if (myTaskId != prepaginationTaskId.get()) {
+                            return;
+                        }
+                        Chapter ch = chaptersSnap.get(i);
+                        String chId = ch.getId();
+                        String text = cacheManager.loadChapter(bookId, chId);
+                        if (text == null) {
+                            text = cacheManager.loadChapter(bookId, String.valueOf(i));
+                        }
+                        if (text == null || text.trim().isEmpty()) {
+                            String t = ch.getTitle();
+                            text = (t != null && !t.startsWith("ch_") && !t.startsWith("ch-")) ? t : "";
+                        }
+                        List<TextPaginator.Page> pList = bgPaginator.paginate(text, screenW, screenH, basePaint, cfgCopy);
+                        exactCounts[i] = (pList != null && !pList.isEmpty()) ? pList.size() : 1;
+                    }
+                    if (myTaskId != prepaginationTaskId.get()) {
+                        return;
+                    }
+                    cacheManager.savePageCountsCache(bookId, sig, exactCounts);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (myTaskId != prepaginationTaskId.get() || !sig.equals(currentPrepagConfigSig)) {
+                                return;
+                            }
+                            if (chapterPageCounts == null || chapterPageCounts.length != exactCounts.length) {
+                                chapterPageCounts = new int[exactCounts.length];
+                            }
+                            if (chapterPageExact == null || chapterPageExact.length != exactCounts.length) {
+                                chapterPageExact = new boolean[exactCounts.length];
+                            }
+                            for (int i = 0; i < exactCounts.length; i++) {
+                                chapterPageCounts[i] = exactCounts[i];
+                                chapterPageExact[i] = true;
+                            }
+                            recalculateTotalBookPages();
+                            if (!currentPages.isEmpty() && currentPageIndex < currentPages.size() && readerCanvas != null) {
+                                String title = getActiveChapterTitle();
+                                double percent = calculateCurrentGlobalPercent();
+                                int totalCh = chapters != null ? chapters.size() : 1;
+                                readerCanvas.setPage(
+                                        currentPages.get(currentPageIndex),
+                                        globalPageIndex,
+                                        totalBookPages,
+                                        title,
+                                        currentChapterIndex,
+                                        totalCh,
+                                        percent,
+                                        currentPageIndex + 1,
+                                        currentPages.size()
+                                );
+                            }
+                        }
+                    });
+                } catch (Throwable ignored) {}
+            }
+        });
     }
 
     private void recalculateTotalBookPages() {
@@ -2229,13 +2412,16 @@ public class ReaderActivity extends Activity {
         int preceding = 0;
 
         for (int i = 0; i < chapters.size(); i++) {
+            boolean isExact = (chapterPageExact != null && i < chapterPageExact.length && chapterPageExact[i]);
             int pages = (chapterPageCounts != null && i < chapterPageCounts.length) ? chapterPageCounts[i] : 0;
-            if (pages <= 0) {
+            if (!isExact && pages <= 0) {
                 long chLen = (chapterLengths != null && i < chapterLengths.length) ? chapterLengths[i] : 10000;
                 pages = Math.max(1, (int) Math.round(chLen / safeAvgChars));
                 if (chapterPageCounts != null && i < chapterPageCounts.length) {
                     chapterPageCounts[i] = pages;
                 }
+            } else if (pages <= 0) {
+                pages = 1;
             }
             if (i < currentChapterIndex) {
                 preceding += pages;
@@ -2245,6 +2431,62 @@ public class ReaderActivity extends Activity {
 
         totalBookPages = Math.max(1, total);
         globalPageIndex = Math.max(1, Math.min(totalBookPages, preceding + currentPageIndex + 1));
+    }
+
+    private void handleCanvasLinkTap(final String rawTarget, final String rawLabel) {
+        if (rawTarget == null || rawTarget.trim().isEmpty()) return;
+        final String target = rawTarget.trim();
+        final String lower = target.toLowerCase(Locale.US);
+
+        if (lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("mailto:")) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Внешняя ссылка")
+                    .setMessage("Открыть внешнюю ссылку во внешнем браузере?\n\n" + target)
+                    .setPositiveButton("Открыть в браузере", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialog, int which) {
+                            try {
+                                Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(target));
+                                startActivity(browserIntent);
+                            } catch (Throwable t) {
+                                EinkNotice.show(ReaderActivity.this, "Ошибка ссылки", "Не удалось открыть браузер для:\n" + target);
+                            }
+                        }
+                    })
+                    .setNegativeButton("Отмена", null)
+                    .show();
+            return;
+        }
+
+        final String fallbackTitle = (rawLabel != null && !rawLabel.trim().isEmpty())
+                ? "Ссылка: " + rawLabel.trim()
+                : "Внутренняя ссылка";
+        paginationExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                String[] preview = null;
+                try {
+                    File epubFile = (cacheManager != null && bookUuid != null)
+                            ? cacheManager.getEpubFile(bookUuid) : null;
+                    if (epubFile != null && epubFile.exists() && epubFile.length() > 0) {
+                        preview = EpubFormatting.extractInternalLinkPreview(epubFile, target);
+                    }
+                } catch (Throwable ignored) {}
+                final String dialogTitle = (preview != null && preview.length > 0 && preview[0] != null && !preview[0].isEmpty())
+                        ? preview[0] : fallbackTitle;
+                final String dialogBody = (preview != null && preview.length > 1 && preview[1] != null && !preview[1].isEmpty())
+                        ? preview[1]
+                        : "Переход по внутренней ссылке: " + target + "\n\nПодробный текст раздела не найден в EPUB.";
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (!isFinishing()) {
+                            EinkNotice.show(ReaderActivity.this, dialogTitle, dialogBody);
+                        }
+                    }
+                });
+            }
+        });
     }
 
     private void showLoadingOverlay(final String message) {
@@ -2282,12 +2524,21 @@ public class ReaderActivity extends Activity {
         boolean isCacheValid = false;
         if (localChapters != null && !localChapters.isEmpty()) {
             isCacheValid = cacheManager.isChapterCacheValid(bookUuid, localChapters);
+            if (isCacheValid && !cacheManager.isFormattedCacheCurrent(bookUuid)) {
+                File epubCheck = cacheManager.getEpubFile(bookUuid);
+                if (epubCheck != null && epubCheck.exists() && epubCheck.length() > 0) {
+                    isCacheValid = false;
+                }
+            }
         }
 
         if (isCacheValid) {
             // Главы уже в базе данных и валидны: открываем МГНОВЕННО (< 50 мс) без повторного тяжелого парсинга EPUB!
             chapters = localChapters;
             cachedTocTree = cacheManager.loadTocTree(bookUuid);
+            if (readerCanvas != null) {
+                readerCanvas.setEpubFontPaths(cacheManager.loadBookEpubFonts(bookUuid));
+            }
             resolveInitialPositionAndOpen();
         } else {
             // Главы еще не извлечены или повреждены предыдущей версией: запускаем парсинг
@@ -2298,6 +2549,10 @@ public class ReaderActivity extends Activity {
                     hideLoadingOverlay();
                     chapters = loadedChapters;
                     cachedTocTree = cacheManager.loadTocTree(bookUuid);
+                    if (readerCanvas != null) {
+                        readerCanvas.setEpubFontPaths(cacheManager.loadBookEpubFonts(bookUuid));
+                        readerCanvas.setTypographyConfig(typographyConfig);
+                    }
                     if (!chapters.isEmpty()) {
                         resolveInitialPositionAndOpen();
                     } else {
@@ -2774,8 +3029,11 @@ public class ReaderActivity extends Activity {
                 if (chapterPageCounts != null && index < chapterPageCounts.length) {
                     chapterPageCounts[index] = currentPages.size();
                 }
-                if (cachedText != null && cachedText.length() > 0) {
-                    avgCharsPerPage = (double) cachedText.length() / (double) currentPages.size();
+                if (chapterPageExact != null && index < chapterPageExact.length) {
+                    chapterPageExact[index] = true;
+                }
+                if (cachedText != null && cachedText.length() > 3000) {
+                    avgCharsPerPage = (double) EpubFormatting.stripFormattingTokens(cachedText).length() / (double) currentPages.size();
                 }
                 recalculateTotalBookPages();
                 int effectiveCharOffset = targetCharOffset;
@@ -2867,8 +3125,11 @@ public class ReaderActivity extends Activity {
                                 if (chapterPageCounts != null && currentChapterIndex < chapterPageCounts.length) {
                                     chapterPageCounts[currentChapterIndex] = currentPages.size();
                                 }
-                                if (rawText != null && rawText.length() > 0) {
-                                    avgCharsPerPage = (double) rawText.length() / (double) currentPages.size();
+                                if (chapterPageExact != null && currentChapterIndex < chapterPageExact.length) {
+                                    chapterPageExact[currentChapterIndex] = true;
+                                }
+                                if (rawText != null && rawText.length() > 3000) {
+                                    avgCharsPerPage = (double) EpubFormatting.stripFormattingTokens(rawText).length() / (double) currentPages.size();
                                 }
                                 recalculateTotalBookPages();
                                 int effectiveCharOffset = targetCharOffset;
@@ -3064,8 +3325,11 @@ public class ReaderActivity extends Activity {
                             if (chapterPageCounts != null && currentChapterIndex < chapterPageCounts.length) {
                                 chapterPageCounts[currentChapterIndex] = currentPages.size();
                             }
-                            if (rawText != null && rawText.length() > 0) {
-                                avgCharsPerPage = (double) rawText.length() / (double) currentPages.size();
+                            if (chapterPageExact != null && currentChapterIndex < chapterPageExact.length) {
+                                chapterPageExact[currentChapterIndex] = true;
+                            }
+                            if (rawText != null && rawText.length() > 3000) {
+                                avgCharsPerPage = (double) EpubFormatting.stripFormattingTokens(rawText).length() / (double) currentPages.size();
                             }
                             recalculateTotalBookPages();
 
@@ -3129,6 +3393,34 @@ public class ReaderActivity extends Activity {
     private void repaginateCurrentChapter() {
         chapterPagesMemoryCache.clear();
         chapterTextMemoryCache.clear();
+        if (chapters != null && !chapters.isEmpty()) {
+            int[] dims = resolveReaderCanvasDims();
+            String sig = buildPrepagSignature(dims[0], dims[1], typographyConfig);
+            if (!sig.equals(currentPrepagConfigSig)) {
+                currentPrepagConfigSig = sig;
+                int[] cachedCounts = (cacheManager != null && bookUuid != null)
+                        ? cacheManager.loadPageCountsCache(bookUuid, sig, chapters.size()) : null;
+                if (cachedCounts != null && cachedCounts.length == chapters.size()) {
+                    if (chapterPageCounts == null || chapterPageCounts.length != chapters.size()) {
+                        chapterPageCounts = new int[chapters.size()];
+                    }
+                    if (chapterPageExact == null || chapterPageExact.length != chapters.size()) {
+                        chapterPageExact = new boolean[chapters.size()];
+                    }
+                    for (int i = 0; i < chapters.size(); i++) {
+                        chapterPageCounts[i] = Math.max(1, cachedCounts[i]);
+                        chapterPageExact[i] = true;
+                    }
+                } else {
+                    if (chapterPageExact != null) {
+                        for (int i = 0; i < chapterPageExact.length; i++) {
+                            chapterPageExact[i] = false;
+                        }
+                    }
+                    prepaginateBookInBackground(dims[0], dims[1], sig);
+                }
+            }
+        }
         if (chapters != null && currentChapterIndex >= 0 && currentChapterIndex < chapters.size()) {
             double fraction = -1.0;
             if (currentPages != null && !currentPages.isEmpty() && currentPageIndex < currentPages.size()) {
@@ -3371,6 +3663,7 @@ public class ReaderActivity extends Activity {
         super.onDestroy();
         autoSaveHandler.removeCallbacks(autoSaveRunnable);
         paginationExecutor.shutdownNow();
+        prepaginationExecutor.shutdownNow();
     }
 
     @Override

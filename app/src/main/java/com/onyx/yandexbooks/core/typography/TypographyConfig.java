@@ -39,6 +39,8 @@ public class TypographyConfig implements Serializable {
     private boolean isNightMode = false;
     private int epdFullRefreshInterval = 8; // Полный сброс артефактов E-Ink каждые 8 страниц
     private String tapZoneMode = "standard"; // standard, left_handed, top_back_bottom_fwd
+    private boolean useEpubFonts = false; // Использовать встроенные в EPUB шрифты (гибрид v1.7.0)
+    private float densityScale = 1.0f; // Масштаб экрана для согласованного красного абзаца на 300 DPI
 
     public TypographyConfig() {}
 
@@ -117,4 +119,20 @@ public class TypographyConfig implements Serializable {
 
     public String getTapZoneMode() { return tapZoneMode != null ? tapZoneMode : "standard"; }
     public void setTapZoneMode(String tapZoneMode) { this.tapZoneMode = tapZoneMode != null ? tapZoneMode : "standard"; }
+
+    public boolean isUseEpubFonts() { return useEpubFonts; }
+    public void setUseEpubFonts(boolean useEpubFonts) { this.useEpubFonts = useEpubFonts; }
+
+    public float getDensityScale() { return densityScale; }
+    public void setDensityScale(float densityScale) { this.densityScale = Math.max(0.75f, Math.min(densityScale, 4.0f)); }
+
+    /**
+     * Эффективный красной строки отступ в физических пикселях с учётом DPI экрана,
+     * чтобы 20-32 sp выглядели чётко на экранах 300 DPI (Darwin 6/7) и оставались предсказуемыми на 160 DPI.
+     */
+    public int getEffectiveParagraphIndentPx() {
+        if (paragraphIndentPx <= 0) return 0;
+        float mult = Math.max(1.0f, densityScale * 0.85f);
+        return Math.round(paragraphIndentPx * mult);
+    }
 }

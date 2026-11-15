@@ -1136,6 +1136,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             meta.put("dither_covers_enabled", settings.isDitherCoversEnabled());
             meta.put("edge_brightness_swipe", settings.isEdgeBrightnessSwipeEnabled());
             meta.put("audio_sync_enabled", settings.isAudioSyncEnabled());
+            meta.put("use_epub_fonts", settings.isUseEpubFonts());
             meta.put("panel_size_mode", settings.getPanelSizeMode());
             meta.put("card_density_mode", settings.getCardDensityMode());
             meta.put("reader_footer_offset_dp", settings.getReaderFooterOffsetDp());
@@ -1226,6 +1227,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 if (meta.has("dither_covers_enabled")) settings.setDitherCoversEnabled(meta.optBoolean("dither_covers_enabled", true));
                 if (meta.has("edge_brightness_swipe")) settings.setEdgeBrightnessSwipeEnabled(meta.optBoolean("edge_brightness_swipe", true));
                 if (meta.has("audio_sync_enabled")) settings.setAudioSyncEnabled(meta.optBoolean("audio_sync_enabled", true));
+                if (meta.has("use_epub_fonts")) settings.setUseEpubFonts(meta.optBoolean("use_epub_fonts", false));
                 if (meta.has("panel_size_mode")) settings.setPanelSizeMode(meta.optString("panel_size_mode", AppSettings.PANEL_SIZE_COMFORTABLE));
                 if (meta.has("card_density_mode")) settings.setCardDensityMode(meta.optString("card_density_mode", AppSettings.CARD_DENSITY_NORMAL));
                 if (meta.has("reader_footer_offset_dp")) settings.setReaderFooterOffsetDp(meta.optInt("reader_footer_offset_dp", AppSettings.DEFAULT_FOOTER_OFFSET_DP));
