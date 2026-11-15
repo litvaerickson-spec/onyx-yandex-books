@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.onyx.yandexbooks"
-    android:versionCode="58"
-    android:versionName="1.6.4-beta">
+    android:versionCode="59"
+    android:versionName="1.6.5-beta">
 
     <uses-sdk
         android:minSdkVersion="17"
@@ -21,6 +21,7 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.DOWNLOAD_WITHOUT_NOTIFICATION" />
 
     <application
         android:name=".YandexBooksApp"

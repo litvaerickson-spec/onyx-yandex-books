@@ -1235,16 +1235,19 @@ public class AppUpdateManager {
                     }
                     targetFile.setReadable(true, false);
 
-                    registerApkInSystemDownloads(activity, targetFile, release.tagName);
+                    boolean registeredInDm = registerApkInSystemDownloads(activity, targetFile, release.tagName);
 
                     final String loginLabel = (backupSummary.userLogin != null && !backupSummary.userLogin.isEmpty())
                             ? backupSummary.userLogin : "сохранена";
+                    final String dmStatusNote = (android.os.Build.VERSION.SDK_INT < 29 && !registeredInDm)
+                            ? "\n(Если системное окно «Загрузки» не покажет APK — откройте «Внутренняя память -> Download» в диспетчере файлов Onyx)\n"
+                            : "";
                     final String readyMsg = "Резервная копия проверена и сохранена:\n" +
                             "• Книг в базе: " + backupSummary.booksCount + "\n" +
                             "• Закладок и прогресса: " + backupSummary.bookmarksCount + "\n" +
                             "• Аккаунт: " + loginLabel + "\n\n" +
                             "Установочный файл " + release.tagName + " находится в папке «Загрузки»:\n" +
-                            targetFile.getAbsolutePath() + "\n\n" +
+                            targetFile.getAbsolutePath() + "\n" + dmStatusNote + "\n" +
                             "Как завершить откат в 2 шага:\n" +
                             "1. Нажмите «Удалить и откатить» и подтвердите удаление текущей версии.\n" +
                             "2. Откройте файл " + fname + " в «Загрузках» и нажмите «Установить».\n\n" +
@@ -1289,8 +1292,41 @@ public class AppUpdateManager {
         });
     }
 
-    private static void registerApkInSystemDownloads(Context context, File apkFile, String tagName) {
-        if (context == null || apkFile == null || !apkFile.exists()) return;
+    private static boolean queryDownloadManagerHasFile(DownloadManager dm, File apkFile) {
+        if (dm == null || apkFile == null) return false;
+        android.database.Cursor c = null;
+        try {
+            DownloadManager.Query q = new DownloadManager.Query()
+                    .setFilterByStatus(DownloadManager.STATUS_SUCCESSFUL);
+            c = dm.query(q);
+            if (c == null) return false;
+            int titleIdx = c.getColumnIndex(DownloadManager.COLUMN_TITLE);
+            int uriIdx = c.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI);
+            int sizeIdx = c.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES);
+            String targetName = apkFile.getName();
+            long targetSize = apkFile.length();
+            while (c.moveToNext()) {
+                String rowTitle = titleIdx >= 0 ? c.getString(titleIdx) : null;
+                String rowUri = uriIdx >= 0 ? c.getString(uriIdx) : null;
+                long rowSize = sizeIdx >= 0 ? c.getLong(sizeIdx) : -1L;
+                boolean nameMatch = targetName.equals(rowTitle)
+                        || (rowUri != null && rowUri.endsWith("/" + targetName));
+                if (nameMatch && (targetSize <= 0 || rowSize == targetSize || rowSize <= 0)) {
+                    return true;
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "queryDownloadManagerHasFile failed: " + t.getMessage());
+        } finally {
+            if (c != null) {
+                try { c.close(); } catch (Throwable ignored) {}
+            }
+        }
+        return false;
+    }
+
+    private static boolean registerApkInSystemDownloads(Context context, File apkFile, String tagName) {
+        if (context == null || apkFile == null || !apkFile.exists()) return false;
         try {
             MediaScannerConnection.scanFile(
                     context.getApplicationContext(),
@@ -1300,34 +1336,70 @@ public class AppUpdateManager {
             );
         } catch (Throwable ignored) {}
 
-        // Системное окно «Загрузки» (ACTION_VIEW_DOWNLOADS) показывает только записи базы DownloadManager,
-        // поэтому регистрируем скачанный через OkHttp файл через addCompletedDownload (API < 29).
+        // На Android < 10 системное окно «Загрузки» (ACTION_VIEW_DOWNLOADS) читает только БД DownloadProvider.
+        // Вызываем addCompletedDownload(..., showNotification=true), чтобы избежать SecurityException на VISIBILITY_HIDDEN,
+        // а также проверяем реальное наличие записи через DownloadManager.Query вместо слепого кэша.
         if (android.os.Build.VERSION.SDK_INT < 29) {
             try {
-                android.content.SharedPreferences sp = context.getApplicationContext()
-                        .getSharedPreferences("ota_dm_registry", Context.MODE_PRIVATE);
-                String key = apkFile.getAbsolutePath();
-                long size = apkFile.length();
-                if (sp.getLong(key, -1L) == size) {
-                    return;
-                }
                 DownloadManager dm = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
-                if (dm != null) {
-                    String title = apkFile.getName();
-                    String desc = "Яндекс Книги Lite " + (tagName != null ? tagName : "");
-                    dm.addCompletedDownload(
-                            title,
-                            desc,
-                            true,
-                            "application/vnd.android.package-archive",
-                            apkFile.getAbsolutePath(),
-                            size,
-                            false
-                    );
-                    sp.edit().putLong(key, size).apply();
+                if (dm == null) return false;
+
+                if (queryDownloadManagerHasFile(dm, apkFile)) {
+                    return true;
                 }
-            } catch (Throwable ignored) {}
+
+                String title = apkFile.getName();
+                String desc = "Яндекс Книги Lite " + (tagName != null ? tagName : "APK");
+                long size = apkFile.length();
+                String[] candidatePaths;
+                String abs = apkFile.getAbsolutePath();
+                String can = abs;
+                try {
+                    can = apkFile.getCanonicalPath();
+                } catch (Throwable ignored) {}
+                candidatePaths = can.equals(abs) ? new String[]{abs} : new String[]{abs, can};
+
+                for (String path : candidatePaths) {
+                    try {
+                        long id = dm.addCompletedDownload(
+                                title,
+                                desc,
+                                true,
+                                "application/vnd.android.package-archive",
+                                path,
+                                size,
+                                true
+                        );
+                        if (id > 0 || queryDownloadManagerHasFile(dm, apkFile)) {
+                            return true;
+                        }
+                    } catch (Throwable primaryErr) {
+                        Log.w(TAG, "addCompletedDownload(showNotif=true) failed for " + path + ": " + primaryErr.getMessage());
+                        try {
+                            long id = dm.addCompletedDownload(
+                                    title,
+                                    desc,
+                                    true,
+                                    "application/vnd.android.package-archive",
+                                    path,
+                                    size,
+                                    false
+                            );
+                            if (id > 0 || queryDownloadManagerHasFile(dm, apkFile)) {
+                                return true;
+                            }
+                        } catch (Throwable fallbackErr) {
+                            Log.w(TAG, "addCompletedDownload(showNotif=false) failed for " + path + ": " + fallbackErr.getMessage());
+                        }
+                    }
+                }
+                return queryDownloadManagerHasFile(dm, apkFile);
+            } catch (Throwable t) {
+                Log.w(TAG, "registerApkInSystemDownloads error: " + t.getMessage());
+                return false;
+            }
         }
+        return true;
     }
 
     private void openDownloadsFolder(Activity activity, File apkFile, boolean silentFallback) {
@@ -1370,21 +1442,28 @@ public class AppUpdateManager {
             }
         }
 
-        // 2. Запасной вариант — системное окно Загрузки (теперь файл зарегистрирован через addCompletedDownload)
-        try {
-            Intent dl = new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS);
-            dl.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            if (pm == null || dl.resolveActivity(pm) != null) {
-                activity.startActivity(dl);
-                return;
-            }
-        } catch (Exception ignored) {}
+        // 2. Проверяем регистрацию в системной БД DownloadManager перед запуском ACTION_VIEW_DOWNLOADS
+        boolean dmReady = android.os.Build.VERSION.SDK_INT >= 29;
+        if (!dmReady && apkFile != null && apkFile.exists()) {
+            dmReady = registerApkInSystemDownloads(activity, apkFile, null);
+        }
 
-        if (!silentFallback) {
+        if (dmReady || silentFallback) {
+            try {
+                Intent dl = new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS);
+                dl.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                if (pm == null || dl.resolveActivity(pm) != null) {
+                    activity.startActivity(dl);
+                    return;
+                }
+            } catch (Exception ignored) {}
+        }
+
+        if (!silentFallback && apkFile != null) {
             EinkNotice.show(
                     activity,
                     "Папка «Загрузки»",
-                    "Файл уже сохранен на устройстве:\n" + apkFile.getAbsolutePath() +
+                    "Установочный файл сохранён на устройстве:\n" + apkFile.getAbsolutePath() +
                             "\n\nОткройте диспетчер файлов Onyx («Внутренняя память» -> «Download») и запустите этот файл после удаления текущей версии."
             );
         }
