@@ -1194,27 +1194,31 @@ public class AppUpdateManager {
 
                         InputStream in = response.body().byteStream();
                         FileOutputStream out = new FileOutputStream(targetFile);
-                        byte[] buffer = new byte[8192];
-                        long totalRead = 0;
-                        int read;
-                        while ((read = in.read(buffer)) != -1) {
-                            out.write(buffer, 0, read);
-                            totalRead += read;
-                            if (contentLength > 0) {
-                                final int pct = (int) ((totalRead * 100) / contentLength);
-                                mainHandler.post(new Runnable() {
-                                    @Override
-                                    public void run() {
-                                        if (progressDialog.isShowing()) {
-                                            progressDialog.setProgress(pct);
+                        try {
+                            byte[] buffer = new byte[8192];
+                            long totalRead = 0;
+                            int read;
+                            while ((read = in.read(buffer)) != -1) {
+                                out.write(buffer, 0, read);
+                                totalRead += read;
+                                if (contentLength > 0) {
+                                    final int pct = (int) ((totalRead * 100) / contentLength);
+                                    mainHandler.post(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            if (progressDialog.isShowing()) {
+                                                progressDialog.setProgress(pct);
+                                            }
                                         }
-                                    }
-                                });
+                                    });
+                                }
                             }
+                            out.flush();
+                        } finally {
+                            try { out.close(); } catch (Throwable ignored) {}
+                            try { in.close(); } catch (Throwable ignored) {}
+                            try { response.close(); } catch (Throwable ignored) {}
                         }
-                        out.flush();
-                        out.close();
-                        in.close();
                     } else {
                         mainHandler.post(new Runnable() {
                             @Override
@@ -1227,14 +1231,7 @@ public class AppUpdateManager {
                     }
                     targetFile.setReadable(true, false);
 
-                    try {
-                        MediaScannerConnection.scanFile(
-                                activity.getApplicationContext(),
-                                new String[]{targetFile.getAbsolutePath()},
-                                new String[]{"application/vnd.android.package-archive"},
-                                null
-                        );
-                    } catch (Throwable ignored) {}
+                    registerApkInSystemDownloads(activity, targetFile, release.tagName);
 
                     final String loginLabel = (backupSummary.userLogin != null && !backupSummary.userLogin.isEmpty())
                             ? backupSummary.userLogin : "сохранена";
@@ -1288,21 +1285,104 @@ public class AppUpdateManager {
         });
     }
 
+    private static void registerApkInSystemDownloads(Context context, File apkFile, String tagName) {
+        if (context == null || apkFile == null || !apkFile.exists()) return;
+        try {
+            MediaScannerConnection.scanFile(
+                    context.getApplicationContext(),
+                    new String[]{apkFile.getAbsolutePath()},
+                    new String[]{"application/vnd.android.package-archive"},
+                    null
+            );
+        } catch (Throwable ignored) {}
+
+        // Системное окно «Загрузки» (ACTION_VIEW_DOWNLOADS) показывает только записи базы DownloadManager,
+        // поэтому регистрируем скачанный через OkHttp файл через addCompletedDownload (API < 29).
+        if (android.os.Build.VERSION.SDK_INT < 29) {
+            try {
+                android.content.SharedPreferences sp = context.getApplicationContext()
+                        .getSharedPreferences("ota_dm_registry", Context.MODE_PRIVATE);
+                String key = apkFile.getAbsolutePath();
+                long size = apkFile.length();
+                if (sp.getLong(key, -1L) == size) {
+                    return;
+                }
+                DownloadManager dm = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+                if (dm != null) {
+                    String title = apkFile.getName();
+                    String desc = "Яндекс Книги Lite " + (tagName != null ? tagName : "");
+                    dm.addCompletedDownload(
+                            title,
+                            desc,
+                            true,
+                            "application/vnd.android.package-archive",
+                            apkFile.getAbsolutePath(),
+                            size,
+                            false
+                    );
+                    sp.edit().putLong(key, size).apply();
+                }
+            } catch (Throwable ignored) {}
+        }
+    }
+
     private void openDownloadsFolder(Activity activity, File apkFile, boolean silentFallback) {
         if (activity == null || activity.isFinishing()) return;
+        android.content.pm.PackageManager pm = activity.getPackageManager();
+        File downloadDir = (apkFile != null) ? apkFile.getParentFile() : null;
+
+        // 1. Сначала пробуем открыть реальную папку Download в диспетчере файлов (а не пустую БД DownloadManager)
+        if (downloadDir != null && downloadDir.exists()) {
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= 24) {
+                    try {
+                        java.lang.reflect.Method m = android.os.StrictMode.class.getMethod("disableDeathOnFileUriExposure");
+                        m.invoke(null);
+                    } catch (Throwable ignored) {}
+                }
+                Intent folderIntent = new Intent(Intent.ACTION_VIEW);
+                folderIntent.setDataAndType(Uri.fromFile(downloadDir), "resource/folder");
+                folderIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                if (pm != null && folderIntent.resolveActivity(pm) != null) {
+                    activity.startActivity(folderIntent);
+                    return;
+                }
+            } catch (Throwable ignored) {}
+
+            // Пробуем стандартный DocumentsUI (Android 8+) на папку Download
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                try {
+                    Intent docIntent = new Intent(Intent.ACTION_VIEW);
+                    docIntent.setDataAndType(
+                            Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADownload"),
+                            "vnd.android.document/directory"
+                    );
+                    docIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    if (pm != null && docIntent.resolveActivity(pm) != null) {
+                        activity.startActivity(docIntent);
+                        return;
+                    }
+                } catch (Throwable ignored) {}
+            }
+        }
+
+        // 2. Запасной вариант — системное окно Загрузки (теперь файл зарегистрирован через addCompletedDownload)
         try {
             Intent dl = new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS);
             dl.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            activity.startActivity(dl);
-        } catch (Exception e) {
-            if (!silentFallback) {
-                EinkNotice.show(
-                        activity,
-                        "Папка «Загрузки»",
-                        "Файл уже сохранен на устройстве:\n" + apkFile.getAbsolutePath() +
-                                "\n\nОткройте стандартный диспетчер файлов Onyx («Память» -> «Download») и запустите этот файл после удаления текущей версии."
-                );
+            if (pm == null || dl.resolveActivity(pm) != null) {
+                activity.startActivity(dl);
+                return;
             }
+        } catch (Exception ignored) {}
+
+        if (!silentFallback) {
+            EinkNotice.show(
+                    activity,
+                    "Папка «Загрузки»",
+                    "Файл уже сохранен на устройстве:\n" + apkFile.getAbsolutePath() +
+                            "\n\nОткройте диспетчер файлов Onyx («Внутренняя память» -> «Download») и запустите этот файл после удаления текущей версии."
+            );
         }
     }
 

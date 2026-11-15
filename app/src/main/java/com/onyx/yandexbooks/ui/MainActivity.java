@@ -142,18 +142,16 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        appSettings = new com.onyx.yandexbooks.core.storage.AppSettings(this);
-        com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, appSettings.getUiScale());
         super.onCreate(savedInstanceState);
+        appSettings = new com.onyx.yandexbooks.core.storage.AppSettings(this);
+        tokenStorage = new TokenStorage(this);
+        dbHelper = DatabaseHelper.getInstance(this);
+        // Автоматическое восстановление резервной копии до масштабирования и разметки экрана
+        dbHelper.restoreBackupFromPublicStorageIfNeeded(this);
+        com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, appSettings.getUiScale());
         setContentView(R.layout.activity_main);
         com.onyx.yandexbooks.core.ui.UiScaleHelper.applyViewTreeScale(findViewById(android.R.id.content), appSettings.getUiScale());
 
-        tokenStorage = new TokenStorage(this);
-        dbHelper = DatabaseHelper.getInstance(this);
-        // Автоматическое восстановление резервной копии после отката версии / переустановки
-        if (dbHelper.restoreBackupFromPublicStorageIfNeeded(this)) {
-            com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, appSettings.getUiScale());
-        }
         waitingStoragePermissionForRestore = !tokenStorage.isAuthorized() && requestRuntimeStoragePermissionsIfNeeded();
         apiClient = new YandexBooksApiClient(tokenStorage);
         cacheManager = new CacheManager(this, apiClient);
@@ -486,7 +484,7 @@ public class MainActivity extends Activity {
         root.addView(menuScroll);
 
         TextView tvBetaNotice = new TextView(this);
-        tvBetaNotice.setText("Яндекс Книги Lite v1.6.2-beta [BETA]");
+        tvBetaNotice.setText("Яндекс Книги Lite v1.6.3-beta [BETA]");
         tvBetaNotice.setTextSize(11);
         tvBetaNotice.setTypeface(null, Typeface.BOLD);
         tvBetaNotice.setTextColor(Color.BLACK);
