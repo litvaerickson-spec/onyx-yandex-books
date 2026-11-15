@@ -497,7 +497,7 @@ public class MainActivity extends Activity {
         root.addView(menuScroll);
 
         TextView tvBetaNotice = new TextView(this);
-        tvBetaNotice.setText("Яндекс Книги Lite v1.7.0-beta [BETA]");
+        tvBetaNotice.setText("Яндекс Книги Lite v2.0.0");
         tvBetaNotice.setTextSize(11);
         tvBetaNotice.setTypeface(null, Typeface.BOLD);
         tvBetaNotice.setTextColor(Color.BLACK);

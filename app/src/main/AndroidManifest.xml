@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.onyx.yandexbooks"
-    android:versionCode="62"
-    android:versionName="1.7.0-beta">
+    android:versionCode="63"
+    android:versionName="2.0.0">
 
     <uses-sdk
         android:minSdkVersion="17"

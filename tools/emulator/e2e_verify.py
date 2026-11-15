@@ -292,7 +292,7 @@ def _run_tests(args):
     shelf_root = dump_ui()
     shelf_joined = " | ".join(all_visible_texts(shelf_root))
     if "Файлы (" not in shelf_joined:
-        raise AssertionError(f"v1.7.0-beta 5th tab 'Файлы (...)' missing on main shelf UI: {shelf_joined}")
+        raise AssertionError(f"5th tab 'Файлы (...)' missing on main shelf UI: {shelf_joined}")
     print("[check] Main shelf displays 5 tabs including 'Файлы (0)': OK")
 
     # 4. Open Main Menu -> re-enable network -> "Архив версий и откат ПО"
@@ -337,8 +337,8 @@ def _run_tests(args):
     bk_content = shell("cat /sdcard/Books/YandexBooks/backup/*.json", check=False)
     for setting_key in ("dither_covers_enabled", "edge_brightness_swipe", "audio_sync_enabled", "use_epub_fonts", "custom_tap_zones", "fullscreen_reader", "quotes_count"):
         if setting_key not in bk_content:
-            raise AssertionError(f"v1.7.0-beta setting '{setting_key}' missing from live Android backup!")
-    print("[check] Live Android backup includes all v1.7.0-beta keys (custom_tap_zones/fullscreen_reader/quotes_count/...): OK")
+            raise AssertionError(f"Required setting '{setting_key}' missing from live Android backup!")
+    print("[check] Live Android backup includes all 21 keys (custom_tap_zones/fullscreen_reader/quotes_count/...): OK")
 
     # Verify DownloadProvider DB directly on real Android OS!
     dm_query = shell("content query --uri content://downloads/my_downloads", check=False)
