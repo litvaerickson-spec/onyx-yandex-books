@@ -30,6 +30,8 @@ marketing_materials/
 # Test generated artifacts
 docs/physical_test_*
 docs/virtual_test_*
+docs/emulator_verify/
+tools/emulator/artifacts/
 
 # Temporary release notes drafts (use CHANGELOG.md and RELEASE_NOTES.md for official logs)
 docs/release_notes_*.md

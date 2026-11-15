@@ -1,0 +1,18 @@
+services:
+  android-emulator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: onyx-yandex-books-emulator:latest
+    container_name: onyx_yandex_books_emu
+    network_mode: host
+    devices:
+      - /dev/kvm:/dev/kvm
+    environment:
+      - AVD_NAME=${AVD_NAME:-onyx_darwin5_api23}
+      - BOOT_TIMEOUT=${BOOT_TIMEOUT:-180}
+    volumes:
+      - ../..:/workspace:ro
+      - ${ARTIFACTS_DIR:-./artifacts}:/artifacts
+    shm_size: 1g
+    # Fully ephemeral by default; no host SDK/AVD files left behind
