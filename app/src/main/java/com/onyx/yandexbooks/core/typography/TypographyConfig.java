@@ -38,7 +38,12 @@ public class TypographyConfig implements Serializable {
     private String customFontPath = null;
     private boolean isNightMode = false;
     private int epdFullRefreshInterval = 8; // Полный сброс артефактов E-Ink каждые 8 страниц
-    private String tapZoneMode = "standard"; // standard, left_handed, top_back_bottom_fwd
+    private String tapZoneMode = "standard"; // standard, left_handed, top_back_bottom_fwd, custom_3x3
+    private String[] customTapZones = new String[]{
+            "prev", "menu", "next",
+            "prev", "menu", "next",
+            "prev", "menu", "next"
+    };
     private boolean useEpubFonts = false; // Использовать встроенные в EPUB шрифты (гибрид v1.7.0)
     private float densityScale = 1.0f; // Масштаб экрана для согласованного красного абзаца на 300 DPI
 
@@ -119,6 +124,27 @@ public class TypographyConfig implements Serializable {
 
     public String getTapZoneMode() { return tapZoneMode != null ? tapZoneMode : "standard"; }
     public void setTapZoneMode(String tapZoneMode) { this.tapZoneMode = tapZoneMode != null ? tapZoneMode : "standard"; }
+
+    public String[] getCustomTapZones() { return customTapZones; }
+    public void setCustomTapZones(String[] zones) {
+        if (zones != null && zones.length >= 9) {
+            String[] copy = new String[9];
+            for (int i = 0; i < 9; i++) {
+                copy[i] = (zones[i] != null && !zones[i].isEmpty()) ? zones[i] : "none";
+            }
+            this.customTapZones = copy;
+        }
+    }
+
+    public String getCustomTapActionAt(int row, int col) {
+        int r = Math.max(0, Math.min(2, row));
+        int c = Math.max(0, Math.min(2, col));
+        int idx = r * 3 + c;
+        if (customTapZones != null && idx < customTapZones.length && customTapZones[idx] != null) {
+            return customTapZones[idx];
+        }
+        return "none";
+    }
 
     public boolean isUseEpubFonts() { return useEpubFonts; }
     public void setUseEpubFonts(boolean useEpubFonts) { this.useEpubFonts = useEpubFonts; }

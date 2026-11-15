@@ -6,6 +6,7 @@ import android.util.Log;
 
 import com.onyx.yandexbooks.core.api.models.Book;
 import com.onyx.yandexbooks.core.api.models.Chapter;
+import com.onyx.yandexbooks.core.api.models.Quote;
 import com.onyx.yandexbooks.core.api.models.ReadingProgress;
 import com.onyx.yandexbooks.core.auth.TokenStorage;
 import com.onyx.yandexbooks.core.network.HttpClientFactory;
@@ -42,6 +43,8 @@ public class YandexBooksApiClient {
 
     private static final String TAG = "YandexBooksApi";
     private static final String BASE_URL = "https://api.bookmate.yandex.net/api/v5";
+    private static final String REST_GATEWAY_URL = "https://api-gateway-rest.bookmate.yandex.net/api/v5";
+    private static final String PRIMARY_GRAPHQL_URL = "https://api-gateway.bookmate.yandex.net/graphql";
     private static final String GRAPHQL_URL = "https://books.yandex.ru/node-api/p-graphql/";
     private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json; charset=utf-8");
 
@@ -119,8 +122,49 @@ public class YandexBooksApiClient {
         builder.addHeader("Accept", "application/json");
         builder.addHeader("App-Platform", "android");
         builder.addHeader("App-Language", "ru");
-        builder.addHeader("User-Agent", "Mozilla/5.0");
+        if (url != null && url.contains("api-gateway.bookmate.yandex.net")) {
+            builder.addHeader("X-App-Id", "ru.plus.bookmate");
+            builder.addHeader("X-App-Platform", "android");
+            builder.addHeader("X-App-Version", "6.83.0");
+            builder.addHeader("User-Agent", "okhttp/3.12.13");
+        } else {
+            builder.addHeader("User-Agent", "Mozilla/5.0");
+        }
         return builder;
+    }
+
+    /**
+     * Выполняет GraphQL-запрос с приоритетом нативного шлюза PRIMARY_GRAPHQL_URL (api-gateway.bookmate.yandex.net)
+     * и автоматическим fallback на веб-прокси GRAPHQL_URL (books.yandex.ru) при 403/5xx/HTML-капче/ошибке сети.
+     */
+    private String executeGraphQLWithFallbackSync(JSONObject gqlBody) {
+        if (gqlBody == null) return null;
+        String jsonStr = gqlBody.toString();
+        String[] endpoints = new String[]{PRIMARY_GRAPHQL_URL, GRAPHQL_URL};
+        for (int i = 0; i < endpoints.length; i++) {
+            Response resp = null;
+            try {
+                Request req = createGraphQLRequestBuilder(endpoints[i])
+                        .post(RequestBody.create(JSON_MEDIA_TYPE, jsonStr))
+                        .build();
+                resp = httpClient.newCall(req).execute();
+                if (resp.isSuccessful() && resp.body() != null) {
+                    String body = resp.body().string();
+                    if (body != null) {
+                        String trimmed = body.trim();
+                        if (trimmed.startsWith("{")) {
+                            return trimmed;
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+            } finally {
+                if (resp != null) {
+                    try { resp.close(); } catch (Exception ignored) {}
+                }
+            }
+        }
+        return null;
     }
 
     /**
@@ -230,18 +274,26 @@ public class YandexBooksApiClient {
     public static class CfiPosition {
         public final int chapterIndex;
         public final int paragraphIndex;
+        public final int charOffset;
+        public final String opfItemId;
         public final String rawCfi;
 
         public CfiPosition(int chapterIndex, int paragraphIndex, String rawCfi) {
+            this(chapterIndex, paragraphIndex, 0, "", rawCfi);
+        }
+
+        public CfiPosition(int chapterIndex, int paragraphIndex, int charOffset, String opfItemId, String rawCfi) {
             this.chapterIndex = chapterIndex;
             this.paragraphIndex = paragraphIndex;
+            this.charOffset = Math.max(0, charOffset);
+            this.opfItemId = opfItemId != null ? opfItemId : "";
             this.rawCfi = rawCfi;
         }
     }
 
     public static CfiPosition parseCfiPosition(String cfi) {
         if (cfi == null || cfi.trim().isEmpty()) {
-            return new CfiPosition(0, 0, "");
+            return new CfiPosition(0, 0, 0, "", "");
         }
         String clean = cfi.trim();
         String[] parts = clean.split("!");
@@ -249,11 +301,16 @@ public class YandexBooksApiClient {
         String elemPart = parts.length > 1 ? parts[1] : "";
 
         int chapterIndex = 0;
-        Matcher mSpine = Pattern.compile("/(\\d+)").matcher(spinePart);
+        String opfItemId = "";
+        Matcher mSpine = Pattern.compile("/(\\d+)(?:\\[([^\\]]+)\\])?").matcher(spinePart);
         int lastSpineNum = -1;
         while (mSpine.find()) {
             try {
                 lastSpineNum = Integer.parseInt(mSpine.group(1));
+                String idGroup = mSpine.group(2);
+                if (idGroup != null && !idGroup.isEmpty()) {
+                    opfItemId = idGroup;
+                }
             } catch (Exception ignored) {}
         }
         if (lastSpineNum > 0) {
@@ -261,21 +318,54 @@ public class YandexBooksApiClient {
         }
 
         int paragraphIndex = 0;
+        int charOffset = 0;
         if (!elemPart.isEmpty()) {
-            String elemPath = elemPart.contains(":") ? elemPart.substring(0, elemPart.indexOf(':')) : elemPart;
+            int colonIdx = elemPart.indexOf(':');
+            String elemPath = (colonIdx >= 0) ? elemPart.substring(0, colonIdx) : elemPart;
+            if (colonIdx >= 0) {
+                String offsetPart = elemPart.substring(colonIdx + 1).replaceAll("[^0-9]", "");
+                if (!offsetPart.isEmpty()) {
+                    try {
+                        charOffset = Integer.parseInt(offsetPart);
+                    } catch (Exception ignored) {}
+                }
+            }
             Matcher mElem = Pattern.compile("/(\\d+)").matcher(elemPath);
-            int lastElemNum = -1;
+            int firstBodyElemNum = -1;
+            int stepCount = 0;
             while (mElem.find()) {
                 try {
-                    lastElemNum = Integer.parseInt(mElem.group(1));
+                    int n = Integer.parseInt(mElem.group(1));
+                    stepCount++;
+                    if (stepCount == 2) {
+                        firstBodyElemNum = n;
+                    } else if (stepCount == 1) {
+                        firstBodyElemNum = n;
+                    }
                 } catch (Exception ignored) {}
             }
-            if (lastElemNum > 0) {
-                paragraphIndex = Math.max(0, (lastElemNum / 2) - 1);
+            if (firstBodyElemNum > 0) {
+                paragraphIndex = Math.max(0, (firstBodyElemNum / 2) - 1);
             }
         }
 
-        return new CfiPosition(chapterIndex, paragraphIndex, clean);
+        return new CfiPosition(chapterIndex, paragraphIndex, charOffset, opfItemId, clean);
+    }
+
+    public static String buildCanonicalCfi(int originalOpfSpineIndex, String opfItemId, int paragraphDomIndex, int charOffset) {
+        int spineCfiIndex = Math.max(2, (Math.max(0, originalOpfSpineIndex) + 1) * 2);
+        int pCfiIndex = Math.max(2, (Math.max(0, paragraphDomIndex) + 1) * 2);
+        int safeChar = Math.max(0, charOffset);
+        if (opfItemId != null && !opfItemId.isEmpty()) {
+            return String.format(Locale.US, "epubcfi(/6/%d[%s]!/4/%d/1:%d)",
+                    spineCfiIndex, opfItemId, pCfiIndex, safeChar);
+        }
+        return String.format(Locale.US, "epubcfi(/6/%d!/4/%d:%d)",
+                spineCfiIndex, pCfiIndex, safeChar);
+    }
+
+    public static String buildCanonicalCfiEnd(int originalOpfSpineIndex, String opfItemId, int paragraphDomIndex, int charOffset) {
+        return buildCanonicalCfi(originalOpfSpineIndex, opfItemId, paragraphDomIndex, Math.max(0, charOffset) + 100);
     }
 
     public static String generateCfi(int chapterIndex, int paragraphIndex) {
@@ -944,9 +1034,8 @@ public class YandexBooksApiClient {
             @Override
             public void run() {
                 try {
-                    // 1. Попытка запроса точной позиции чтения через GraphQL (GetTextbookProgress)
+                    // 1. Попытка запроса точной позиции чтения через GraphQL Gateway с автоматическим fallback
                     String gqlCfiStart = null;
-                    Response gqlResp = null;
                     try {
                         JSONObject gqlBody = new JSONObject();
                         gqlBody.put("operationName", "GetTextbookProgress");
@@ -955,12 +1044,8 @@ public class YandexBooksApiClient {
                         vars.put("uuid", bookUuid);
                         gqlBody.put("variables", vars);
 
-                        Request gqlReq = createGraphQLRequestBuilder(GRAPHQL_URL)
-                                .post(RequestBody.create(JSON_MEDIA_TYPE, gqlBody.toString()))
-                                .build();
-                        gqlResp = httpClient.newCall(gqlReq).execute();
-                        if (gqlResp.isSuccessful() && gqlResp.body() != null) {
-                            String respStr = gqlResp.body().string();
+                        String respStr = executeGraphQLWithFallbackSync(gqlBody);
+                        if (respStr != null) {
                             JSONObject rj = new JSONObject(respStr);
                             JSONObject data = rj.optJSONObject("data");
                             if (data != null) {
@@ -979,12 +1064,7 @@ public class YandexBooksApiClient {
                                 }
                             }
                         }
-                    } catch (Exception ignored) {
-                    } finally {
-                        if (gqlResp != null) {
-                            try { gqlResp.close(); } catch (Exception ignored) {}
-                        }
-                    }
+                    } catch (Exception ignored) {}
 
                     // 2. Запрос карточки библиотеки для извлечения процента и cardId
                     double cardPercent = 0.0;
@@ -1163,9 +1243,95 @@ public class YandexBooksApiClient {
     }
 
     /**
+     * Загрузка списка пользовательских загруженных файлов (Модуль 8: User Uploads).
+     */
+    public void fetchUserUploadedBooks(final ApiCallback<List<Book>> callback) {
+        fetchUserUploadedBooksFromUrl(BASE_URL + "/profile/user_books?per_page=100", true, callback);
+    }
+
+    private void fetchUserUploadedBooksFromUrl(final String url, final boolean allowGatewayRetry, final ApiCallback<List<Book>> callback) {
+        Request request = createAuthRequestBuilder(url).get().build();
+        httpClient.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                if (allowGatewayRetry) {
+                    fetchUserUploadedBooksFromUrl(REST_GATEWAY_URL + "/profile/user_books?per_page=100", false, callback);
+                } else {
+                    postError(callback, "Ошибка загрузки «Мои файлы»: " + e.getMessage());
+                }
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                if (!response.isSuccessful()) {
+                    int code = response.code();
+                    response.close();
+                    if (allowGatewayRetry && code >= 400) {
+                        fetchUserUploadedBooksFromUrl(REST_GATEWAY_URL + "/profile/user_books?per_page=100", false, callback);
+                        return;
+                    }
+                    if (code == 404) {
+                        postSuccess(callback, new ArrayList<Book>());
+                        return;
+                    }
+                    postError(callback, "Ошибка загрузки «Мои файлы»: HTTP " + code);
+                    return;
+                }
+                try {
+                    String body = response.body().string();
+                    List<Book> result = parseUserUploadedBooksJson(body);
+                    postSuccess(callback, result);
+                } catch (Exception e) {
+                    Log.e(TAG, "Error parsing user_books", e);
+                    postError(callback, "Ошибка разбора «Мои файлы»: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    public List<Book> parseUserUploadedBooksJson(String jsonBody) throws org.json.JSONException {
+        List<Book> result = new ArrayList<>();
+        if (jsonBody == null || jsonBody.trim().isEmpty()) return result;
+        JSONObject json = new JSONObject(jsonBody);
+        JSONArray arr = json.optJSONArray("user_books");
+        if (arr == null) arr = json.optJSONArray("books");
+        if (arr == null) arr = json.optJSONArray("items");
+        if (arr == null) return result;
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject item = arr.optJSONObject(i);
+            if (item == null) continue;
+            Book book = parseBookFromCard(item);
+            if (book == null) continue;
+            book.setShelfType("user_books");
+            JSONObject bObj = item.optJSONObject("book");
+            String fileUrl = item.optString("file_url", item.optString("download_url", ""));
+            if (fileUrl.isEmpty() && bObj != null) {
+                fileUrl = bObj.optString("file_url", bObj.optString("download_url", ""));
+            }
+            if (!fileUrl.isEmpty() && !"null".equalsIgnoreCase(fileUrl)) {
+                book.setFileUrl(fileUrl);
+            }
+            if (book.getAuthor() == null || book.getAuthor().trim().isEmpty()) {
+                book.setAuthor("Личный файл");
+            }
+            result.add(book);
+        }
+        return result;
+    }
+
+    /**
      * Прямое синхронное скачивание книги в текущем потоке (для фонового пакетного загрузчика).
      */
     public DownloadResult downloadBookEpubSync(final String bookUuid, final File destFile) {
+        return downloadBookEpubSync(bookUuid, null, destFile);
+    }
+
+    public DownloadResult downloadBookEpubSync(final String bookUuid, final String directFileUrl, final File destFile) {
+        // 0. Если это пользовательский файл (user_books) с прямым file_url — качаем напрямую
+        if (directFileUrl != null && !directFileUrl.trim().isEmpty()) {
+            DownloadResult directRes = tryDownloadSync(directFileUrl.trim(), destFile);
+            if (directRes.success) return directRes;
+        }
         // 1. Попытка v4: /books/{uuid}/content/v4
         DownloadResult res = tryDownloadSync(BASE_URL + "/books/" + bookUuid + "/content/v4", destFile);
         if (res.success) return res;
@@ -1326,6 +1492,38 @@ public class YandexBooksApiClient {
      * Скачивание файла книги в формате EPUB с автоматической привязкой к библиотеке и каскадным fallback.
      */
     public void downloadBookEpub(final String bookUuid, final File destFile, final ApiCallback<File> callback) {
+        downloadBookEpub(bookUuid, null, destFile, callback);
+    }
+
+    public void downloadBookEpub(final String bookUuid, final String directFileUrl, final File destFile, final ApiCallback<File> callback) {
+        if (directFileUrl != null && !directFileUrl.trim().isEmpty()) {
+            Request directReq = createAuthRequestBuilder(directFileUrl.trim())
+                    .header("Accept", "*/*")
+                    .get()
+                    .build();
+            httpClient.newCall(directReq).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    attemptDownloadBookEpub(bookUuid, destFile, callback, false);
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) throws IOException {
+                    if (!response.isSuccessful()) {
+                        response.close();
+                        attemptDownloadBookEpub(bookUuid, destFile, callback, false);
+                        return;
+                    }
+                    saveResponseBodyToFile(response, destFile, callback, new Runnable() {
+                        @Override
+                        public void run() {
+                            attemptDownloadBookEpub(bookUuid, destFile, callback, false);
+                        }
+                    });
+                }
+            });
+            return;
+        }
         attemptDownloadBookEpub(bookUuid, destFile, callback, false);
     }
 
@@ -1730,7 +1928,6 @@ public class YandexBooksApiClient {
                     }
                     String endCfi = generateCfiEnd(progress.getChapterIndex(), progress.getParagraphIndex());
 
-                    Response gqlResp = null;
                     try {
                         JSONObject gqlBody = new JSONObject();
                         gqlBody.put("operationName", "ProgressUpdated");
@@ -1759,12 +1956,8 @@ public class YandexBooksApiClient {
                         vars.put("textbookProgresses", progArr);
                         gqlBody.put("variables", vars);
 
-                        Request gqlReq = createGraphQLRequestBuilder(GRAPHQL_URL)
-                                .post(RequestBody.create(JSON_MEDIA_TYPE, gqlBody.toString()))
-                                .build();
-                        gqlResp = httpClient.newCall(gqlReq).execute();
-                        if (gqlResp.isSuccessful() && gqlResp.body() != null) {
-                            String respStr = gqlResp.body().string();
+                        String respStr = executeGraphQLWithFallbackSync(gqlBody);
+                        if (respStr != null) {
                             JSONObject rj = new JSONObject(respStr);
                             if (rj.has("data") && !rj.isNull("data")) {
                                 anySuccess = true;
@@ -1772,12 +1965,7 @@ public class YandexBooksApiClient {
                                 Log.w(TAG, "GraphQL ProgressUpdated returned errors: " + rj.optJSONArray("errors"));
                             }
                         }
-                    } catch (Exception ignored) {
-                    } finally {
-                        if (gqlResp != null) {
-                            try { gqlResp.close(); } catch (Exception ignored) {}
-                        }
-                    }
+                    } catch (Exception ignored) {}
 
                     // 2. Обновление конкретной карточки по ее настоящему UUID (PUT и PATCH /profile/library_cards/{cardUuid})
                     if (cardId != null && !cardId.isEmpty() && !cardId.equals(bookUuid)) {
@@ -2159,7 +2347,7 @@ public class YandexBooksApiClient {
             payload.put("query", GQL_SEARCH);
 
             RequestBody body = RequestBody.create(JSON_MEDIA_TYPE, payload.toString());
-            Request request = createAuthRequestBuilder("https://api-gateway.bookmate.yandex.net/graphql")
+            Request request = createGraphQLRequestBuilder(PRIMARY_GRAPHQL_URL)
                     .post(body)
                     .build();
 
@@ -2728,6 +2916,168 @@ public class YandexBooksApiClient {
         } catch (Exception e) {
             postError(callback, e.getMessage());
         }
+    }
+
+    /**
+     * Загрузка облачных цитат книги (Модуль 13).
+     */
+    public void getBookQuotes(final String bookUuid, final ApiCallback<List<Quote>> callback) {
+        if (bookUuid == null || bookUuid.isEmpty()) {
+            postSuccess(callback, new ArrayList<Quote>());
+            return;
+        }
+        String url = BASE_URL + "/books/" + bookUuid + "/quotes?per_page=100";
+        Request request = createAuthRequestBuilder(url).get().build();
+        httpClient.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                postError(callback, "Ошибка загрузки цитат: " + e.getMessage());
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                try {
+                    if (!response.isSuccessful()) {
+                        int code = response.code();
+                        if (code == 404) {
+                            postSuccess(callback, new ArrayList<Quote>());
+                        } else {
+                            postError(callback, "HTTP " + code);
+                        }
+                        return;
+                    }
+                    String body = response.body() != null ? response.body().string() : "";
+                    postSuccess(callback, parseQuotesJson(body, bookUuid));
+                } catch (Exception e) {
+                    postError(callback, "Ошибка разбора цитат: " + e.getMessage());
+                } finally {
+                    response.close();
+                }
+            }
+        });
+    }
+
+    public List<Quote> parseQuotesJson(String body, String bookUuid) throws org.json.JSONException {
+        List<Quote> result = new ArrayList<>();
+        if (body == null || body.trim().isEmpty()) return result;
+        JSONObject json = new JSONObject(body);
+        JSONArray arr = json.optJSONArray("quotes");
+        if (arr == null) arr = json.optJSONArray("items");
+        if (arr == null) return result;
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject obj = arr.optJSONObject(i);
+            if (obj == null) continue;
+            String text = obj.optString("content", obj.optString("text", ""));
+            if (text == null || text.trim().isEmpty() || "null".equals(text)) continue;
+            Quote q = new Quote();
+            q.bookUuid = bookUuid;
+            q.quoteUuid = obj.optString("uuid", obj.optString("id", ""));
+            q.text = text.trim();
+            String note = obj.optString("note", obj.optString("comment", ""));
+            q.note = (note != null && !"null".equalsIgnoreCase(note)) ? note : "";
+            q.cfi = obj.optString("cfi", "");
+            CfiPosition pos = parseCfiPosition(q.cfi);
+            q.chapterIndex = (pos != null && pos.chapterIndex >= 0) ? pos.chapterIndex : 0;
+            q.startOffset = Math.max(0, obj.optInt("start_offset", 0));
+            q.endOffset = Math.max(q.startOffset, obj.optInt("end_offset", q.startOffset + q.text.length()));
+            long ts = obj.optLong("created_at", 0L);
+            if (ts <= 0L) ts = parseIsoTimestamp(obj.optString("created_at", null));
+            if (ts > 0L && ts < 1000000000000L) ts = ts * 1000L;
+            q.createdAt = ts > 0 ? ts : System.currentTimeMillis();
+            q.synced = true;
+            result.add(q);
+        }
+        return result;
+    }
+
+    /**
+     * Отправка новой цитаты в облако Яндекса (Модуль 13).
+     */
+    public void createBookQuote(final Quote quote, final ApiCallback<String> callback) {
+        if (quote == null || quote.bookUuid == null || quote.bookUuid.isEmpty()) {
+            postError(callback, "Empty quote");
+            return;
+        }
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("content", quote.text != null ? quote.text : "");
+            if (quote.cfi != null && !quote.cfi.isEmpty()) {
+                payload.put("cfi", quote.cfi);
+            }
+            if (quote.note != null && !quote.note.trim().isEmpty()) {
+                payload.put("note", quote.note.trim());
+            }
+            RequestBody reqBody = RequestBody.create(MediaType.parse("application/json; charset=utf-8"), payload.toString());
+            Request req = createAuthRequestBuilder(BASE_URL + "/books/" + quote.bookUuid + "/quotes")
+                    .post(reqBody)
+                    .build();
+            httpClient.newCall(req).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    postError(callback, e.getMessage());
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) throws IOException {
+                    try {
+                        if (!response.isSuccessful()) {
+                            postError(callback, "HTTP " + response.code());
+                            return;
+                        }
+                        String respStr = response.body() != null ? response.body().string() : "";
+                        String qUuid = "";
+                        if (!respStr.isEmpty()) {
+                            JSONObject root = new JSONObject(respStr);
+                            JSONObject qObj = root.optJSONObject("quote");
+                            if (qObj != null) {
+                                qUuid = qObj.optString("uuid", qObj.optString("id", ""));
+                            } else {
+                                qUuid = root.optString("uuid", root.optString("id", ""));
+                            }
+                        }
+                        postSuccess(callback, qUuid);
+                    } catch (Exception e) {
+                        postError(callback, e.getMessage());
+                    } finally {
+                        response.close();
+                    }
+                }
+            });
+        } catch (Exception e) {
+            postError(callback, e.getMessage());
+        }
+    }
+
+    /**
+     * Удаление цитаты из облака Яндекса.
+     */
+    public void deleteBookQuote(final String quoteUuid, final ApiCallback<Boolean> callback) {
+        if (quoteUuid == null || quoteUuid.isEmpty()) {
+            postSuccess(callback, true);
+            return;
+        }
+        Request req = createAuthRequestBuilder(BASE_URL + "/quotes/" + quoteUuid)
+                .delete()
+                .build();
+        httpClient.newCall(req).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                postError(callback, e.getMessage());
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                try {
+                    if (response.isSuccessful() || response.code() == 404) {
+                        postSuccess(callback, true);
+                    } else {
+                        postError(callback, "HTTP " + response.code());
+                    }
+                } finally {
+                    response.close();
+                }
+            }
+        });
     }
 
     private <T> void postSuccess(final ApiCallback<T> callback, final T result) {

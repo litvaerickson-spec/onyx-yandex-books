@@ -8,6 +8,7 @@ import android.database.sqlite.SQLiteOpenHelper;
 
 import com.onyx.yandexbooks.core.api.models.Book;
 import com.onyx.yandexbooks.core.api.models.Chapter;
+import com.onyx.yandexbooks.core.api.models.Quote;
 import com.onyx.yandexbooks.core.api.models.ReadingProgress;
 
 import java.util.ArrayList;
@@ -60,7 +61,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 "ALTER TABLE sync_queue ADD COLUMN document_uuid TEXT",
                 "ALTER TABLE sync_queue ADD COLUMN cfi TEXT",
                 "ALTER TABLE bookmarks ADD COLUMN timestamp INTEGER",
-                "ALTER TABLE bookmarks ADD COLUMN created_at INTEGER"
+                "ALTER TABLE bookmarks ADD COLUMN created_at INTEGER",
+                "ALTER TABLE chapters ADD COLUMN original_opf_spine_index INTEGER DEFAULT -1",
+                "ALTER TABLE chapters ADD COLUMN opf_item_id TEXT",
+                "ALTER TABLE books ADD COLUMN file_url TEXT"
         };
         for (String sql : migrations) {
             try {
@@ -87,7 +91,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 "is_downloaded INTEGER," +
                 "last_read_timestamp INTEGER," +
                 "document_uuid TEXT," +
-                "cfi TEXT" +
+                "cfi TEXT," +
+                "file_url TEXT" +
                 ")");
 
         // Таблица глав
@@ -97,7 +102,9 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 "chapter_index INTEGER," +
                 "title TEXT," +
                 "content TEXT," +
-                "is_downloaded INTEGER" +
+                "is_downloaded INTEGER," +
+                "original_opf_spine_index INTEGER DEFAULT -1," +
+                "opf_item_id TEXT" +
                 ")");
 
         // Таблица прогресса
@@ -125,8 +132,9 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 "cfi TEXT" +
                 ")");
 
-        // Закладки пользователя
+        // Закладки и цитаты пользователя
         ensureBookmarksTable(db);
+        ensureQuotesTable(db);
         ensureHiddenBooksTable(db);
 
         // Гарантируем наличие всех колонок для баз, обновленных с предыдущих версий
@@ -153,6 +161,24 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             db.execSQL("CREATE TABLE IF NOT EXISTS hidden_books (" +
                     "uuid TEXT PRIMARY KEY," +
                     "removed_at INTEGER" +
+                    ")");
+        } catch (Exception ignored) {}
+    }
+
+    private void ensureQuotesTable(SQLiteDatabase db) {
+        try {
+            db.execSQL("CREATE TABLE IF NOT EXISTS quotes (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "book_uuid TEXT," +
+                    "quote_uuid TEXT," +
+                    "chapter_index INTEGER," +
+                    "start_offset INTEGER," +
+                    "end_offset INTEGER," +
+                    "cfi TEXT," +
+                    "text TEXT," +
+                    "note TEXT," +
+                    "created_at INTEGER," +
+                    "synced INTEGER DEFAULT 0" +
                     ")");
         } catch (Exception ignored) {}
     }
@@ -254,10 +280,11 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         boolean hasLocalRecord = false;
         String localShelfType = null;
         String localCardId = null;
+        String localFileUrl = null;
 
         try {
             // 1. Проверяем локальную запись в таблице books
-            Cursor c = db.rawQuery("SELECT percent, is_downloaded, last_read_timestamp, current_chapter, current_paragraph, shelf_type, card_id FROM books WHERE uuid = ?", new String[]{book.getUuid()});
+            Cursor c = db.rawQuery("SELECT percent, is_downloaded, last_read_timestamp, current_chapter, current_paragraph, shelf_type, card_id, file_url FROM books WHERE uuid = ?", new String[]{book.getUuid()});
             if (c != null) {
                 if (c.moveToFirst()) {
                     hasLocalRecord = true;
@@ -270,6 +297,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     int cardIdx = c.getColumnIndex("card_id");
                     if (cardIdx >= 0) {
                         localCardId = c.getString(cardIdx);
+                    }
+                    int fileUrlIdx = c.getColumnIndex("file_url");
+                    if (fileUrlIdx >= 0) {
+                        localFileUrl = c.getString(fileUrlIdx);
                     }
 
                     if (localDown == 1) {
@@ -385,10 +416,12 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 }
             }
 
-            // Определение актуальной полки (Читаю / В планах / Прочитано):
+            // Определение актуальной полки (Читаю / В планах / Прочитано / Мои файлы):
             String targetShelf;
             if (overrideShelfType != null) {
                 targetShelf = overrideShelfType;
+            } else if ("user_books".equals(book.getShelfType()) || "user_books".equals(localShelfType)) {
+                targetShelf = "user_books";
             } else if (book.getShelfType() != null && ("reading".equals(book.getShelfType()) || "to_read".equals(book.getShelfType()) || "done".equals(book.getShelfType()))) {
                 boolean localReadingIsNewer = "reading".equals(localShelfType) && (hasLocalProgress || bestLocalTs > 0) && (cloudTimestamp <= 0 || bestLocalTs >= cloudTimestamp);
                 boolean localToReadIsNewer = "to_read".equals(localShelfType) && bestLocalTs > 0 && (cloudTimestamp <= 0 || bestLocalTs > cloudTimestamp);
@@ -427,6 +460,14 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             }
             if (book.getCfi() != null && !book.getCfi().isEmpty()) {
                 cv.put("cfi", book.getCfi());
+            }
+            String effectiveFileUrl = book.getFileUrl();
+            if ((effectiveFileUrl == null || effectiveFileUrl.isEmpty()) && localFileUrl != null && !localFileUrl.isEmpty()) {
+                effectiveFileUrl = localFileUrl;
+                book.setFileUrl(effectiveFileUrl);
+            }
+            if (effectiveFileUrl != null && !effectiveFileUrl.isEmpty()) {
+                cv.put("file_url", effectiveFileUrl);
             }
 
             cv.put("title", book.getTitle());
@@ -717,6 +758,11 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             b.setCfi(c.getString(cfiIdx));
         }
 
+        int fileUrlIdx = c.getColumnIndex("file_url");
+        if (fileUrlIdx >= 0) {
+            b.setFileUrl(c.getString(fileUrlIdx));
+        }
+
         return b;
     }
 
@@ -732,6 +778,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 cv.put("chapter_index", ch.getChapterIndex());
                 cv.put("title", ch.getTitle());
                 cv.put("is_downloaded", 1);
+                cv.put("original_opf_spine_index", ch.getOriginalOpfSpineIndex());
+                cv.put("opf_item_id", ch.getOpfItemId());
                 db.insertWithOnConflict("chapters", null, cv, SQLiteDatabase.CONFLICT_REPLACE);
             }
             db.setTransactionSuccessful();
@@ -751,6 +799,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 ch.setBookUuid(c.getString(c.getColumnIndex("book_uuid")));
                 ch.setChapterIndex(c.getInt(c.getColumnIndex("chapter_index")));
                 ch.setTitle(c.getString(c.getColumnIndex("title")));
+                int opfIdxCol = c.getColumnIndex("original_opf_spine_index");
+                if (opfIdxCol >= 0) ch.setOriginalOpfSpineIndex(c.getInt(opfIdxCol));
+                int opfIdCol = c.getColumnIndex("opf_item_id");
+                if (opfIdCol >= 0) ch.setOpfItemId(c.getString(opfIdCol));
                 list.add(ch);
             }
             c.close();
@@ -1067,10 +1119,154 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         }
     }
 
+    public synchronized long insertQuote(Quote quote) {
+        if (quote == null || quote.bookUuid == null) return -1;
+        try {
+            SQLiteDatabase db = getWritableDatabase();
+            ensureQuotesTable(db);
+            ContentValues cv = new ContentValues();
+            cv.put("book_uuid", quote.bookUuid);
+            cv.put("quote_uuid", quote.quoteUuid != null ? quote.quoteUuid : "");
+            cv.put("chapter_index", quote.chapterIndex);
+            cv.put("start_offset", quote.startOffset);
+            cv.put("end_offset", quote.endOffset);
+            cv.put("cfi", quote.cfi != null ? quote.cfi : "");
+            cv.put("text", quote.text != null ? quote.text : "");
+            cv.put("note", quote.note != null ? quote.note : "");
+            long now = quote.createdAt > 0 ? quote.createdAt : System.currentTimeMillis();
+            cv.put("created_at", now);
+            cv.put("synced", quote.synced ? 1 : 0);
+            long id = db.insert("quotes", null, cv);
+            quote.id = id;
+            quote.createdAt = now;
+            return id;
+        } catch (Exception e) {
+            android.util.Log.e("DatabaseHelper", "Failed to insert quote", e);
+            return -1;
+        }
+    }
+
+    public synchronized List<Quote> getQuotesForBook(String bookUuid) {
+        List<Quote> list = new ArrayList<>();
+        if (bookUuid == null) return list;
+        Cursor c = null;
+        try {
+            SQLiteDatabase db = getReadableDatabase();
+            ensureQuotesTable(db);
+            c = db.rawQuery("SELECT * FROM quotes WHERE book_uuid = ? ORDER BY created_at DESC", new String[]{bookUuid});
+            if (c != null) {
+                while (c.moveToNext()) {
+                    list.add(readQuoteFromCursor(c));
+                }
+            }
+        } catch (Exception e) {
+            android.util.Log.e("DatabaseHelper", "Failed to get quotes", e);
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
+        }
+        return list;
+    }
+
+    public synchronized List<Quote> getQuotesForChapter(String bookUuid, int chapterIndex) {
+        List<Quote> list = new ArrayList<>();
+        if (bookUuid == null) return list;
+        Cursor c = null;
+        try {
+            SQLiteDatabase db = getReadableDatabase();
+            ensureQuotesTable(db);
+            c = db.rawQuery(
+                    "SELECT * FROM quotes WHERE book_uuid = ? AND chapter_index = ? ORDER BY start_offset ASC",
+                    new String[]{bookUuid, String.valueOf(chapterIndex)}
+            );
+            if (c != null) {
+                while (c.moveToNext()) {
+                    list.add(readQuoteFromCursor(c));
+                }
+            }
+        } catch (Exception e) {
+            android.util.Log.e("DatabaseHelper", "Failed to get chapter quotes", e);
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
+        }
+        return list;
+    }
+
+    private Quote readQuoteFromCursor(Cursor c) {
+        Quote q = new Quote();
+        q.id = c.getLong(c.getColumnIndex("id"));
+        q.bookUuid = c.getString(c.getColumnIndex("book_uuid"));
+        q.quoteUuid = c.getString(c.getColumnIndex("quote_uuid"));
+        q.chapterIndex = c.getInt(c.getColumnIndex("chapter_index"));
+        q.startOffset = c.getInt(c.getColumnIndex("start_offset"));
+        q.endOffset = c.getInt(c.getColumnIndex("end_offset"));
+        q.cfi = c.getString(c.getColumnIndex("cfi"));
+        q.text = c.getString(c.getColumnIndex("text"));
+        q.note = c.getString(c.getColumnIndex("note"));
+        q.createdAt = c.getLong(c.getColumnIndex("created_at"));
+        q.synced = c.getInt(c.getColumnIndex("synced")) == 1;
+        return q;
+    }
+
+    public synchronized void deleteQuote(long id) {
+        try {
+            SQLiteDatabase db = getWritableDatabase();
+            ensureQuotesTable(db);
+            db.delete("quotes", "id = ?", new String[]{String.valueOf(id)});
+        } catch (Exception e) {
+            android.util.Log.e("DatabaseHelper", "Failed to delete quote", e);
+        }
+    }
+
+    public synchronized void markQuoteSynced(long id, String remoteQuoteUuid) {
+        try {
+            SQLiteDatabase db = getWritableDatabase();
+            ensureQuotesTable(db);
+            ContentValues cv = new ContentValues();
+            cv.put("synced", 1);
+            if (remoteQuoteUuid != null && !remoteQuoteUuid.isEmpty()) {
+                cv.put("quote_uuid", remoteQuoteUuid);
+            }
+            db.update("quotes", cv, "id = ?", new String[]{String.valueOf(id)});
+        } catch (Exception e) {
+            android.util.Log.e("DatabaseHelper", "Failed to mark quote synced", e);
+        }
+    }
+
+    public synchronized void upsertCloudQuotes(String bookUuid, List<Quote> cloudQuotes) {
+        if (bookUuid == null || cloudQuotes == null || cloudQuotes.isEmpty()) return;
+        try {
+            SQLiteDatabase db = getWritableDatabase();
+            ensureQuotesTable(db);
+            List<Quote> existing = getQuotesForBook(bookUuid);
+            for (Quote cq : cloudQuotes) {
+                if (cq == null || cq.text == null || cq.text.trim().isEmpty()) continue;
+                boolean found = false;
+                for (Quote loc : existing) {
+                    if (cq.quoteUuid != null && !cq.quoteUuid.isEmpty() && cq.quoteUuid.equals(loc.quoteUuid)) {
+                        found = true;
+                        break;
+                    }
+                    if (loc.text != null && loc.text.trim().equals(cq.text.trim()) && loc.chapterIndex == cq.chapterIndex) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    cq.bookUuid = bookUuid;
+                    cq.synced = true;
+                    insertQuote(cq);
+                }
+            }
+        } catch (Exception e) {
+            android.util.Log.e("DatabaseHelper", "Failed to upsert cloud quotes", e);
+        }
+    }
+
     public static class BackupSummary {
         public boolean success;
         public int booksCount;
         public int bookmarksCount;
+        public int quotesCount;
         public String userLogin;
         public long dbBytes;
         public String backupPath;
@@ -1099,6 +1295,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 if (c != null) c.close();
                 summary.booksCount = countTableRows(wdb, "books");
                 summary.bookmarksCount = countTableRows(wdb, "bookmarks");
+                summary.quotesCount = countTableRows(wdb, "quotes");
             } catch (Throwable ignored) {}
             java.io.File dbFile = context.getDatabasePath(DATABASE_NAME);
             java.io.File dstDb = new java.io.File(backupDir, DATABASE_NAME);
@@ -1122,6 +1319,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             meta.put("ui_scale", (double) settings.getUiScale());
             meta.put("reader_mode", settings.getReaderMode());
             meta.put("tap_zone_mode", settings.getTapZoneMode());
+            meta.put("custom_tap_zones", settings.getCustomTapZonesRaw());
+            meta.put("fullscreen_reader", settings.isFullscreenReader());
             meta.put("margin_mode", settings.getMarginMode());
             meta.put("reader_orientation", settings.getReaderOrientation());
             meta.put("font_size_sp", settings.getFontSizeSp());
@@ -1141,6 +1340,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             meta.put("card_density_mode", settings.getCardDensityMode());
             meta.put("reader_footer_offset_dp", settings.getReaderFooterOffsetDp());
             meta.put("books_count", summary.booksCount);
+            meta.put("quotes_count", summary.quotesCount);
             meta.put("backup_timestamp", System.currentTimeMillis());
 
             java.io.File metaFile = new java.io.File(backupDir, "backup_meta.json");
@@ -1213,6 +1413,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 if (meta.has("ui_scale")) settings.setUiScale((float) meta.optDouble("ui_scale", 1.0));
                 if (meta.has("reader_mode")) settings.setReaderMode(meta.optString("reader_mode", AppSettings.READER_MODE_ONYX));
                 if (meta.has("tap_zone_mode")) settings.setTapZoneMode(meta.optString("tap_zone_mode", AppSettings.TAP_ZONE_STANDARD));
+                if (meta.has("custom_tap_zones")) settings.setCustomTapZonesRaw(meta.optString("custom_tap_zones", AppSettings.DEFAULT_CUSTOM_TAP_ZONES));
+                if (meta.has("fullscreen_reader")) settings.setFullscreenReader(meta.optBoolean("fullscreen_reader", false));
                 if (meta.has("margin_mode")) settings.setMarginMode(meta.optString("margin_mode", AppSettings.MARGIN_NARROW));
                 if (meta.has("reader_orientation")) settings.setReaderOrientation(meta.optString("reader_orientation", AppSettings.ORIENTATION_PORTRAIT));
                 if (meta.has("font_size_sp")) settings.setFontSizeSp((int) meta.optInt("font_size_sp", 18));

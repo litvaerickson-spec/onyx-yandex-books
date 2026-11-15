@@ -21,6 +21,20 @@ public class AppSettings {
     public static final String TAP_ZONE_STANDARD = "standard";
     public static final String TAP_ZONE_LEFT_HANDED = "left_handed";
     public static final String TAP_ZONE_TOP_BACK_BOTTOM_FWD = "top_back_bottom_fwd";
+    public static final String TAP_ZONE_CUSTOM = "custom_3x3";
+
+    public static final String KEY_CUSTOM_TAP_ZONES = "custom_tap_zones";
+    public static final String TAP_ACTION_PREV = "prev";
+    public static final String TAP_ACTION_NEXT = "next";
+    public static final String TAP_ACTION_MENU = "menu";
+    public static final String TAP_ACTION_TOC = "toc";
+    public static final String TAP_ACTION_BOOKMARK = "bookmark";
+    public static final String TAP_ACTION_REFRESH = "refresh";
+    public static final String TAP_ACTION_NONE = "none";
+    public static final String DEFAULT_CUSTOM_TAP_ZONES =
+            "prev,menu,next,prev,menu,next,prev,menu,next";
+
+    public static final String KEY_FULLSCREEN_READER = "fullscreen_reader";
 
     public static final String KEY_MARGIN_MODE = "margin_mode";
     public static final String MARGIN_EXTRA_NARROW = "extra_narrow"; // 8px
@@ -87,6 +101,55 @@ public class AppSettings {
 
     public void setTapZoneMode(String mode) {
         prefs.edit().putString(KEY_TAP_ZONE_MODE, mode != null ? mode : TAP_ZONE_STANDARD).apply();
+    }
+
+    public String getCustomTapZonesRaw() {
+        return prefs.getString(KEY_CUSTOM_TAP_ZONES, DEFAULT_CUSTOM_TAP_ZONES);
+    }
+
+    public void setCustomTapZonesRaw(String raw) {
+        prefs.edit().putString(KEY_CUSTOM_TAP_ZONES, (raw != null && !raw.trim().isEmpty()) ? raw : DEFAULT_CUSTOM_TAP_ZONES).apply();
+    }
+
+    public String[] getCustomTapZones() {
+        return parseCustomTapZones(getCustomTapZonesRaw());
+    }
+
+    public void setCustomTapZones(String[] zones) {
+        if (zones == null || zones.length < 9) {
+            setCustomTapZonesRaw(DEFAULT_CUSTOM_TAP_ZONES);
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 9; i++) {
+            if (i > 0) sb.append(",");
+            String a = zones[i];
+            sb.append((a != null && !a.trim().isEmpty()) ? a.trim() : TAP_ACTION_NONE);
+        }
+        setCustomTapZonesRaw(sb.toString());
+    }
+
+    public static String[] parseCustomTapZones(String raw) {
+        String[] result = new String[]{
+                TAP_ACTION_PREV, TAP_ACTION_MENU, TAP_ACTION_NEXT,
+                TAP_ACTION_PREV, TAP_ACTION_MENU, TAP_ACTION_NEXT,
+                TAP_ACTION_PREV, TAP_ACTION_MENU, TAP_ACTION_NEXT
+        };
+        if (raw == null || raw.trim().isEmpty()) return result;
+        String[] parts = raw.split(",");
+        for (int i = 0; i < Math.min(9, parts.length); i++) {
+            String p = parts[i] != null ? parts[i].trim() : "";
+            if (!p.isEmpty()) result[i] = p;
+        }
+        return result;
+    }
+
+    public boolean isFullscreenReader() {
+        return prefs.getBoolean(KEY_FULLSCREEN_READER, false);
+    }
+
+    public void setFullscreenReader(boolean fullscreen) {
+        prefs.edit().putBoolean(KEY_FULLSCREEN_READER, fullscreen).apply();
     }
 
     public String getMarginMode() {

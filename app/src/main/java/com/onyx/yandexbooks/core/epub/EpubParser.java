@@ -45,6 +45,20 @@ public class EpubParser {
         public String textContent;
         public String fileHref;
         public int spineIndex;
+        public int originalOpfSpineIndex = -1;
+        public String opfItemId = "";
+    }
+
+    private static class SpineItem {
+        final String href;
+        final String idref;
+        final int originalOpfSpineIndex;
+
+        SpineItem(String href, String idref, int originalOpfSpineIndex) {
+            this.href = href;
+            this.idref = idref != null ? idref : "";
+            this.originalOpfSpineIndex = originalOpfSpineIndex;
+        }
     }
 
     public static class TocNode implements Serializable {
@@ -129,12 +143,16 @@ public class EpubParser {
 
             // 2. Парсинг spine и manifest из OPF
             List<String> chapterHrefs = new ArrayList<>();
+            List<SpineItem> spineItems = new ArrayList<>();
             Map<String, String> manifestHrefMap = new HashMap<>();
             String ncxPathFromOpf = null;
             String navPathFromOpf = null;
 
             if (opfPath != null) {
-                chapterHrefs = parseOpfSpine(zip, opfPath, opfBaseDir, manifestHrefMap);
+                spineItems = parseOpfSpineDetailed(zip, opfPath, opfBaseDir, manifestHrefMap);
+                for (SpineItem si : spineItems) {
+                    chapterHrefs.add(si.href);
+                }
                 ncxPathFromOpf = findNcxPathFromOpf(zip, opfPath, opfBaseDir);
                 navPathFromOpf = findNavPathFromOpf(zip, opfPath, opfBaseDir);
                 result.coverImagePath = findCoverImageFromOpf(zip, opfPath, opfBaseDir);
@@ -204,6 +222,12 @@ public class EpubParser {
                     cd.id = "ch_" + chIndex;
                     cd.fileHref = href;
                     cd.spineIndex = s;
+                    if (s < spineItems.size()) {
+                        cd.originalOpfSpineIndex = spineItems.get(s).originalOpfSpineIndex;
+                        cd.opfItemId = spineItems.get(s).idref;
+                    } else {
+                        cd.originalOpfSpineIndex = s;
+                    }
                     cd.textContent = richText;
 
                     // Название главы (приоритет полного пути href над коротким именем файла для многотомников)
@@ -238,6 +262,8 @@ public class EpubParser {
                     coverCh.textContent = "[IMG:" + result.coverImagePath + "]";
                     coverCh.fileHref = result.coverImagePath;
                     coverCh.spineIndex = 0;
+                    coverCh.originalOpfSpineIndex = -1;
+                    coverCh.opfItemId = "";
                     chapters.add(0, coverCh);
                     for (int i = 0; i < chapters.size(); i++) {
                         chapters.get(i).spineIndex = i;
@@ -615,7 +641,16 @@ public class EpubParser {
     }
 
     private static List<String> parseOpfSpine(ZipFile zip, String opfPath, String baseDir, Map<String, String> outManifestMap) {
-        List<String> result = new ArrayList<>();
+        List<SpineItem> detailed = parseOpfSpineDetailed(zip, opfPath, baseDir, outManifestMap);
+        List<String> result = new ArrayList<>(detailed.size());
+        for (SpineItem item : detailed) {
+            result.add(item.href);
+        }
+        return result;
+    }
+
+    private static List<SpineItem> parseOpfSpineDetailed(ZipFile zip, String opfPath, String baseDir, Map<String, String> outManifestMap) {
+        List<SpineItem> result = new ArrayList<>();
         ZipEntry opfEntry = zip.getEntry(opfPath);
         if (opfEntry == null) return result;
 
@@ -636,9 +671,10 @@ public class EpubParser {
                 outManifestMap.put(mRev.group(2), mRev.group(1));
             }
 
-            // Порядок чтения из <spine>
+            // Порядок чтения из <spine> с сохранением точного 0-based индекса <itemref> и opfItemId
             Pattern itemrefPattern = Pattern.compile("<itemref\\s+[^>]*?idref\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
             Matcher mSpine = itemrefPattern.matcher(opfXml);
+            int opfIdx = 0;
             while (mSpine.find()) {
                 String idref = mSpine.group(1);
                 String href = outManifestMap.get(idref);
@@ -647,10 +683,18 @@ public class EpubParser {
                         href = href.substring(0, href.indexOf('#'));
                     }
                     String fullPath = baseDir.isEmpty() ? href : (baseDir + href);
-                    if (!result.contains(fullPath)) {
-                        result.add(fullPath);
+                    boolean alreadyExists = false;
+                    for (int k = 0; k < result.size(); k++) {
+                        if (fullPath.equals(result.get(k).href)) {
+                            alreadyExists = true;
+                            break;
+                        }
+                    }
+                    if (!alreadyExists) {
+                        result.add(new SpineItem(fullPath, idref, opfIdx));
                     }
                 }
+                opfIdx++;
             }
         } catch (Exception e) {
             Log.w(TAG, "Error reading OPF spine", e);

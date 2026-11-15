@@ -12,6 +12,8 @@ public class Chapter implements Serializable {
     private String title;
     private String content; // Распарсенный текст или разметка
     private boolean isDownloaded;
+    private int originalOpfSpineIndex = -1;
+    private String opfItemId = "";
 
     public Chapter() {}
 
@@ -40,4 +42,10 @@ public class Chapter implements Serializable {
 
     public boolean isDownloaded() { return isDownloaded; }
     public void setDownloaded(boolean downloaded) { isDownloaded = downloaded; }
+
+    public int getOriginalOpfSpineIndex() { return originalOpfSpineIndex; }
+    public void setOriginalOpfSpineIndex(int originalOpfSpineIndex) { this.originalOpfSpineIndex = originalOpfSpineIndex; }
+
+    public String getOpfItemId() { return opfItemId != null ? opfItemId : ""; }
+    public void setOpfItemId(String opfItemId) { this.opfItemId = opfItemId != null ? opfItemId : ""; }
 }

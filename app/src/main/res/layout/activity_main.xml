@@ -108,15 +108,17 @@
             android:layout_height="32dp"
             android:minHeight="0dp"
             android:minWidth="0dp"
-            android:layout_weight="1"
+            android:layout_weight="1.15"
             android:text="Читаю (0)"
-            android:textSize="11.5sp"
+            android:textSize="10.5sp"
+            android:singleLine="true"
+            android:ellipsize="end"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
             android:background="@drawable/tab_eink_active"
             android:includeFontPadding="false"
             android:padding="0dp"
-            android:layout_marginRight="2dp" />
+            android:layout_marginRight="1dp" />
 
         <Button
             android:id="@+id/tab_to_read_btn"
@@ -124,16 +126,37 @@
             android:layout_height="32dp"
             android:minHeight="0dp"
             android:minWidth="0dp"
-            android:layout_weight="1"
+            android:layout_weight="1.2"
             android:text="В планах (0)"
-            android:textSize="11.5sp"
+            android:textSize="10.5sp"
+            android:singleLine="true"
+            android:ellipsize="end"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
             android:background="@drawable/tab_eink_inactive"
             android:includeFontPadding="false"
             android:padding="0dp"
-            android:layout_marginLeft="2dp"
-            android:layout_marginRight="2dp" />
+            android:layout_marginLeft="1dp"
+            android:layout_marginRight="1dp" />
+
+        <Button
+            android:id="@+id/tab_user_books_btn"
+            android:layout_width="0dp"
+            android:layout_height="32dp"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:layout_weight="1.05"
+            android:text="Файлы (0)"
+            android:textSize="10.5sp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textStyle="bold"
+            android:textColor="@color/eink_black"
+            android:background="@drawable/tab_eink_inactive"
+            android:includeFontPadding="false"
+            android:padding="0dp"
+            android:layout_marginLeft="1dp"
+            android:layout_marginRight="1dp" />
 
         <Button
             android:id="@+id/tab_catalog_btn"
@@ -141,16 +164,18 @@
             android:layout_height="32dp"
             android:minHeight="0dp"
             android:minWidth="0dp"
-            android:layout_weight="1"
+            android:layout_weight="0.9"
             android:text="Каталог"
-            android:textSize="11.5sp"
+            android:textSize="10.5sp"
+            android:singleLine="true"
+            android:ellipsize="end"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
             android:background="@drawable/tab_eink_inactive"
             android:includeFontPadding="false"
             android:padding="0dp"
-            android:layout_marginLeft="2dp"
-            android:layout_marginRight="2dp" />
+            android:layout_marginLeft="1dp"
+            android:layout_marginRight="1dp" />
 
         <Button
             android:id="@+id/tab_search_btn"
@@ -158,15 +183,17 @@
             android:layout_height="32dp"
             android:minHeight="0dp"
             android:minWidth="0dp"
-            android:layout_weight="1"
+            android:layout_weight="0.8"
             android:text="Поиск"
-            android:textSize="11.5sp"
+            android:textSize="10.5sp"
+            android:singleLine="true"
+            android:ellipsize="end"
             android:textStyle="bold"
             android:textColor="@color/eink_black"
             android:background="@drawable/tab_eink_inactive"
             android:includeFontPadding="false"
             android:padding="0dp"
-            android:layout_marginLeft="2dp" />
+            android:layout_marginLeft="1dp" />
     </LinearLayout>
 
     <View

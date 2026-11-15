@@ -21,6 +21,7 @@ public class Book implements Serializable {
     private boolean isDownloaded;
     private long lastReadTimestamp;
     private String libraryCardId;
+    private String fileUrl;
 
     public Book() {
     }
@@ -99,4 +100,7 @@ public class Book implements Serializable {
 
     public long getAudioUpdatedAt() { return audioUpdatedAt; }
     public void setAudioUpdatedAt(long audioUpdatedAt) { this.audioUpdatedAt = audioUpdatedAt; }
+
+    public String getFileUrl() { return fileUrl; }
+    public void setFileUrl(String fileUrl) { this.fileUrl = fileUrl; }
 }

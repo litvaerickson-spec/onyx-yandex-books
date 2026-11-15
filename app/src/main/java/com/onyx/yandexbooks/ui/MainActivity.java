@@ -70,7 +70,7 @@ public class MainActivity extends Activity {
     private EinkListView booksListView;
     private LinearLayout mainHeaderBar, mainTabsBar, shelfFooterBar;
     private TextView mainHeaderTitle;
-    private Button tabReadingBtn, tabToReadBtn, tabCatalogBtn, tabSearchBtn;
+    private Button tabReadingBtn, tabToReadBtn, tabUserBooksBtn, tabCatalogBtn, tabSearchBtn;
     private Button btnToggleReaderMode, btnCheckUpdate, btnMainMenu;
     private LinearLayout searchBarContainer;
     private View searchBarDivider;
@@ -166,6 +166,7 @@ public class MainActivity extends Activity {
         shelfFooterBar = (LinearLayout) findViewById(R.id.shelf_footer_bar);
         tabReadingBtn = (Button) findViewById(R.id.tab_reading_btn);
         tabToReadBtn = (Button) findViewById(R.id.tab_to_read_btn);
+        tabUserBooksBtn = (Button) findViewById(R.id.tab_user_books_btn);
         tabCatalogBtn = (Button) findViewById(R.id.tab_catalog_btn);
         tabSearchBtn = (Button) findViewById(R.id.tab_search_btn);
 
@@ -295,6 +296,8 @@ public class MainActivity extends Activity {
                 public void onClick(View v) {
                     if ("catalog".equals(currentShelf)) {
                         loadCatalog();
+                    } else if ("user_books".equals(currentShelf)) {
+                        loadUserUploadedBooks();
                     } else if ("search".equals(currentShelf)) {
                         String q = searchQueryInput != null ? searchQueryInput.getText().toString().trim() : "";
                         if (!q.isEmpty()) executeSearch(q);
@@ -401,6 +404,16 @@ public class MainActivity extends Activity {
             }
         }, density);
         listLayout.addView(btnShelfDone);
+
+        int userBooksCount = dbHelper.getBooksCountByShelf("user_books");
+        Button btnShelfUserBooks = createMenuButton("Мои файлы (" + userBooksCount + ")", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                switchTab("user_books");
+            }
+        }, density);
+        listLayout.addView(btnShelfUserBooks);
 
         Button btnBatchDownload = createMenuButton("Скачать полку", new View.OnClickListener() {
             @Override
@@ -544,7 +557,7 @@ public class MainActivity extends Activity {
         dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         final int targetW = (int) (dm.widthPixels * 0.90);
-        final int targetH = Math.min((int) (dm.heightPixels * 0.86), (int) (460 * density));
+        final int targetH = Math.min((int) (dm.heightPixels * 0.90), (int) (515 * density));
         dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
             @Override
             public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
@@ -1126,6 +1139,7 @@ public class MainActivity extends Activity {
         String shelfName = "«Читаю»";
         if ("to_read".equals(currentShelf)) shelfName = "«В планах»";
         else if ("done".equals(currentShelf)) shelfName = "«Прочитано»";
+        else if ("user_books".equals(currentShelf)) shelfName = "«Мои файлы»";
 
         final int totalOnShelf = allShelfBooks.size();
         final List<Book> neededToDownload = new ArrayList<>();
@@ -1554,6 +1568,15 @@ public class MainActivity extends Activity {
             }
         });
 
+        if (tabUserBooksBtn != null) {
+            tabUserBooksBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    switchTab("user_books");
+                }
+            });
+        }
+
         tabCatalogBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -1588,6 +1611,8 @@ public class MainActivity extends Activity {
             }
             if ("catalog".equals(shelf)) {
                 loadCatalog();
+            } else if ("user_books".equals(shelf)) {
+                loadUserUploadedBooks();
             } else {
                 loadBooks(shelf);
             }
@@ -1672,6 +1697,50 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void loadUserUploadedBooks() {
+        currentBooks = dbHelper.getBooksByShelf("user_books");
+        adapter.notifyDataSetChanged();
+        updateTabBadges();
+        updateTabStyles();
+        updateEmptyState();
+        updateShelfFooter();
+
+        if (currentBooks.isEmpty()) {
+            loadingTextView.setText("Загрузка личных файлов...");
+            loadingTextView.setVisibility(View.VISIBLE);
+        }
+
+        apiClient.fetchUserUploadedBooks(new YandexBooksApiClient.ApiCallback<List<Book>>() {
+            @Override
+            public void onSuccess(List<Book> books) {
+                loadingTextView.setVisibility(View.GONE);
+                if (books != null && !books.isEmpty()) {
+                    dbHelper.saveAllBooks(books);
+                }
+                if ("user_books".equals(currentShelf)) {
+                    currentBooks = dbHelper.getBooksByShelf("user_books");
+                    adapter.notifyDataSetChanged();
+                    updateTabBadges();
+                    updateEmptyState();
+                    updateShelfFooter();
+                    EpdController.requestFullRefresh(MainActivity.this, booksListView);
+                }
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                loadingTextView.setVisibility(View.GONE);
+                if ("user_books".equals(currentShelf)) {
+                    updateEmptyState();
+                    updateShelfFooter();
+                    if (currentBooks.isEmpty()) {
+                        EinkNotice.show(MainActivity.this, "Мои файлы", "Не удалось загрузить личные файлы.\n" + (errorMessage != null ? errorMessage : ""));
+                    }
+                }
+            }
+        });
+    }
+
     private void executeSearch(final String query) {
         if (query == null || query.trim().isEmpty()) {
             EinkNotice.show(this, "Поиск", "Введите поисковый запрос.");
@@ -1739,6 +1808,7 @@ public class MainActivity extends Activity {
     private void updateTabStyles() {
         boolean isReading = "reading".equals(currentShelf);
         boolean isToRead = "to_read".equals(currentShelf);
+        boolean isUserBooks = "user_books".equals(currentShelf);
         boolean isCatalog = "catalog".equals(currentShelf);
         boolean isSearch = "search".equals(currentShelf);
 
@@ -1749,6 +1819,12 @@ public class MainActivity extends Activity {
         tabToReadBtn.setBackgroundResource(isToRead ? R.drawable.tab_eink_active : R.drawable.tab_eink_inactive);
         tabToReadBtn.setTextColor(Color.BLACK);
         tabToReadBtn.setTypeface(null, isToRead ? Typeface.BOLD : Typeface.NORMAL);
+
+        if (tabUserBooksBtn != null) {
+            tabUserBooksBtn.setBackgroundResource(isUserBooks ? R.drawable.tab_eink_active : R.drawable.tab_eink_inactive);
+            tabUserBooksBtn.setTextColor(Color.BLACK);
+            tabUserBooksBtn.setTypeface(null, isUserBooks ? Typeface.BOLD : Typeface.NORMAL);
+        }
 
         tabCatalogBtn.setBackgroundResource(isCatalog ? R.drawable.tab_eink_active : R.drawable.tab_eink_inactive);
         tabCatalogBtn.setTextColor(Color.BLACK);
@@ -1762,9 +1838,13 @@ public class MainActivity extends Activity {
     private void updateTabBadges() {
         int readingCount = dbHelper.getBooksCountByShelf("reading");
         int toReadCount = dbHelper.getBooksCountByShelf("to_read");
+        int userBooksCount = dbHelper.getBooksCountByShelf("user_books");
 
         tabReadingBtn.setText("Читаю (" + readingCount + ")");
         tabToReadBtn.setText("В планах (" + toReadCount + ")");
+        if (tabUserBooksBtn != null) {
+            tabUserBooksBtn.setText("Файлы (" + userBooksCount + ")");
+        }
         tabCatalogBtn.setText("Каталог");
         tabSearchBtn.setText("Поиск");
     }
@@ -1819,6 +1899,7 @@ public class MainActivity extends Activity {
         String title = "Читаю";
         if ("to_read".equals(currentShelf)) title = "В планах";
         else if ("done".equals(currentShelf)) title = "Прочитано";
+        else if ("user_books".equals(currentShelf)) title = "Мои файлы";
         else if ("catalog".equals(currentShelf)) title = "Каталог";
         else if ("search".equals(currentShelf)) title = "Поиск";
 
@@ -1867,6 +1948,10 @@ public class MainActivity extends Activity {
                         emptyShelfHintView.setText("Попробуйте изменить поисковый запрос или имя автора.");
                         if (btnRefreshShelf != null) btnRefreshShelf.setText("Очистить поиск");
                     }
+                } else if ("user_books".equals(currentShelf)) {
+                    emptyShelfTitleView.setText("Личные файлы отсутствуют");
+                    emptyShelfHintView.setText("Здесь отображаются книги (EPUB/FB2), загруженные вами в профиль Яндекс Книг / Букмейта.");
+                    if (btnRefreshShelf != null) btnRefreshShelf.setText("Обновить «Мои файлы»");
                 } else {
                     emptyShelfTitleView.setText(R.string.empty_shelf_title);
                     emptyShelfHintView.setText(R.string.empty_shelf_hint);

@@ -674,13 +674,43 @@ public class CacheManager {
         dir.delete();
     }
 
+    private List<Chapter> saveParsedBookChapters(String bookUuid, EpubParser.ParseResult parsed) {
+        saveTocTree(bookUuid, parsed.tocTree);
+        saveFootnotes(bookUuid, parsed.footnotes);
+        saveBookEpubFonts(bookUuid, parsed.epubFonts);
+        invalidatePageCountsCache(bookUuid);
+
+        List<Chapter> chapters = new ArrayList<>();
+        for (int i = 0; i < parsed.chapters.size(); i++) {
+            EpubParser.ChapterData cd = parsed.chapters.get(i);
+            String chId = String.valueOf(i);
+            saveChapter(bookUuid, chId, cd.textContent);
+
+            Chapter ch = new Chapter();
+            ch.setId(chId);
+            ch.setBookUuid(bookUuid);
+            ch.setChapterIndex(i);
+            ch.setTitle(cd.title);
+            ch.setOriginalOpfSpineIndex(cd.originalOpfSpineIndex);
+            ch.setOpfItemId(cd.opfItemId);
+            chapters.add(ch);
+        }
+
+        markFormattedCacheCurrent(bookUuid);
+        dbHelper.saveChapters(bookUuid, chapters);
+        dbHelper.updateBookDownloaded(bookUuid, true);
+        return chapters;
+    }
+
     /**
      * Прямая синхронная загрузка книги (EPUB) и извлечение глав в текущем фоновом потоке.
      */
     public YandexBooksApiClient.DownloadResult downloadBookSync(final String bookUuid, final String bookTitle) {
         final File epubFile = getEpubFile(bookUuid);
+        Book bookMeta = dbHelper.getBookByUuid(bookUuid);
+        String directFileUrl = bookMeta != null ? bookMeta.getFileUrl() : null;
 
-        YandexBooksApiClient.DownloadResult dlResult = apiClient.downloadBookEpubSync(bookUuid, epubFile);
+        YandexBooksApiClient.DownloadResult dlResult = apiClient.downloadBookEpubSync(bookUuid, directFileUrl, epubFile);
         if (!dlResult.success || !epubFile.exists() || epubFile.length() < 500) {
             return dlResult;
         }
@@ -691,28 +721,7 @@ public class CacheManager {
                 return YandexBooksApiClient.DownloadResult.error("Не удалось извлечь главы из книги");
             }
 
-            saveTocTree(bookUuid, parsed.tocTree);
-            saveFootnotes(bookUuid, parsed.footnotes);
-            saveBookEpubFonts(bookUuid, parsed.epubFonts);
-            invalidatePageCountsCache(bookUuid);
-
-            List<Chapter> chapters = new ArrayList<>();
-            for (int i = 0; i < parsed.chapters.size(); i++) {
-                EpubParser.ChapterData cd = parsed.chapters.get(i);
-                String chId = String.valueOf(i);
-                saveChapter(bookUuid, chId, cd.textContent);
-
-                Chapter ch = new Chapter();
-                ch.setId(chId);
-                ch.setBookUuid(bookUuid);
-                ch.setChapterIndex(i);
-                ch.setTitle(cd.title);
-                chapters.add(ch);
-            }
-
-            markFormattedCacheCurrent(bookUuid);
-            dbHelper.saveChapters(bookUuid, chapters);
-            dbHelper.updateBookDownloaded(bookUuid, true);
+            saveParsedBookChapters(bookUuid, parsed);
             exportToPublicBooksDir(epubFile, bookTitle);
 
             return YandexBooksApiClient.DownloadResult.ok(epubFile);
@@ -727,8 +736,10 @@ public class CacheManager {
      */
     public void downloadBookAsync(final String bookUuid, final String bookTitle, final DownloadProgressCallback callback) {
         final File epubFile = getEpubFile(bookUuid);
+        Book bookMeta = dbHelper.getBookByUuid(bookUuid);
+        String directFileUrl = bookMeta != null ? bookMeta.getFileUrl() : null;
 
-        apiClient.downloadBookEpub(bookUuid, epubFile, new YandexBooksApiClient.ApiCallback<File>() {
+        apiClient.downloadBookEpub(bookUuid, directFileUrl, epubFile, new YandexBooksApiClient.ApiCallback<File>() {
             @Override
             public void onSuccess(final File downloadedFile) {
                 // В фоновом потоке парсим главы из скачанного EPUB архива
@@ -741,28 +752,7 @@ public class CacheManager {
                                 return null;
                             }
 
-                            saveTocTree(bookUuid, parsed.tocTree);
-                            saveFootnotes(bookUuid, parsed.footnotes);
-                            saveBookEpubFonts(bookUuid, parsed.epubFonts);
-                            invalidatePageCountsCache(bookUuid);
-
-                            List<Chapter> chapters = new ArrayList<>();
-                            for (int i = 0; i < parsed.chapters.size(); i++) {
-                                EpubParser.ChapterData cd = parsed.chapters.get(i);
-                                String chId = String.valueOf(i);
-                                saveChapter(bookUuid, chId, cd.textContent);
-
-                                Chapter ch = new Chapter();
-                                ch.setId(chId);
-                                ch.setBookUuid(bookUuid);
-                                ch.setChapterIndex(i);
-                                ch.setTitle(cd.title);
-                                chapters.add(ch);
-                            }
-
-                            markFormattedCacheCurrent(bookUuid);
-                            dbHelper.saveChapters(bookUuid, chapters);
-                            dbHelper.updateBookDownloaded(bookUuid, true);
+                            List<Chapter> chapters = saveParsedBookChapters(bookUuid, parsed);
 
                             // Также экспортируем копию в /sdcard/Books/YandexBooks/ для системы Onyx
                             exportToPublicBooksDir(downloadedFile, bookTitle);
@@ -852,27 +842,7 @@ public class CacheManager {
                         EpubParser.ParseResult parsed = EpubParser.parseEpubFull(epub, getEpubFontsDir(bookUuid));
                         if (parsed == null || parsed.chapters.isEmpty()) return null;
 
-                        saveTocTree(bookUuid, parsed.tocTree);
-                        saveFootnotes(bookUuid, parsed.footnotes);
-                        saveBookEpubFonts(bookUuid, parsed.epubFonts);
-                        invalidatePageCountsCache(bookUuid);
-
-                        List<Chapter> newChapters = new ArrayList<>();
-                        for (int i = 0; i < parsed.chapters.size(); i++) {
-                            EpubParser.ChapterData cd = parsed.chapters.get(i);
-                            String chId = String.valueOf(i);
-                            saveChapter(bookUuid, chId, cd.textContent);
-                            Chapter ch = new Chapter();
-                            ch.setId(chId);
-                            ch.setBookUuid(bookUuid);
-                            ch.setChapterIndex(i);
-                            ch.setTitle(cd.title);
-                            newChapters.add(ch);
-                        }
-                        markFormattedCacheCurrent(bookUuid);
-                        dbHelper.saveChapters(bookUuid, newChapters);
-                        dbHelper.updateBookDownloaded(bookUuid, true);
-                        return newChapters;
+                        return saveParsedBookChapters(bookUuid, parsed);
                     } catch (Throwable e) {
                         Log.e(TAG, "Error reparsing EPUB", e);
                         return null;

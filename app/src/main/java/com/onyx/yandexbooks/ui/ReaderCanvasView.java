@@ -9,9 +9,11 @@ import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.util.AttributeSet;
+import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
 
+import com.onyx.yandexbooks.core.api.models.Quote;
 import com.onyx.yandexbooks.core.typography.FontHelper;
 import com.onyx.yandexbooks.core.typography.TextPaginator;
 import com.onyx.yandexbooks.core.typography.TypographyConfig;
@@ -74,6 +76,30 @@ public class ReaderCanvasView extends View {
         void onEdgeBrightnessChanged(boolean isWarmEdge, int newPercent);
     }
 
+    public interface OnExtraTapActionListener {
+        void onOpenToc();
+        void onToggleBookmark();
+        void onForceRefresh();
+    }
+
+    public interface OnTextSelectionListener {
+        void onTextSelected(String selectedText, int startOffset, int endOffset);
+    }
+
+    private static class RenderedWordBox {
+        final RectF rect;
+        final int startOffset;
+        final int endOffset;
+        final String text;
+
+        RenderedWordBox(RectF rect, int startOffset, int endOffset, String text) {
+            this.rect = rect;
+            this.startOffset = startOffset;
+            this.endOffset = endOffset;
+            this.text = text;
+        }
+    }
+
     private static class FootnoteHitbox {
         final RectF bounds;
         final String marker;
@@ -103,10 +129,37 @@ public class ReaderCanvasView extends View {
     private OnFootnoteTapListener footnoteTapListener;
     private OnLinkTapListener linkTapListener;
     private OnEdgeBrightnessGestureListener edgeBrightnessListener;
+    private OnExtraTapActionListener extraTapActionListener;
+    private OnTextSelectionListener textSelectionListener;
 
     private Map<String, String> footnotesMap;
     private final List<FootnoteHitbox> footnoteHitboxes = new ArrayList<>();
     private final List<LinkHitbox> linkHitboxes = new ArrayList<>();
+    private final List<RenderedWordBox> renderedWordBoxes = new ArrayList<>();
+    private final List<Quote> chapterQuotes = new ArrayList<>();
+    private boolean isSelectingText = false;
+    private int selectionAnchorOffset = -1;
+    private int selectionFocusOffset = -1;
+    private final Paint selectionFillPaint = new Paint();
+    private final Paint savedQuoteFillPaint = new Paint();
+    private final Runnable longPressRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (isEdgeBrightnessDragging || textSelectionListener == null || renderedWordBoxes.isEmpty()) {
+                return;
+            }
+            RenderedWordBox hit = findWordBoxAtOrNear(touchDownX, touchDownY, dpToPx(20f));
+            if (hit != null) {
+                isSelectingText = true;
+                selectionAnchorOffset = hit.startOffset;
+                selectionFocusOffset = hit.endOffset;
+                try {
+                    performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                } catch (Throwable ignored) {}
+                invalidate();
+            }
+        }
+    };
     private final Paint runPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint decorPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private Typeface baseBookTypeface;
@@ -266,12 +319,35 @@ public class ReaderCanvasView extends View {
         invalidate();
     }
 
+    public void setChapterQuotes(List<Quote> quotes) {
+        this.chapterQuotes.clear();
+        if (quotes != null) {
+            this.chapterQuotes.addAll(quotes);
+        }
+        invalidate();
+    }
+
+    public void setOnTextSelectionListener(OnTextSelectionListener listener) {
+        this.textSelectionListener = listener;
+    }
+
+    public void clearSelection() {
+        isSelectingText = false;
+        selectionAnchorOffset = -1;
+        selectionFocusOffset = -1;
+        invalidate();
+    }
+
     public void setOnFootnoteTapListener(OnFootnoteTapListener listener) {
         this.footnoteTapListener = listener;
     }
 
     public void setOnLinkTapListener(OnLinkTapListener listener) {
         this.linkTapListener = listener;
+    }
+
+    public void setOnExtraTapActionListener(OnExtraTapActionListener listener) {
+        this.extraTapActionListener = listener;
     }
 
     public void setEpubFontPaths(Map<String, String> fontPaths) {
@@ -371,6 +447,7 @@ public class ReaderCanvasView extends View {
         canvas.drawColor(bgColor);
         footnoteHitboxes.clear();
         linkHitboxes.clear();
+        renderedWordBoxes.clear();
         decorPaint.setColor(textColor);
         decorPaint.setStyle(Paint.Style.STROKE);
         textPaint.setColor(textColor);
@@ -505,6 +582,46 @@ public class ReaderCanvasView extends View {
                 }
 
                 int drawY = Math.round(currentY);
+                if (line.wordBoxes != null && !line.wordBoxes.isEmpty()) {
+                    float boxTop = currentY + (fm.ascent * line.fontScale) - dpToPx(2f);
+                    float boxBot = currentY + (fm.descent * line.fontScale) + dpToPx(2f);
+                    int activeStart = (selectionAnchorOffset >= 0 && selectionFocusOffset >= 0) ? Math.min(selectionAnchorOffset, selectionFocusOffset) : -1;
+                    int activeEnd = (selectionAnchorOffset >= 0 && selectionFocusOffset >= 0) ? Math.max(selectionAnchorOffset, selectionFocusOffset) : -1;
+                    selectionFillPaint.setStyle(Paint.Style.FILL);
+                    selectionFillPaint.setColor(isNight ? Color.rgb(90, 90, 90) : Color.rgb(190, 190, 190));
+                    savedQuoteFillPaint.setStyle(Paint.Style.FILL);
+                    savedQuoteFillPaint.setColor(isNight ? Color.rgb(52, 52, 52) : Color.rgb(226, 226, 226));
+
+                    for (int wbIdx = 0; wbIdx < line.wordBoxes.size(); wbIdx++) {
+                        TextPaginator.WordBox wb = line.wordBoxes.get(wbIdx);
+                        RectF wRect = new RectF(lineX + wb.relStartX, boxTop, lineX + wb.relEndX, boxBot);
+                        renderedWordBoxes.add(new RenderedWordBox(wRect, wb.startCharOffset, wb.endCharOffset, wb.text));
+
+                        boolean inActiveSel = activeStart >= 0 && wb.startCharOffset < activeEnd && wb.endCharOffset > activeStart;
+                        boolean inSavedQuote = !inActiveSel && isRangeInSavedQuotes(wb.startCharOffset, wb.endCharOffset);
+                        if (inActiveSel || inSavedQuote) {
+                            float drawRight = wRect.right;
+                            if (wbIdx + 1 < line.wordBoxes.size()) {
+                                TextPaginator.WordBox nextWb = line.wordBoxes.get(wbIdx + 1);
+                                boolean nextMatches = inActiveSel
+                                        ? (activeStart >= 0 && nextWb.startCharOffset < activeEnd && nextWb.endCharOffset > activeStart)
+                                        : isRangeInSavedQuotes(nextWb.startCharOffset, nextWb.endCharOffset);
+                                if (nextMatches) {
+                                    drawRight = lineX + nextWb.relStartX;
+                                }
+                            }
+                            canvas.drawRect(wRect.left, boxTop, drawRight, boxBot, inActiveSel ? selectionFillPaint : savedQuoteFillPaint);
+                            if (inSavedQuote) {
+                                decorPaint.setStrokeWidth(Math.max(1.5f, dpToPx(1.5f)));
+                                canvas.drawLine(wRect.left, boxBot, drawRight, boxBot, decorPaint);
+                            } else {
+                                decorPaint.setStrokeWidth(Math.max(1.5f, dpToPx(1.5f)));
+                                canvas.drawLine(wRect.left, boxTop, drawRight, boxTop, decorPaint);
+                                canvas.drawLine(wRect.left, boxBot, drawRight, boxBot, decorPaint);
+                            }
+                        }
+                    }
+                }
                 if (line.drawQuoteBar) {
                     decorPaint.setStrokeWidth(Math.max(2f, dpToPx(2f)));
                     float barX = startX + Math.max(4f, line.leftInsetPx * 0.42f);
@@ -781,9 +898,27 @@ public class ReaderCanvasView extends View {
                 touchStartedInRightEdge = edgeBrightnessEnabled && width > 0 && touchDownX >= width * 0.90f;
                 dragStartLightLevel = touchStartedInLeftEdge ? warmLightLevel : coldLightLevel;
                 lastDispatchedLightLevel = -1;
+                removeCallbacks(longPressRunnable);
+                if (textSelectionListener != null && !renderedWordBoxes.isEmpty() && !touchStartedInLeftEdge && !touchStartedInRightEdge) {
+                    postDelayed(longPressRunnable, 480L);
+                }
                 return true;
 
             case MotionEvent.ACTION_MOVE:
+                if (isSelectingText) {
+                    RenderedWordBox hovered = findWordBoxAtOrNear(event.getX(), event.getY(), dpToPx(32f));
+                    if (hovered != null) {
+                        int newFocus = hovered.startOffset >= selectionAnchorOffset ? hovered.endOffset : hovered.startOffset;
+                        if (newFocus != selectionFocusOffset) {
+                            selectionFocusOffset = newFocus;
+                            invalidate();
+                        }
+                    }
+                    return true;
+                }
+                if (Math.abs(event.getX() - touchDownX) > dpToPx(14f) || Math.abs(event.getY() - touchDownY) > dpToPx(14f)) {
+                    removeCallbacks(longPressRunnable);
+                }
                 if (edgeBrightnessEnabled && (touchStartedInLeftEdge || touchStartedInRightEdge) && height > 0) {
                     float moveX = event.getX();
                     float moveY = event.getY();
@@ -821,6 +956,10 @@ public class ReaderCanvasView extends View {
                 return true;
 
             case MotionEvent.ACTION_CANCEL:
+                removeCallbacks(longPressRunnable);
+                if (isSelectingText) {
+                    clearSelection();
+                }
                 if (isEdgeBrightnessDragging) {
                     isEdgeBrightnessDragging = false;
                     postDelayed(hideBrightnessHudRunnable, 1200L);
@@ -828,6 +967,12 @@ public class ReaderCanvasView extends View {
                 return true;
 
             case MotionEvent.ACTION_UP:
+                removeCallbacks(longPressRunnable);
+                if (isSelectingText) {
+                    isSelectingText = false;
+                    dispatchSelectedText();
+                    return true;
+                }
                 float upX = event.getX();
                 float upY = event.getY();
                 if (isEdgeBrightnessDragging) {
@@ -901,6 +1046,11 @@ public class ReaderCanvasView extends View {
                             } else {
                                 interactionListener.onCenterTap();
                             }
+                        } else if ("custom_3x3".equalsIgnoreCase(tapMode) && config != null) {
+                            int col = (upX < width * 0.3333f) ? 0 : (upX < width * 0.6667f ? 1 : 2);
+                            int row = (upY < height * 0.3333f) ? 0 : (upY < height * 0.6667f ? 1 : 2);
+                            String action = config.getCustomTapActionAt(row, col);
+                            dispatchCustomTapAction(action);
                         } else {
                             // 2. Стандартный тап по зонам (левые 30% Назад, правые 30% Вперед, центр 40% Меню)
                             if (upX < width * 0.30f) {
@@ -916,6 +1066,82 @@ public class ReaderCanvasView extends View {
                 return true;
         }
         return true;
+    }
+
+    private void dispatchCustomTapAction(String action) {
+        if ("prev".equalsIgnoreCase(action)) {
+            if (interactionListener != null) interactionListener.onPageBackward();
+        } else if ("next".equalsIgnoreCase(action)) {
+            if (interactionListener != null) interactionListener.onPageForward();
+        } else if ("menu".equalsIgnoreCase(action)) {
+            if (interactionListener != null) interactionListener.onCenterTap();
+        } else if ("toc".equalsIgnoreCase(action)) {
+            if (extraTapActionListener != null) extraTapActionListener.onOpenToc();
+        } else if ("bookmark".equalsIgnoreCase(action)) {
+            if (extraTapActionListener != null) extraTapActionListener.onToggleBookmark();
+        } else if ("refresh".equalsIgnoreCase(action)) {
+            if (extraTapActionListener != null) extraTapActionListener.onForceRefresh();
+        }
+    }
+
+    private boolean isRangeInSavedQuotes(int startOffset, int endOffset) {
+        if (chapterQuotes.isEmpty()) return false;
+        for (int i = 0; i < chapterQuotes.size(); i++) {
+            Quote q = chapterQuotes.get(i);
+            if (q == null) continue;
+            if (q.endOffset > startOffset && q.startOffset < endOffset) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private RenderedWordBox findWordBoxAtOrNear(float x, float y, float maxRadiusPx) {
+        if (renderedWordBoxes.isEmpty()) return null;
+        for (int i = 0; i < renderedWordBoxes.size(); i++) {
+            RenderedWordBox b = renderedWordBoxes.get(i);
+            if (x >= b.rect.left - dpToPx(3f) && x <= b.rect.right + dpToPx(3f)
+                    && y >= b.rect.top - dpToPx(3f) && y <= b.rect.bottom + dpToPx(3f)) {
+                return b;
+            }
+        }
+        RenderedWordBox best = null;
+        float bestDist = maxRadiusPx * maxRadiusPx;
+        for (int i = 0; i < renderedWordBoxes.size(); i++) {
+            RenderedWordBox b = renderedWordBoxes.get(i);
+            float cy = (b.rect.top + b.rect.bottom) * 0.5f;
+            float dy = y - cy;
+            float dx = (x < b.rect.left) ? (b.rect.left - x) : ((x > b.rect.right) ? (x - b.rect.right) : 0f);
+            float distSq = dx * dx + (dy * dy * 2.2f);
+            if (distSq < bestDist) {
+                bestDist = distSq;
+                best = b;
+            }
+        }
+        return best;
+    }
+
+    private void dispatchSelectedText() {
+        if (textSelectionListener == null || selectionAnchorOffset < 0 || selectionFocusOffset < 0) {
+            clearSelection();
+            return;
+        }
+        int selStart = Math.min(selectionAnchorOffset, selectionFocusOffset);
+        int selEnd = Math.max(selectionAnchorOffset, selectionFocusOffset);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < renderedWordBoxes.size(); i++) {
+            RenderedWordBox b = renderedWordBoxes.get(i);
+            if (b.startOffset < selEnd && b.endOffset > selStart) {
+                if (sb.length() > 0) sb.append(' ');
+                sb.append(b.text);
+            }
+        }
+        String text = sb.toString().trim();
+        if (text.isEmpty()) {
+            clearSelection();
+            return;
+        }
+        textSelectionListener.onTextSelected(text, selStart, selEnd);
     }
 
     private float spToPx(int sp) {

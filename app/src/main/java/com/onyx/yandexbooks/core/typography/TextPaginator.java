@@ -48,6 +48,22 @@ public class TextPaginator {
         }
     }
 
+    public static class WordBox {
+        public final float relStartX;
+        public final float relEndX;
+        public final int startCharOffset;
+        public final int endCharOffset;
+        public final String text;
+
+        public WordBox(float relStartX, float relEndX, int startCharOffset, int endCharOffset, String text) {
+            this.relStartX = relStartX;
+            this.relEndX = relEndX;
+            this.startCharOffset = startCharOffset;
+            this.endCharOffset = endCharOffset;
+            this.text = text != null ? text : "";
+        }
+    }
+
     public static class Line {
         public final String text;
         public final boolean isParagraphStart;
@@ -61,11 +77,12 @@ public class TextPaginator {
         public final float extraTopPx;
         public final float extraBottomPx;
         public final List<LineRun> runs;
+        public final List<WordBox> wordBoxes;
 
         public Line(String text, boolean isParagraphStart, boolean isLastLineOfParagraph, float wordSpacing) {
             this(text, isParagraphStart, isLastLineOfParagraph, wordSpacing,
                     isLastLineOfParagraph ? ALIGN_LEFT : ALIGN_JUSTIFY,
-                    1.0f, 0f, 0f, false, 0f, 0f, null);
+                    1.0f, 0f, 0f, false, 0f, 0f, null, null);
         }
 
         public Line(
@@ -82,6 +99,26 @@ public class TextPaginator {
                 float extraBottomPx,
                 List<LineRun> runs
         ) {
+            this(text, isParagraphStart, isLastLineOfParagraph, wordSpacing,
+                    alignment, fontScale, indentPx, leftInsetPx, drawQuoteBar,
+                    extraTopPx, extraBottomPx, runs, null);
+        }
+
+        public Line(
+                String text,
+                boolean isParagraphStart,
+                boolean isLastLineOfParagraph,
+                float wordSpacing,
+                int alignment,
+                float fontScale,
+                float indentPx,
+                float leftInsetPx,
+                boolean drawQuoteBar,
+                float extraTopPx,
+                float extraBottomPx,
+                List<LineRun> runs,
+                List<WordBox> wordBoxes
+        ) {
             this.text = text != null ? text : "";
             this.isParagraphStart = isParagraphStart;
             this.isLastLineOfParagraph = isLastLineOfParagraph;
@@ -94,6 +131,7 @@ public class TextPaginator {
             this.extraTopPx = extraTopPx;
             this.extraBottomPx = extraBottomPx;
             this.runs = runs != null ? runs : Collections.singletonList(new LineRun(this.text, STYLE_NORMAL, null, null));
+            this.wordBoxes = wordBoxes != null ? wordBoxes : Collections.<WordBox>emptyList();
         }
     }
 
@@ -392,6 +430,8 @@ public class TextPaginator {
             boolean isFirstLineOfParagraph = true;
             float activeIndent = firstLineIndent;
             float currentLineWidth = activeIndent;
+            int[] paraCharCursor = new int[]{globalCharOffset};
+            int paraEndOffset = globalCharOffset + rawParagraph.length();
 
             for (int w = 0; w < words.size(); w++) {
                 WordToken token = words.get(w);
@@ -428,7 +468,7 @@ public class TextPaginator {
                             lineWords.add(splitFirst);
                             Line built = buildLine(lineWords, measurer, effectiveAvailableWidth, alignment, fontScale,
                                     isFirstLineOfParagraph, false, isFirstLineOfParagraph ? firstLineIndent : 0f,
-                                    leftInsetPx, isQuote, topGap, 0f);
+                                    leftInsetPx, isQuote, topGap, 0f, paraCharCursor, paraEndOffset);
                             currentLines.add(built);
                             usedHeight += topGap + thisLineHeight;
                             isFirstLineOfParagraph = false;
@@ -475,7 +515,7 @@ public class TextPaginator {
 
                         Line built = buildLine(lineWords, measurer, effectiveAvailableWidth, alignment, fontScale,
                                 isFirstLineOfParagraph, false, isFirstLineOfParagraph ? firstLineIndent : 0f,
-                                leftInsetPx, isQuote, topGap, 0f);
+                                leftInsetPx, isQuote, topGap, 0f, paraCharCursor, paraEndOffset);
                         currentLines.add(built);
                         usedHeight += topGap + thisLineHeight;
 
@@ -498,7 +538,7 @@ public class TextPaginator {
                 }
                 Line built = buildLine(lineWords, measurer, effectiveAvailableWidth, alignment, fontScale,
                         isFirstLineOfParagraph, true, isFirstLineOfParagraph ? firstLineIndent : 0f,
-                        leftInsetPx, isQuote, topGap, extraBottomPx);
+                        leftInsetPx, isQuote, topGap, extraBottomPx, paraCharCursor, paraEndOffset);
                 currentLines.add(built);
                 usedHeight += topGap + thisLineHeight + extraBottomPx;
             }
@@ -554,7 +594,9 @@ public class TextPaginator {
             float leftInsetPx,
             boolean drawQuoteBar,
             float extraTopPx,
-            float extraBottomPx
+            float extraBottomPx,
+            int[] paraCharCursor,
+            int paraEndOffset
     ) {
         StringBuilder plainSb = new StringBuilder();
         List<LineRun> runs = new ArrayList<>();
@@ -592,8 +634,31 @@ public class TextPaginator {
             }
         }
 
+        List<WordBox> wordBoxes = new ArrayList<>(lineWords.size());
+        float xCursor = 0f;
+        int lastStyle = STYLE_NORMAL;
+        for (int i = 0; i < lineWords.size(); i++) {
+            WordToken wt = lineWords.get(i);
+            if (i > 0) {
+                float spW = measurer.measureSpace(lastStyle, fontScale);
+                xCursor += spW + wordSpacing;
+            }
+            float wStart = xCursor;
+            float wordW = measurer.measureWord(wt, fontScale);
+            float wEnd = wStart + wordW;
+            if (!wt.pieces.isEmpty()) {
+                lastStyle = wt.pieces.get(wt.pieces.size() - 1).style;
+            }
+            String wordText = wt.getPlainText();
+            int cStart = Math.min(paraEndOffset, paraCharCursor[0]);
+            int cEnd = Math.min(paraEndOffset, cStart + wordText.length());
+            paraCharCursor[0] = Math.min(paraEndOffset, cEnd + 1);
+            wordBoxes.add(new WordBox(wStart, wEnd, cStart, cEnd, wordText));
+            xCursor = wEnd;
+        }
+
         return new Line(linePlain, isParagraphStart, isLastLineOfParagraph, wordSpacing,
-                alignment, fontScale, indentPx, leftInsetPx, drawQuoteBar, extraTopPx, extraBottomPx, runs);
+                alignment, fontScale, indentPx, leftInsetPx, drawQuoteBar, extraTopPx, extraBottomPx, runs, wordBoxes);
     }
 
     private void appendRunMerged(List<LineRun> runs, String text, int style, String linkTarget, String linkLabel) {

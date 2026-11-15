@@ -28,11 +28,14 @@ import android.view.WindowManager;
 import android.widget.AdapterView;
 import android.widget.BaseAdapter;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.text.TextUtils;
+
+import com.onyx.yandexbooks.core.api.models.Quote;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
@@ -122,6 +125,7 @@ public class ReaderActivity extends Activity {
     private Button btnToggleIndent;
     private Button btnToggleTapZones;
     private Button btnToggleEdgeBrightness;
+    private Button btnToggleFullscreen;
     private View rowToggleAudioSync;
     private Button btnToggleAudioSync;
     private boolean hasLinkedAudio = false;
@@ -270,6 +274,7 @@ public class ReaderActivity extends Activity {
         btnToggleIndent = (Button) findViewById(R.id.btn_toggle_indent);
         btnToggleTapZones = (Button) findViewById(R.id.btn_toggle_tap_zones);
         btnToggleEdgeBrightness = (Button) findViewById(R.id.btn_toggle_edge_brightness);
+        btnToggleFullscreen = (Button) findViewById(R.id.btn_toggle_fullscreen);
         rowToggleAudioSync = findViewById(R.id.row_toggle_audio_sync);
         btnToggleAudioSync = (Button) findViewById(R.id.btn_toggle_audio_sync);
         if (rowToggleAudioSync != null) {
@@ -296,6 +301,7 @@ public class ReaderActivity extends Activity {
 
         appSettings = new com.onyx.yandexbooks.core.storage.AppSettings(this);
         applyOrientation();
+        applyFullscreenMode();
         typographyConfig = new TypographyConfig();
         typographyConfig.setFontSizeSp(appSettings.getFontSizeSp());
         typographyConfig.setFontFamily(appSettings.getFontFamily());
@@ -307,6 +313,7 @@ public class ReaderActivity extends Activity {
         typographyConfig.setVerticalMarginMode(appSettings.getVerticalMarginMode());
         typographyConfig.setNightMode(appSettings.isNightMode());
         typographyConfig.setTapZoneMode(appSettings.getTapZoneMode());
+        typographyConfig.setCustomTapZones(appSettings.getCustomTapZones());
         typographyConfig.setUseEpubFonts(appSettings.isUseEpubFonts());
         typographyConfig.setDensityScale(getResources().getDisplayMetrics().density);
         applyFooterOffsetToConfig();
@@ -432,6 +439,31 @@ public class ReaderActivity extends Activity {
             @Override
             public void onLinkTap(final String target, final String label) {
                 handleCanvasLinkTap(target, label);
+            }
+        });
+
+        readerCanvas.setOnExtraTapActionListener(new ReaderCanvasView.OnExtraTapActionListener() {
+            @Override
+            public void onOpenToc() {
+                showTableOfContentsDialog();
+            }
+
+            @Override
+            public void onToggleBookmark() {
+                addQuickBookmarkAtCurrentPosition();
+            }
+
+            @Override
+            public void onForceRefresh() {
+                EpdController.applyGCOnce(readerCanvas);
+                EpdController.requestFullRefresh(ReaderActivity.this, readerCanvas);
+            }
+        });
+
+        readerCanvas.setOnTextSelectionListener(new ReaderCanvasView.OnTextSelectionListener() {
+            @Override
+            public void onTextSelected(String selectedText, int startOffset, int endOffset) {
+                showTextSelectionActionDialog(selectedText, startOffset, endOffset);
             }
         });
 
@@ -777,7 +809,27 @@ public class ReaderActivity extends Activity {
             btnToggleTapZones.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    cycleTapZoneMode();
+                    showTapZoneSettingsDialog();
+                }
+            });
+            btnToggleTapZones.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View v) {
+                    showCustomTapZoneGridDialog();
+                    return true;
+                }
+            });
+        }
+
+        updateFullscreenButtonText();
+        if (btnToggleFullscreen != null) {
+            btnToggleFullscreen.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    boolean next = !appSettings.isFullscreenReader();
+                    appSettings.setFullscreenReader(next);
+                    applyFullscreenMode();
+                    updateFullscreenButtonText();
                 }
             });
         }
@@ -974,6 +1026,7 @@ public class ReaderActivity extends Activity {
         setupRowClick(R.id.row_toggle_indent, btnToggleIndent);
         setupRowClick(R.id.row_toggle_tap_zones, btnToggleTapZones);
         setupRowClick(R.id.row_toggle_edge_brightness, btnToggleEdgeBrightness);
+        setupRowClick(R.id.row_toggle_fullscreen, btnToggleFullscreen);
         setupRowClick(R.id.row_toggle_audio_sync, btnToggleAudioSync);
         setupRowClick(R.id.row_toggle_contrast, btnToggleContrast);
         setupRowClick(R.id.row_toggle_hyphenation, btnToggleHyphenation);
@@ -1272,9 +1325,45 @@ public class ReaderActivity extends Activity {
             btnToggleTapZones.setText("Для левшей");
         } else if (com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_TOP_BACK_BOTTOM_FWD.equalsIgnoreCase(mode)) {
             btnToggleTapZones.setText("Верх/Низ");
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_CUSTOM.equalsIgnoreCase(mode)) {
+            btnToggleTapZones.setText("Своя 3×3");
         } else {
             btnToggleTapZones.setText("Стандарт");
         }
+    }
+
+    private void updateFullscreenButtonText() {
+        if (btnToggleFullscreen == null || appSettings == null) return;
+        btnToggleFullscreen.setText(appSettings.isFullscreenReader() ? "Скрыт бар" : "Выкл");
+    }
+
+    private void applyFullscreenMode() {
+        if (getWindow() == null || appSettings == null) return;
+        if (appSettings.isFullscreenReader()) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        } else {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        }
+    }
+
+    private void addQuickBookmarkAtCurrentPosition() {
+        if (dbHelper == null || bookUuid == null || bookUuid.isEmpty()) return;
+        String title = getActiveChapterTitle();
+        String snippet = "";
+        if (currentPages != null && currentPageIndex < currentPages.size()) {
+            TextPaginator.Page page = currentPages.get(currentPageIndex);
+            if (page != null && page.lines != null) {
+                StringBuilder sb = new StringBuilder();
+                for (TextPaginator.Line line : page.lines) {
+                    if (line != null && line.text != null) sb.append(line.text).append(" ");
+                    if (sb.length() > 90) break;
+                }
+                snippet = sb.toString().trim();
+                if (snippet.length() > 90) snippet = snippet.substring(0, 90) + "...";
+            }
+        }
+        dbHelper.addBookmark(bookUuid, currentChapterIndex, currentPageIndex, title, snippet);
+        EinkNotice.show(ReaderActivity.this, "Закладка", "Закладка сохранена:\n" + title + " (стр. " + globalPageIndex + ")");
     }
 
     private void updateEdgeBrightnessButtonText() {
@@ -1292,27 +1381,332 @@ public class ReaderActivity extends Activity {
         rowToggleAudioSync.setVisibility(hasLinkedAudio ? View.VISIBLE : View.GONE);
     }
 
-    private void cycleTapZoneMode() {
-        String cur = typographyConfig.getTapZoneMode();
-        String next;
-        String hint;
-        if (com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_STANDARD.equalsIgnoreCase(cur)) {
-            next = com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_LEFT_HANDED;
-            hint = "Режим «Для левшей»:\n• Левый край (верх и низ 30%): Вперед\n• Левый край (центр 40%): Назад\n• Правый край: Вперед";
-        } else if (com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_LEFT_HANDED.equalsIgnoreCase(cur)) {
-            next = com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_TOP_BACK_BOTTOM_FWD;
-            hint = "Режим «Верх / Низ»:\n• Верхние 30% экрана: Назад\n• Нижние 40% экрана: Вперед\n• Центр экрана: Меню";
-        } else {
-            next = com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_STANDARD;
-            hint = "Режим «Стандарт»:\n• Левые 30% экрана: Назад\n• Правые 30% экрана: Вперед\n• Центр экрана: Меню";
+    private void showTapZoneSettingsDialog() {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setWindowAnimations(0);
         }
-        typographyConfig.setTapZoneMode(next);
-        appSettings.setTapZoneMode(next);
+
+        float density = getResources().getDisplayMetrics().density;
+        final LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (14 * density);
+        root.setPadding(pad, pad, pad, pad);
+
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(Color.WHITE);
+        bg.setStroke((int) Math.max(2, 2 * density), Color.BLACK);
+        root.setBackgroundDrawable(bg);
+
+        TextView titleView = new TextView(this);
+        titleView.setText("Зоны касания экрана");
+        titleView.setTextSize(15);
+        titleView.setTypeface(null, Typeface.BOLD);
+        titleView.setTextColor(Color.BLACK);
+        titleView.setPadding(0, 0, 0, (int) (8 * density));
+        root.addView(titleView);
+
+        String cur = typographyConfig.getTapZoneMode();
+        final String[] modes = new String[]{
+                com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_STANDARD,
+                com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_LEFT_HANDED,
+                com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_TOP_BACK_BOTTOM_FWD,
+                com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_CUSTOM
+        };
+        final String[] labels = new String[]{
+                "Стандарт (Лево=Назад, Право=Вперед)",
+                "Для левшей (Лево верх/низ=Вперед, центр=Назад)",
+                "Верх / Низ (Верх=Назад, Низ=Вперед)",
+                "Пользовательская сетка 3×3"
+        };
+
+        for (int i = 0; i < modes.length; i++) {
+            final String m = modes[i];
+            boolean selected = m.equalsIgnoreCase(cur);
+            Button btn = new Button(this);
+            btn.setText((selected ? "✓ " : "") + labels[i]);
+            btn.setTextSize(12);
+            btn.setTypeface(null, selected ? Typeface.BOLD : Typeface.NORMAL);
+            btn.setTextColor(Color.BLACK);
+            btn.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+            btn.setBackgroundResource(selected ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (42 * density));
+            lp.setMargins(0, (int) (4 * density), 0, (int) (4 * density));
+            btn.setLayoutParams(lp);
+            int pH = (int) (10 * density);
+            btn.setPadding(pH, 0, pH, 0);
+            btn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    applyTapZoneMode(m);
+                    dialog.dismiss();
+                    if (com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_CUSTOM.equalsIgnoreCase(m)) {
+                        showCustomTapZoneGridDialog();
+                    }
+                }
+            });
+            root.addView(btn);
+        }
+
+        LinearLayout bottomRow = new LinearLayout(this);
+        bottomRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams brLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        brLp.setMargins(0, (int) (8 * density), 0, 0);
+        bottomRow.setLayoutParams(brLp);
+
+        Button btnEditGrid = new Button(this);
+        btnEditGrid.setText("Настроить сетку 3×3");
+        btnEditGrid.setTextSize(12);
+        btnEditGrid.setTypeface(null, Typeface.BOLD);
+        btnEditGrid.setTextColor(Color.BLACK);
+        btnEditGrid.setBackgroundResource(R.drawable.btn_eink);
+        LinearLayout.LayoutParams gLp = new LinearLayout.LayoutParams(0, (int) (40 * density), 1.0f);
+        gLp.setMargins(0, 0, (int) (6 * density), 0);
+        btnEditGrid.setLayoutParams(gLp);
+        btnEditGrid.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                showCustomTapZoneGridDialog();
+            }
+        });
+        bottomRow.addView(btnEditGrid);
+
+        Button btnClose = new Button(this);
+        btnClose.setText("Закрыть");
+        btnClose.setTextSize(12);
+        btnClose.setTypeface(null, Typeface.BOLD);
+        btnClose.setTextColor(Color.BLACK);
+        btnClose.setBackgroundResource(R.drawable.btn_eink);
+        btnClose.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (int) (40 * density)));
+        btnClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        bottomRow.addView(btnClose);
+        root.addView(bottomRow);
+
+        dialog.setContentView(root);
+        if (dialog.getWindow() != null) {
+            int maxW = (int) (getResources().getDisplayMetrics().widthPixels * 0.90f);
+            dialog.getWindow().setLayout(maxW, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        dialog.show();
+        EpdController.requestFullRefresh(ReaderActivity.this, root);
+    }
+
+    private void applyTapZoneMode(String mode) {
+        typographyConfig.setTapZoneMode(mode);
+        typographyConfig.setCustomTapZones(appSettings.getCustomTapZones());
+        appSettings.setTapZoneMode(mode);
         updateTapZonesButtonText();
         if (readerCanvas != null) {
             readerCanvas.setTypographyConfig(typographyConfig);
         }
-        EinkNotice.show(ReaderActivity.this, "Зоны касания", hint);
+    }
+
+    private void showCustomTapZoneGridDialog() {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setWindowAnimations(0);
+        }
+
+        final String[] zones = appSettings.getCustomTapZones();
+        final Button[] cellButtons = new Button[9];
+
+        float density = getResources().getDisplayMetrics().density;
+        final LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (14 * density);
+        root.setPadding(pad, pad, pad, pad);
+
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(Color.WHITE);
+        bg.setStroke((int) Math.max(2, 2 * density), Color.BLACK);
+        root.setBackgroundDrawable(bg);
+
+        TextView titleView = new TextView(this);
+        titleView.setText("Кастомная сетка тапов (3×3)");
+        titleView.setTextSize(15);
+        titleView.setTypeface(null, Typeface.BOLD);
+        titleView.setTextColor(Color.BLACK);
+        root.addView(titleView);
+
+        TextView subView = new TextView(this);
+        subView.setText("Нажмите на любую из 9 зон для смены действия:");
+        subView.setTextSize(11);
+        subView.setTextColor(Color.DKGRAY);
+        subView.setPadding(0, (int) (4 * density), 0, (int) (8 * density));
+        root.addView(subView);
+
+        for (int r = 0; r < 3; r++) {
+            LinearLayout rowLayout = new LinearLayout(this);
+            rowLayout.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout.LayoutParams rLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (58 * density));
+            rLp.setMargins(0, (int) (2 * density), 0, (int) (2 * density));
+            rowLayout.setLayoutParams(rLp);
+
+            for (int c = 0; c < 3; c++) {
+                final int idx = r * 3 + c;
+                final Button cellBtn = new Button(this);
+                cellButtons[idx] = cellBtn;
+                cellBtn.setText(formatTapActionShortLabel(zones[idx]));
+                cellBtn.setTextSize(11);
+                cellBtn.setTypeface(null, Typeface.BOLD);
+                cellBtn.setTextColor(Color.BLACK);
+                cellBtn.setBackgroundResource(R.drawable.btn_eink);
+                cellBtn.setPadding((int) (4 * density), 0, (int) (4 * density), 0);
+                LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
+                cLp.setMargins((int) (2 * density), 0, (int) (2 * density), 0);
+                cellBtn.setLayoutParams(cLp);
+                cellBtn.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        zones[idx] = cycleTapZoneAction(zones[idx]);
+                        cellBtn.setText(formatTapActionShortLabel(zones[idx]));
+                    }
+                });
+                rowLayout.addView(cellBtn);
+            }
+            root.addView(rowLayout);
+        }
+
+        LinearLayout presetRow = new LinearLayout(this);
+        presetRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams prLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        prLp.setMargins(0, (int) (8 * density), 0, (int) (4 * density));
+        presetRow.setLayoutParams(prLp);
+
+        Button btnPresetStd = new Button(this);
+        btnPresetStd.setText("Шаблон: Правша");
+        btnPresetStd.setTextSize(11);
+        btnPresetStd.setTextColor(Color.BLACK);
+        btnPresetStd.setBackgroundResource(R.drawable.btn_eink);
+        LinearLayout.LayoutParams p1Lp = new LinearLayout.LayoutParams(0, (int) (36 * density), 1.0f);
+        p1Lp.setMargins(0, 0, (int) (4 * density), 0);
+        btnPresetStd.setLayoutParams(p1Lp);
+        btnPresetStd.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String[] std = new String[]{
+                        "prev", "menu", "next",
+                        "prev", "menu", "next",
+                        "prev", "menu", "next"
+                };
+                for (int i = 0; i < 9; i++) {
+                    zones[i] = std[i];
+                    cellButtons[i].setText(formatTapActionShortLabel(zones[i]));
+                }
+            }
+        });
+        presetRow.addView(btnPresetStd);
+
+        Button btnPresetLeft = new Button(this);
+        btnPresetLeft.setText("Шаблон: Левша");
+        btnPresetLeft.setTextSize(11);
+        btnPresetLeft.setTextColor(Color.BLACK);
+        btnPresetLeft.setBackgroundResource(R.drawable.btn_eink);
+        btnPresetLeft.setLayoutParams(new LinearLayout.LayoutParams(0, (int) (36 * density), 1.0f));
+        btnPresetLeft.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String[] left = new String[]{
+                        "next", "menu", "next",
+                        "prev", "menu", "next",
+                        "next", "menu", "next"
+                };
+                for (int i = 0; i < 9; i++) {
+                    zones[i] = left[i];
+                    cellButtons[i].setText(formatTapActionShortLabel(zones[i]));
+                }
+            }
+        });
+        presetRow.addView(btnPresetLeft);
+        root.addView(presetRow);
+
+        LinearLayout actionRow = new LinearLayout(this);
+        actionRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams arLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        arLp.setMargins(0, (int) (4 * density), 0, 0);
+        actionRow.setLayoutParams(arLp);
+
+        Button btnSave = new Button(this);
+        btnSave.setText("Сохранить и включить 3×3");
+        btnSave.setTextSize(12);
+        btnSave.setTypeface(null, Typeface.BOLD);
+        btnSave.setTextColor(Color.BLACK);
+        btnSave.setBackgroundResource(R.drawable.btn_eink_primary);
+        LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(0, (int) (40 * density), 1.0f);
+        sLp.setMargins(0, 0, (int) (6 * density), 0);
+        btnSave.setLayoutParams(sLp);
+        btnSave.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                appSettings.setCustomTapZones(zones);
+                applyTapZoneMode(com.onyx.yandexbooks.core.storage.AppSettings.TAP_ZONE_CUSTOM);
+                dialog.dismiss();
+            }
+        });
+        actionRow.addView(btnSave);
+
+        Button btnCancel = new Button(this);
+        btnCancel.setText("Отмена");
+        btnCancel.setTextSize(12);
+        btnCancel.setTextColor(Color.BLACK);
+        btnCancel.setBackgroundResource(R.drawable.btn_eink);
+        btnCancel.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (int) (40 * density)));
+        btnCancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        actionRow.addView(btnCancel);
+        root.addView(actionRow);
+
+        dialog.setContentView(root);
+        if (dialog.getWindow() != null) {
+            int maxW = (int) (getResources().getDisplayMetrics().widthPixels * 0.90f);
+            dialog.getWindow().setLayout(maxW, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        dialog.show();
+        EpdController.requestFullRefresh(ReaderActivity.this, root);
+    }
+
+    private static String cycleTapZoneAction(String cur) {
+        String[] order = new String[]{
+                com.onyx.yandexbooks.core.storage.AppSettings.TAP_ACTION_NEXT,
+                com.onyx.yandexbooks.core.storage.AppSettings.TAP_ACTION_PREV,
+                com.onyx.yandexbooks.core.storage.AppSettings.TAP_ACTION_MENU,
+                com.onyx.yandexbooks.core.storage.AppSettings.TAP_ACTION_TOC,
+                com.onyx.yandexbooks.core.storage.AppSettings.TAP_ACTION_BOOKMARK,
+                com.onyx.yandexbooks.core.storage.AppSettings.TAP_ACTION_REFRESH,
+                com.onyx.yandexbooks.core.storage.AppSettings.TAP_ACTION_NONE
+        };
+        for (int i = 0; i < order.length; i++) {
+            if (order[i].equalsIgnoreCase(cur)) {
+                return order[(i + 1) % order.length];
+            }
+        }
+        return order[0];
+    }
+
+    private static String formatTapActionShortLabel(String action) {
+        if ("next".equalsIgnoreCase(action)) return "Вперед →";
+        if ("prev".equalsIgnoreCase(action)) return "← Назад";
+        if ("menu".equalsIgnoreCase(action)) return "Меню";
+        if ("toc".equalsIgnoreCase(action)) return "Оглавл.";
+        if ("bookmark".equalsIgnoreCase(action)) return "Закладка";
+        if ("refresh".equalsIgnoreCase(action)) return "Обновить";
+        return "Пусто";
     }
 
     private void updateContrastButtonText() {
@@ -1448,6 +1842,7 @@ public class ReaderActivity extends Activity {
         dst.setBoldText(src.isBoldText());
         dst.setNightMode(src.isNightMode());
         dst.setTapZoneMode(src.getTapZoneMode());
+        dst.setCustomTapZones(src.getCustomTapZones());
         dst.setUseEpubFonts(src.isUseEpubFonts());
         dst.setDensityScale(src.getDensityScale());
         return dst;
@@ -1640,7 +2035,7 @@ public class ReaderActivity extends Activity {
         root.setPadding(pad, pad, pad, pad);
 
         TextView titleView = new TextView(this);
-        titleView.setText("Содержание и закладки");
+        titleView.setText("Содержание, закладки и цитаты");
         titleView.setTextSize(14);
         titleView.setTypeface(null, Typeface.BOLD);
         titleView.setTextColor(Color.BLACK);
@@ -1648,7 +2043,7 @@ public class ReaderActivity extends Activity {
         titleView.setPadding(0, 0, 0, (int) (6 * density));
         root.addView(titleView);
 
-        // Сегментированные вкладки: [ Оглавление ] | [ Закладки ]
+        // Сегментированные вкладки: [ Оглавление ] | [ Закладки ] | [ Цитаты ]
         LinearLayout tabsLayout = new LinearLayout(this);
         tabsLayout.setOrientation(LinearLayout.HORIZONTAL);
         tabsLayout.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (32 * density)));
@@ -1673,27 +2068,45 @@ public class ReaderActivity extends Activity {
 
         final Button btnTabChapters = new Button(this);
         btnTabChapters.setText("Оглавление (" + visibleTocNodes.size() + ")");
-        btnTabChapters.setTextSize(12);
+        btnTabChapters.setTextSize(11);
+        btnTabChapters.setSingleLine(true);
+        btnTabChapters.setEllipsize(TextUtils.TruncateAt.END);
         btnTabChapters.setTypeface(null, Typeface.BOLD);
         btnTabChapters.setBackgroundResource(R.drawable.btn_eink_primary);
         btnTabChapters.setTextColor(Color.BLACK);
         LinearLayout.LayoutParams tabLp1 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
-        tabLp1.setMargins(0, 0, (int) (4 * density), 0);
+        tabLp1.setMargins(0, 0, (int) (2 * density), 0);
         btnTabChapters.setLayoutParams(tabLp1);
 
         final Button btnTabBookmarks = new Button(this);
         List<DatabaseHelper.Bookmark> initialBookmarks = dbHelper.getBookmarks(bookUuid);
         btnTabBookmarks.setText("Закладки (" + initialBookmarks.size() + ")");
-        btnTabBookmarks.setTextSize(12);
+        btnTabBookmarks.setTextSize(11);
+        btnTabBookmarks.setSingleLine(true);
+        btnTabBookmarks.setEllipsize(TextUtils.TruncateAt.END);
         btnTabBookmarks.setTypeface(null, Typeface.BOLD);
         btnTabBookmarks.setBackgroundResource(R.drawable.btn_eink);
         btnTabBookmarks.setTextColor(Color.BLACK);
         LinearLayout.LayoutParams tabLp2 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
-        tabLp2.setMargins((int) (4 * density), 0, 0, 0);
+        tabLp2.setMargins((int) (2 * density), 0, (int) (2 * density), 0);
         btnTabBookmarks.setLayoutParams(tabLp2);
+
+        final Button btnTabQuotes = new Button(this);
+        List<Quote> initialQuotes = dbHelper.getQuotesForBook(bookUuid);
+        btnTabQuotes.setText("Цитаты (" + initialQuotes.size() + ")");
+        btnTabQuotes.setTextSize(11);
+        btnTabQuotes.setSingleLine(true);
+        btnTabQuotes.setEllipsize(TextUtils.TruncateAt.END);
+        btnTabQuotes.setTypeface(null, Typeface.BOLD);
+        btnTabQuotes.setBackgroundResource(R.drawable.btn_eink);
+        btnTabQuotes.setTextColor(Color.BLACK);
+        LinearLayout.LayoutParams tabLp3 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
+        tabLp3.setMargins((int) (2 * density), 0, 0, 0);
+        btnTabQuotes.setLayoutParams(tabLp3);
 
         tabsLayout.addView(btnTabChapters);
         tabsLayout.addView(btnTabBookmarks);
+        tabsLayout.addView(btnTabQuotes);
         root.addView(tabsLayout);
 
         View divider = new View(this);
@@ -2015,7 +2428,174 @@ public class ReaderActivity extends Activity {
             }
         });
 
-        // Переключение вкладок Оглавление / Закладки
+        // Контейнер 3: Цитаты и заметки
+        final LinearLayout quotesContainer = new LinearLayout(this);
+        quotesContainer.setOrientation(LinearLayout.VERTICAL);
+        quotesContainer.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));
+        quotesContainer.setVisibility(View.GONE);
+
+        final List<Quote> quotesList = new ArrayList<>(initialQuotes);
+
+        Button btnExportQuotes = new Button(this);
+        btnExportQuotes.setText("Экспорт цитат в файл (.md)");
+        btnExportQuotes.setTextSize(12);
+        btnExportQuotes.setTypeface(null, Typeface.BOLD);
+        btnExportQuotes.setTextColor(Color.BLACK);
+        btnExportQuotes.setBackgroundResource(R.drawable.btn_eink);
+        btnExportQuotes.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (34 * density)));
+        btnExportQuotes.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                exportBookQuotesToFile(quotesList);
+            }
+        });
+        quotesContainer.addView(btnExportQuotes);
+
+        final EinkListView listQuotesView = new EinkListView(this);
+        listQuotesView.setDivider(new ColorDrawable(Color.LTGRAY));
+        listQuotesView.setDividerHeight((int) Math.max(1, density));
+        EpdController.configureEinkListView(this, listQuotesView);
+        LinearLayout.LayoutParams qListLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
+        qListLp.setMargins(0, (int) (6 * density), 0, 0);
+        listQuotesView.setLayoutParams(qListLp);
+        quotesContainer.addView(listQuotesView);
+
+        final TextView emptyQuotesView = new TextView(this);
+        emptyQuotesView.setText("Цитат пока нет.\nУдерживайте палец на слове на странице, чтобы выделить фрагмент и сохранить цитату.");
+        emptyQuotesView.setTextSize(13);
+        emptyQuotesView.setTextColor(Color.DKGRAY);
+        emptyQuotesView.setGravity(Gravity.CENTER);
+        emptyQuotesView.setPadding((int) (12 * density), (int) (32 * density), (int) (12 * density), (int) (32 * density));
+        quotesContainer.addView(emptyQuotesView);
+
+        root.addView(quotesContainer);
+
+        final Runnable updateQuotesVisibility = new Runnable() {
+            @Override
+            public void run() {
+                if (quotesList.isEmpty()) {
+                    listQuotesView.setVisibility(View.GONE);
+                    emptyQuotesView.setVisibility(View.VISIBLE);
+                } else {
+                    listQuotesView.setVisibility(View.VISIBLE);
+                    emptyQuotesView.setVisibility(View.GONE);
+                }
+            }
+        };
+        updateQuotesVisibility.run();
+
+        final BaseAdapter quotesAdapter = new BaseAdapter() {
+            private final SimpleDateFormat qSdf = new SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault());
+            @Override
+            public int getCount() { return quotesList.size(); }
+            @Override
+            public Object getItem(int pos) { return quotesList.get(pos); }
+            @Override
+            public long getItemId(int pos) { return quotesList.get(pos).id; }
+            @Override
+            public View getView(final int pos, View convertView, ViewGroup parent) {
+                LinearLayout rowLayout;
+                if (convertView instanceof LinearLayout) {
+                    rowLayout = (LinearLayout) convertView;
+                } else {
+                    rowLayout = new LinearLayout(ReaderActivity.this);
+                    rowLayout.setOrientation(LinearLayout.HORIZONTAL);
+                    rowLayout.setGravity(Gravity.CENTER_VERTICAL);
+                    rowLayout.setPadding((int) (4 * density), (int) (8 * density), (int) (4 * density), (int) (8 * density));
+
+                    LinearLayout col = new LinearLayout(ReaderActivity.this);
+                    col.setOrientation(LinearLayout.VERTICAL);
+                    col.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+
+                    TextView tvMeta = new TextView(ReaderActivity.this);
+                    tvMeta.setTag("qmeta");
+                    tvMeta.setTextSize(11);
+                    tvMeta.setTypeface(null, Typeface.BOLD);
+                    tvMeta.setTextColor(Color.DKGRAY);
+                    col.addView(tvMeta);
+
+                    TextView tvText = new TextView(ReaderActivity.this);
+                    tvText.setTag("qtext");
+                    tvText.setTextSize(13);
+                    tvText.setTextColor(Color.BLACK);
+                    tvText.setMaxLines(3);
+                    tvText.setEllipsize(TextUtils.TruncateAt.END);
+                    col.addView(tvText);
+
+                    TextView tvNote = new TextView(ReaderActivity.this);
+                    tvNote.setTag("qnote");
+                    tvNote.setTextSize(11);
+                    tvNote.setTypeface(null, Typeface.ITALIC);
+                    tvNote.setTextColor(Color.DKGRAY);
+                    tvNote.setMaxLines(2);
+                    tvNote.setEllipsize(TextUtils.TruncateAt.END);
+                    col.addView(tvNote);
+
+                    rowLayout.addView(col);
+
+                    Button btnDelQ = new Button(ReaderActivity.this);
+                    btnDelQ.setTag("qdel");
+                    btnDelQ.setText("X");
+                    btnDelQ.setTextSize(13);
+                    btnDelQ.setTypeface(null, Typeface.BOLD);
+                    btnDelQ.setTextColor(Color.BLACK);
+                    btnDelQ.setBackgroundResource(R.drawable.btn_eink);
+                    LinearLayout.LayoutParams delLp = new LinearLayout.LayoutParams((int) (32 * density), (int) (32 * density));
+                    delLp.setMargins((int) (6 * density), 0, 0, 0);
+                    btnDelQ.setLayoutParams(delLp);
+                    rowLayout.addView(btnDelQ);
+                }
+
+                final Quote q = quotesList.get(pos);
+                TextView tvMeta = (TextView) rowLayout.findViewWithTag("qmeta");
+                TextView tvText = (TextView) rowLayout.findViewWithTag("qtext");
+                TextView tvNote = (TextView) rowLayout.findViewWithTag("qnote");
+                Button btnDelQ = (Button) rowLayout.findViewWithTag("qdel");
+
+                tvMeta.setText("Гл. " + (q.chapterIndex + 1) + " • " + qSdf.format(new Date(q.createdAt > 0 ? q.createdAt : System.currentTimeMillis())));
+                tvText.setText("«" + (q.text != null ? q.text : "") + "»");
+                if (q.note != null && !q.note.trim().isEmpty()) {
+                    tvNote.setVisibility(View.VISIBLE);
+                    tvNote.setText("Заметка: " + q.note.trim());
+                } else {
+                    tvNote.setVisibility(View.GONE);
+                }
+
+                btnDelQ.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        dbHelper.deleteQuote(q.id);
+                        if (q.quoteUuid != null && !q.quoteUuid.isEmpty()) {
+                            apiClient.deleteBookQuote(q.quoteUuid, null);
+                        }
+                        quotesList.remove(pos);
+                        notifyDataSetChanged();
+                        btnTabQuotes.setText("Цитаты (" + quotesList.size() + ")");
+                        updateQuotesVisibility.run();
+                        invalidateChapterQuotesCache();
+                        refreshCanvasChapterQuotes(true);
+                        EpdController.requestFullRefresh(ReaderActivity.this, root);
+                    }
+                });
+                return rowLayout;
+            }
+        };
+        listQuotesView.setAdapter(quotesAdapter);
+        listQuotesView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                if (position >= 0 && position < quotesList.size()) {
+                    Quote q = quotesList.get(position);
+                    dialog.dismiss();
+                    hideMenuOverlay();
+                    isInitialLoading = false;
+                    userHasInteracted = true;
+                    loadChapterAtCharOffset(q.chapterIndex, Math.max(0, q.startOffset));
+                }
+            }
+        });
+
+        // Переключение вкладок Оглавление / Закладки / Цитаты
         btnTabChapters.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -2023,8 +2603,11 @@ public class ReaderActivity extends Activity {
                 btnTabChapters.setTextColor(Color.BLACK);
                 btnTabBookmarks.setBackgroundResource(R.drawable.btn_eink);
                 btnTabBookmarks.setTextColor(Color.BLACK);
+                btnTabQuotes.setBackgroundResource(R.drawable.btn_eink);
+                btnTabQuotes.setTextColor(Color.BLACK);
                 listChaptersView.setVisibility(View.VISIBLE);
                 bookmarksContainer.setVisibility(View.GONE);
+                quotesContainer.setVisibility(View.GONE);
                 EpdController.requestFullRefresh(ReaderActivity.this, root);
             }
         });
@@ -2036,8 +2619,27 @@ public class ReaderActivity extends Activity {
                 btnTabBookmarks.setTextColor(Color.BLACK);
                 btnTabChapters.setBackgroundResource(R.drawable.btn_eink);
                 btnTabChapters.setTextColor(Color.BLACK);
+                btnTabQuotes.setBackgroundResource(R.drawable.btn_eink);
+                btnTabQuotes.setTextColor(Color.BLACK);
                 listChaptersView.setVisibility(View.GONE);
                 bookmarksContainer.setVisibility(View.VISIBLE);
+                quotesContainer.setVisibility(View.GONE);
+                EpdController.requestFullRefresh(ReaderActivity.this, root);
+            }
+        });
+
+        btnTabQuotes.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                btnTabQuotes.setBackgroundResource(R.drawable.btn_eink_primary);
+                btnTabQuotes.setTextColor(Color.BLACK);
+                btnTabChapters.setBackgroundResource(R.drawable.btn_eink);
+                btnTabChapters.setTextColor(Color.BLACK);
+                btnTabBookmarks.setBackgroundResource(R.drawable.btn_eink);
+                btnTabBookmarks.setTextColor(Color.BLACK);
+                listChaptersView.setVisibility(View.GONE);
+                bookmarksContainer.setVisibility(View.GONE);
+                quotesContainer.setVisibility(View.VISIBLE);
                 EpdController.requestFullRefresh(ReaderActivity.this, root);
             }
         });
@@ -2518,6 +3120,7 @@ public class ReaderActivity extends Activity {
         if (bookUuid != null && !bookUuid.isEmpty()) {
             dbHelper.updateBookShelf(bookUuid, "reading");
             loadBookFootnotesAsync();
+            loadBookQuotesCloudSyncAsync();
         }
         // Проверяем, есть ли уже главы в локальной БД
         List<Chapter> localChapters = dbHelper.getChapters(bookUuid);
@@ -2627,6 +3230,12 @@ public class ReaderActivity extends Activity {
     }
 
     private int chapterIndexToSpineIndex(int chapterIndex) {
+        if (chapters != null && chapterIndex >= 0 && chapterIndex < chapters.size()) {
+            int orig = chapters.get(chapterIndex).getOriginalOpfSpineIndex();
+            if (orig >= 0) {
+                return orig;
+            }
+        }
         if (hasCoverChapter()) {
             return Math.max(0, chapterIndex - 1);
         }
@@ -2634,10 +3243,29 @@ public class ReaderActivity extends Activity {
     }
 
     private int spineIndexToChapterIndex(int spineIndex) {
+        if (chapters != null) {
+            for (int i = 0; i < chapters.size(); i++) {
+                if (chapters.get(i).getOriginalOpfSpineIndex() == spineIndex && spineIndex >= 0) {
+                    return i;
+                }
+            }
+        }
         if (hasCoverChapter()) {
             return Math.min(chapters != null ? chapters.size() - 1 : spineIndex + 1, spineIndex + 1);
         }
         return Math.min(chapters != null ? chapters.size() - 1 : spineIndex, spineIndex);
+    }
+
+    private int resolveChapterIndexFromCfi(YandexBooksApiClient.CfiPosition cfiPos) {
+        if (cfiPos == null) return 0;
+        if (chapters != null && cfiPos.opfItemId != null && !cfiPos.opfItemId.isEmpty()) {
+            for (int i = 0; i < chapters.size(); i++) {
+                if (cfiPos.opfItemId.equals(chapters.get(i).getOpfItemId())) {
+                    return i;
+                }
+            }
+        }
+        return spineIndexToChapterIndex(cfiPos.chapterIndex);
     }
 
     private void resolveInitialPositionAndOpen() {
@@ -2663,8 +3291,8 @@ public class ReaderActivity extends Activity {
                     if (cfiPos.paragraphIndex > 0) {
                         targetParagraph = cfiPos.paragraphIndex;
                     }
-                    if (cfiPos.chapterIndex >= 0) {
-                        targetChapter = spineIndexToChapterIndex(cfiPos.chapterIndex);
+                    if (cfiPos.chapterIndex >= 0 || !cfiPos.opfItemId.isEmpty()) {
+                        targetChapter = resolveChapterIndexFromCfi(cfiPos);
                     }
                 }
             }
@@ -2677,11 +3305,11 @@ public class ReaderActivity extends Activity {
                 if (b.getCfi() != null && !b.getCfi().isEmpty()) {
                     YandexBooksApiClient.CfiPosition cfiPos = YandexBooksApiClient.parseCfiPosition(b.getCfi());
                     if (cfiPos != null) {
-                        if (cfiPos.chapterIndex >= 0) {
-                            targetChapter = spineIndexToChapterIndex(cfiPos.chapterIndex);
-                        }
                         if (cfiPos.paragraphIndex > 0) {
                             targetParagraph = cfiPos.paragraphIndex;
+                        }
+                        if (cfiPos.chapterIndex >= 0 || !cfiPos.opfItemId.isEmpty()) {
+                            targetChapter = resolveChapterIndexFromCfi(cfiPos);
                         }
                     }
                 }
@@ -2833,8 +3461,8 @@ public class ReaderActivity extends Activity {
                 if (cfiPos.paragraphIndex > 0 || resolvedParagraph <= 0) {
                     resolvedParagraph = cfiPos.paragraphIndex;
                 }
-                if (cfiPos.chapterIndex >= 0) {
-                    resolvedChapter = spineIndexToChapterIndex(cfiPos.chapterIndex);
+                if (cfiPos.chapterIndex >= 0 || !cfiPos.opfItemId.isEmpty()) {
+                    resolvedChapter = resolveChapterIndexFromCfi(cfiPos);
                 }
             }
         } else if (hasCoverChapter() && resolvedChapter >= 0) {
@@ -2920,6 +3548,338 @@ public class ReaderActivity extends Activity {
 
         if (isNewer) {
             navigateToResolvedProgress(cloudProgress, targetChapter, targetParagraph, cloudPercent);
+        }
+    }
+
+    private int cachedQuotesChapterIndex = -1;
+
+    private void invalidateChapterQuotesCache() {
+        cachedQuotesChapterIndex = -1;
+    }
+
+    private void refreshCanvasChapterQuotes(boolean force) {
+        if (readerCanvas == null || dbHelper == null || bookUuid == null || bookUuid.isEmpty()) return;
+        if (!force && cachedQuotesChapterIndex == currentChapterIndex) return;
+        cachedQuotesChapterIndex = currentChapterIndex;
+        List<Quote> qList = dbHelper.getQuotesForChapter(bookUuid, currentChapterIndex);
+        readerCanvas.setChapterQuotes(qList);
+    }
+
+    private void loadBookQuotesCloudSyncAsync() {
+        if (bookUuid == null || bookUuid.isEmpty() || apiClient == null || dbHelper == null) return;
+        apiClient.getBookQuotes(bookUuid, new YandexBooksApiClient.ApiCallback<List<Quote>>() {
+            @Override
+            public void onSuccess(List<Quote> remoteQuotes) {
+                if (remoteQuotes != null && !remoteQuotes.isEmpty()) {
+                    dbHelper.upsertCloudQuotes(bookUuid, remoteQuotes);
+                    invalidateChapterQuotesCache();
+                    refreshCanvasChapterQuotes(true);
+                }
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                // Игнорируем ошибку сети, локальные цитаты доступны автономно
+            }
+        });
+    }
+
+    private void showTextSelectionActionDialog(final String selectedText, final int startOffset, final int endOffset) {
+        if (isFinishing() || selectedText == null || selectedText.trim().isEmpty()) {
+            if (readerCanvas != null) readerCanvas.clearSelection();
+            return;
+        }
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setWindowAnimations(0);
+        }
+
+        float density = getResources().getDisplayMetrics().density;
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundResource(R.drawable.dialog_notice_bg);
+        int pad = (int) (14 * density);
+        root.setPadding(pad, pad, pad, pad);
+
+        TextView titleView = new TextView(this);
+        titleView.setText("Выделенный фрагмент");
+        titleView.setTextSize(14);
+        titleView.setTypeface(null, Typeface.BOLD);
+        titleView.setTextColor(Color.BLACK);
+        titleView.setGravity(Gravity.CENTER);
+        titleView.setPadding(0, 0, 0, (int) (6 * density));
+        root.addView(titleView);
+
+        TextView previewView = new TextView(this);
+        previewView.setText("«" + selectedText.trim() + "»");
+        previewView.setTextSize(12);
+        previewView.setTextColor(Color.DKGRAY);
+        previewView.setMaxLines(4);
+        previewView.setEllipsize(TextUtils.TruncateAt.END);
+        previewView.setPadding(0, 0, 0, (int) (10 * density));
+        root.addView(previewView);
+
+        Button btnSaveQuote = new Button(this);
+        btnSaveQuote.setText("Сохранить цитату");
+        btnSaveQuote.setTextSize(13);
+        btnSaveQuote.setTypeface(null, Typeface.BOLD);
+        btnSaveQuote.setTextColor(Color.BLACK);
+        btnSaveQuote.setBackgroundResource(R.drawable.btn_eink_primary);
+        LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (36 * density));
+        bLp.setMargins(0, 0, 0, (int) (6 * density));
+        btnSaveQuote.setLayoutParams(bLp);
+        btnSaveQuote.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                saveSelectedQuote(selectedText.trim(), "", startOffset, endOffset);
+            }
+        });
+        root.addView(btnSaveQuote);
+
+        Button btnAddNote = new Button(this);
+        btnAddNote.setText("Сохранить с заметкой");
+        btnAddNote.setTextSize(13);
+        btnAddNote.setTextColor(Color.BLACK);
+        btnAddNote.setBackgroundResource(R.drawable.btn_eink);
+        btnAddNote.setLayoutParams(bLp);
+        btnAddNote.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                showQuoteNoteDialog(selectedText.trim(), startOffset, endOffset);
+            }
+        });
+        root.addView(btnAddNote);
+
+        Button btnCopy = new Button(this);
+        btnCopy.setText("Копировать текст");
+        btnCopy.setTextSize(13);
+        btnCopy.setTextColor(Color.BLACK);
+        btnCopy.setBackgroundResource(R.drawable.btn_eink);
+        btnCopy.setLayoutParams(bLp);
+        btnCopy.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                try {
+                    android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+                    if (cm != null) {
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("quote", selectedText.trim()));
+                    }
+                    EinkNotice.show(ReaderActivity.this, "Цитаты", "Текст скопирован в буфер обмена.");
+                } catch (Throwable ignored) {}
+                if (readerCanvas != null) readerCanvas.clearSelection();
+            }
+        });
+        root.addView(btnCopy);
+
+        Button btnCancel = new Button(this);
+        btnCancel.setText("Отмена");
+        btnCancel.setTextSize(13);
+        btnCancel.setTextColor(Color.BLACK);
+        btnCancel.setBackgroundResource(R.drawable.btn_eink);
+        btnCancel.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (36 * density)));
+        btnCancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                if (readerCanvas != null) readerCanvas.clearSelection();
+            }
+        });
+        root.addView(btnCancel);
+
+        dialog.setOnCancelListener(new DialogInterface.OnCancelListener() {
+            @Override
+            public void onCancel(DialogInterface d) {
+                if (readerCanvas != null) readerCanvas.clearSelection();
+            }
+        });
+
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setLayout(Math.min((int) (dm.widthPixels * 0.86), (int) (460 * density)), ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
+    private void showQuoteNoteDialog(final String selectedText, final int startOffset, final int endOffset) {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setWindowAnimations(0);
+        }
+        float density = getResources().getDisplayMetrics().density;
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundResource(R.drawable.dialog_notice_bg);
+        int pad = (int) (14 * density);
+        root.setPadding(pad, pad, pad, pad);
+
+        TextView titleView = new TextView(this);
+        titleView.setText("Заметка к цитате");
+        titleView.setTextSize(14);
+        titleView.setTypeface(null, Typeface.BOLD);
+        titleView.setTextColor(Color.BLACK);
+        titleView.setPadding(0, 0, 0, (int) (8 * density));
+        root.addView(titleView);
+
+        final EditText input = new EditText(this);
+        input.setHint("Введите комментарий...");
+        input.setTextSize(13);
+        input.setTextColor(Color.BLACK);
+        input.setMinLines(2);
+        input.setMaxLines(5);
+        root.addView(input);
+
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams rLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rLp.setMargins(0, (int) (10 * density), 0, 0);
+        btnRow.setLayoutParams(rLp);
+
+        Button btnSave = new Button(this);
+        btnSave.setText("Сохранить");
+        btnSave.setTextSize(13);
+        btnSave.setTypeface(null, Typeface.BOLD);
+        btnSave.setTextColor(Color.BLACK);
+        btnSave.setBackgroundResource(R.drawable.btn_eink_primary);
+        LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(0, (int) (36 * density), 1.0f);
+        bLp.setMargins(0, 0, (int) (4 * density), 0);
+        btnSave.setLayoutParams(bLp);
+        btnSave.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                saveSelectedQuote(selectedText, input.getText().toString().trim(), startOffset, endOffset);
+            }
+        });
+        btnRow.addView(btnSave);
+
+        Button btnCancel = new Button(this);
+        btnCancel.setText("Отмена");
+        btnCancel.setTextSize(13);
+        btnCancel.setTextColor(Color.BLACK);
+        btnCancel.setBackgroundResource(R.drawable.btn_eink);
+        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0, (int) (36 * density), 1.0f);
+        cLp.setMargins((int) (4 * density), 0, 0, 0);
+        btnCancel.setLayoutParams(cLp);
+        btnCancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                if (readerCanvas != null) readerCanvas.clearSelection();
+            }
+        });
+        btnRow.addView(btnCancel);
+        root.addView(btnRow);
+
+        dialog.setOnCancelListener(new DialogInterface.OnCancelListener() {
+            @Override
+            public void onCancel(DialogInterface d) {
+                if (readerCanvas != null) readerCanvas.clearSelection();
+            }
+        });
+
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setLayout(Math.min((int) (dm.widthPixels * 0.88), (int) (480 * density)), ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
+    private void saveSelectedQuote(String selectedText, String note, int startOffset, int endOffset) {
+        final Quote q = new Quote();
+        q.bookUuid = bookUuid;
+        q.chapterIndex = currentChapterIndex;
+        q.startOffset = Math.max(0, startOffset);
+        q.endOffset = Math.max(q.startOffset, endOffset);
+        q.text = selectedText;
+        q.note = note != null ? note : "";
+        q.createdAt = System.currentTimeMillis();
+        q.synced = false;
+
+        int parIdx = calculateCurrentParagraphIndex();
+        if (chapters != null && currentChapterIndex >= 0 && currentChapterIndex < chapters.size()) {
+            Chapter curCh = chapters.get(currentChapterIndex);
+            int opfIdx = curCh.getOriginalOpfSpineIndex();
+            String opfId = curCh.getOpfItemId();
+            if (opfIdx >= 0 && opfId != null && !opfId.isEmpty()) {
+                q.cfi = YandexBooksApiClient.buildCanonicalCfi(opfIdx, opfId, parIdx, q.startOffset);
+            } else {
+                q.cfi = YandexBooksApiClient.generateCfi(chapterIndexToSpineIndex(currentChapterIndex), parIdx);
+            }
+        }
+
+        final long localId = dbHelper.insertQuote(q);
+        invalidateChapterQuotesCache();
+        refreshCanvasChapterQuotes(true);
+        if (readerCanvas != null) {
+            readerCanvas.clearSelection();
+        }
+        EinkNotice.show(this, "Цитаты", "Цитата сохранена.");
+
+        if (apiClient != null && localId > 0) {
+            apiClient.createBookQuote(q, new YandexBooksApiClient.ApiCallback<String>() {
+                @Override
+                public void onSuccess(String remoteUuid) {
+                    dbHelper.markQuoteSynced(localId, remoteUuid);
+                }
+
+                @Override
+                public void onError(String errorMessage) {
+                    // Сохранена локально
+                }
+            });
+        }
+    }
+
+    private void exportBookQuotesToFile(List<Quote> quotesList) {
+        if (quotesList == null || quotesList.isEmpty()) {
+            EinkNotice.show(this, "Экспорт цитат", "Нет сохраненных цитат для экспорта.");
+            return;
+        }
+        try {
+            File extDir = android.os.Environment.getExternalStorageDirectory();
+            File quotesDir = (extDir != null && extDir.canWrite())
+                    ? new File(extDir, "Books/YandexBooks/Quotes")
+                    : new File(getExternalFilesDir(null), "Quotes");
+            if (!quotesDir.exists()) {
+                quotesDir.mkdirs();
+            }
+            String safeTitle = (bookTitle != null && !bookTitle.trim().isEmpty())
+                    ? bookTitle.replaceAll("[\\\\/:*?\"<>|\\s]+", "_")
+                    : bookUuid;
+            if (safeTitle.length() > 64) safeTitle = safeTitle.substring(0, 64);
+            File outFile = new File(quotesDir, safeTitle + "_quotes.md");
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("# Цитаты: ").append(bookTitle != null ? bookTitle : bookUuid).append("\n\n");
+            SimpleDateFormat sdf = new SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault());
+            for (int i = 0; i < quotesList.size(); i++) {
+                Quote q = quotesList.get(i);
+                sb.append("## ").append(i + 1).append(". Глава ").append(q.chapterIndex + 1)
+                        .append(" (").append(sdf.format(new Date(q.createdAt > 0 ? q.createdAt : System.currentTimeMillis()))).append(")\n");
+                sb.append("> ").append(q.text != null ? q.text : "").append("\n\n");
+                if (q.note != null && !q.note.trim().isEmpty()) {
+                    sb.append("**Заметка:** ").append(q.note.trim()).append("\n\n");
+                }
+            }
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(outFile);
+            fos.write(sb.toString().getBytes("UTF-8"));
+            fos.flush();
+            fos.close();
+
+            EinkNotice.show(this, "Экспорт цитат", "Сохранено в файл:\n" + outFile.getAbsolutePath());
+        } catch (Throwable t) {
+            EinkNotice.show(this, "Экспорт цитат", "Ошибка экспорта: " + t.getMessage());
         }
     }
 
@@ -3486,6 +4446,7 @@ public class ReaderActivity extends Activity {
         try {
             recalculateTotalBookPages();
             if (!currentPages.isEmpty() && currentPageIndex < currentPages.size()) {
+                refreshCanvasChapterQuotes(false);
                 String title = getActiveChapterTitle();
                 double percent = calculateCurrentGlobalPercent();
                 int totalChapters = chapters != null ? chapters.size() : 1;
@@ -3603,7 +4564,13 @@ public class ReaderActivity extends Activity {
             long now = System.currentTimeMillis();
             int parIndex = calculateCurrentParagraphIndex();
             int spineIndex = chapterIndexToSpineIndex(currentChapterIndex);
-            String cfi = YandexBooksApiClient.generateCfi(spineIndex, parIndex);
+            String opfItemId = (chapters != null && currentChapterIndex >= 0 && currentChapterIndex < chapters.size())
+                    ? chapters.get(currentChapterIndex).getOpfItemId() : "";
+            int pageCharOffset = (currentPages != null && currentPageIndex >= 0 && currentPageIndex < currentPages.size())
+                    ? Math.max(0, currentPages.get(currentPageIndex).startCharOffset) : 0;
+            String cfi = (opfItemId != null && !opfItemId.isEmpty())
+                    ? YandexBooksApiClient.buildCanonicalCfi(spineIndex, opfItemId, parIndex, pageCharOffset)
+                    : YandexBooksApiClient.generateCfi(spineIndex, parIndex);
 
             ReadingProgress progress = new ReadingProgress(
                     bookUuid,
