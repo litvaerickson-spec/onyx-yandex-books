@@ -18,14 +18,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Извлекает встроенные в EPUB шрифты (`.ttf`/`.otf`) с определением начертаний (`regular`, `bold`, `italic`, `bold_italic`); по умолчанию отключён (используется шрифт/размер из настроек Lite + полная структурная разметка книги).
 - **Кликабельные подчёркнутые ссылки (`TextPaginator`, `ReaderCanvasView`, `ReaderActivity`, `EpubFormatting`)**:
   - Все ссылки (`<a href>` и bare `https://...`) подчёркиваются и перехватывают короткое нажатие: внутренние ссылки EPUB открывают предпросмотр цели в модальном окне `EinkNotice` **без ухода с текущей страницы**, внешние URL — через диалог подтверждения перед запуском системного браузера.
+- **Выделение текста, цитаты и заметки (`Quote`, `WordBox`, `ReaderCanvasView`, `ReaderActivity`, `DatabaseHelper`, `YandexBooksApiClient`)**:
+  - Долгое нажатие и протяжка по словам на странице выделяют фрагмент с сохранением в локальную таблицу SQLite `quotes`, синхронизацией с облаком (`/books/{uuid}/quotes`), добавлением заметок и копированием в буфер обмена.
+  - В диалоге «Содержание, закладки и цитаты» добавлена 3-я вкладка **«Цитаты»** с переходом к месту в книге, удалением и экспортом всех цитат в Markdown (`/sdcard/Books/YandexBooks/Quotes/*.md`).
+- **Настраиваемая сетка тап-зон 3×3 и полноэкранное чтение (`AppSettings`, `ReaderCanvasView`, `ReaderActivity`)**:
+  - Режим тап-зон `TAP_ZONE_CUSTOM` с визуальным конструктором матрицы 3×3 (`Назад`, `Вперёд`, `Меню`, `Оглавление`, `Закладка`, `Обновить экран`, `Ничего`) и быстрыми пресетами «Правша» / «Левша».
+  - Переключатель **«Во весь экран»** (`KEY_FULLSCREEN_READER`) в настройках вида книги для скрытия системного статус-бара Android при чтении.
+- **Полка «Мои файлы» / User Uploads (`Book`, `DatabaseHelper`, `YandexBooksApiClient`, `CacheManager`, `MainActivity`)**:
+  - Добавлена 5-я вкладка **«Файлы»** и пункт меню «Мои файлы» с загрузкой пользовательских книг (`/api/v5/profile/user_books`) и приоритетным скачиванием по прямому `file_url`.
 
 ### Changed
+- **Мобильный GraphQL Gateway и канонический EPUB CFI (`YandexBooksApiClient`, `EpubParser`, `Chapter`, `CacheManager`, `DatabaseHelper`, `ReaderActivity`)**:
+  - Внедрён приоритетный транспорт `https://api-gateway.bookmate.yandex.net/graphql` с мобильными заголовками `X-App-*` и прозрачным fallback на веб-маршрут `p-graphql`.
+  - Сохраняются реальный `original_opf_spine_index` и `opf_item_id` из `.opf` книги; генерируется и точно резолвится стандартный EPUB CFI `epubcfi(/6/2*(idx+1)[idref]!/4/...)` даже для многотомных омнибусов.
 - **Чистый и стабильный сквозной счётчик страниц книги (`ReaderCanvasView`, `ReaderActivity`, `CacheManager`)**:
   - Из нижнего колонтитула полностью убрана сбивающая подпись глав (`Гл. X/Y`); отображается только общий счётчик всей книги (`Стр. X из Y (Z%)`).
   - Введена фоновая точная пре-пагинация книги (`prepaginateBookInBackground`) с дисковым кэшем `page_counts.json` по сигнатуре параметров экрана, полностью исключающая колебания общего числа страниц при чтении.
 - **Масштабируемая красная строка для E-Ink 300 DPI (`TypographyConfig.getEffectiveParagraphIndentPx`)**:
   - Абзацный отступ адаптирован под плотность экрана устройства (Darwin 6/7) и автоматически обнуляется для заголовков, центрированных блоков, цитат, эпиграфов и абзацев с `text-indent: 0`.
-- **Резервное копирование (`AppSettings`, `DatabaseHelper`)**: добавлен 21-й ключ настройки `KEY_USE_EPUB_FONTS`.
+- **Резервное копирование (`AppSettings`, `DatabaseHelper`)**: добавлены ключи настроек `use_epub_fonts`, `custom_tap_zones`, `fullscreen_reader` и учёт таблицы `quotes` (`quotes_count`).
 
 ## [v1.6.7-beta] - 2026-11-15
 
