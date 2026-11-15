@@ -1298,6 +1298,10 @@ public class AppUpdateManager {
         try {
             DownloadManager.Query q = new DownloadManager.Query()
                     .setFilterByStatus(DownloadManager.STATUS_SUCCESSFUL);
+            try {
+                java.lang.reflect.Method visMethod = q.getClass().getMethod("setOnlyIncludeVisibleInDownloadsUi", boolean.class);
+                visMethod.invoke(q, true);
+            } catch (Throwable ignored) {}
             c = dm.query(q);
             if (c == null) return false;
             int titleIdx = c.getColumnIndex(DownloadManager.COLUMN_TITLE);
@@ -1448,7 +1452,7 @@ public class AppUpdateManager {
             dmReady = registerApkInSystemDownloads(activity, apkFile, null);
         }
 
-        if (dmReady || silentFallback) {
+        if (dmReady) {
             try {
                 Intent dl = new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS);
                 dl.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
