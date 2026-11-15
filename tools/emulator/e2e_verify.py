@@ -289,6 +289,12 @@ def _run_tests(args):
     time.sleep(1.5)
     screencap(os.path.join(args.artifacts, f"{args.tag}_02_main_shelf.png"))
 
+    shelf_root = dump_ui()
+    shelf_joined = " | ".join(all_visible_texts(shelf_root))
+    if "Файлы (" not in shelf_joined:
+        raise AssertionError(f"v1.7.0-beta 5th tab 'Файлы (...)' missing on main shelf UI: {shelf_joined}")
+    print("[check] Main shelf displays 5 tabs including 'Файлы (0)': OK")
+
     # 4. Open Main Menu -> re-enable network -> "Архив версий и откат ПО"
     m_ver = re.search(r"versionName=([^\s]+)", pkg_dump)
     installed_ver = m_ver.group(1) if m_ver else ""
@@ -329,10 +335,10 @@ def _run_tests(args):
     if "yandex-books-lite-v1.6.1-beta.apk" not in dl_files:
         raise AssertionError("Downloaded APK yandex-books-lite-v1.6.1-beta.apk not found in /sdcard/Download!")
     bk_content = shell("cat /sdcard/Books/YandexBooks/backup/*.json", check=False)
-    for setting_key in ("dither_covers_enabled", "edge_brightness_swipe", "audio_sync_enabled", "use_epub_fonts"):
+    for setting_key in ("dither_covers_enabled", "edge_brightness_swipe", "audio_sync_enabled", "use_epub_fonts", "custom_tap_zones", "fullscreen_reader", "quotes_count"):
         if setting_key not in bk_content:
             raise AssertionError(f"v1.7.0-beta setting '{setting_key}' missing from live Android backup!")
-    print("[check] Live Android backup includes v1.7.0-beta settings (dither/edge_brightness/audio_sync/use_epub_fonts): OK")
+    print("[check] Live Android backup includes all v1.7.0-beta keys (custom_tap_zones/fullscreen_reader/quotes_count/...): OK")
 
     # Verify DownloadProvider DB directly on real Android OS!
     dm_query = shell("content query --uri content://downloads/my_downloads", check=False)

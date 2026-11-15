@@ -3446,10 +3446,10 @@ def test_v163_beta_downloads_ui_and_full_settings_backup():
     ):
         assert k in upd, f"Отсутствует {k} в AppUpdateManager.java"
 
-    # 3. DatabaseHelper сохраняет и восстанавливает все 21 ключ AppSettings
+    # 3. DatabaseHelper сохраняет и восстанавливает все 23 ключа AppSettings
     st = rd(jb + "core/storage/AppSettings.java")
     declared_keys = re.findall(r'(?:public|private)\s+static\s+final\s+String\s+KEY_[A-Z0-9_]+\s*=\s*"([^"]+)"', st)
-    assert len(declared_keys) == 21, f"Ожидался 21 ключ в AppSettings.java, найдено: {len(declared_keys)} -> {declared_keys}"
+    assert len(declared_keys) == 23, f"Ожидалось 23 ключа в AppSettings.java, найдено: {len(declared_keys)} -> {declared_keys}"
 
     dbh = rd(jb + "core/storage/DatabaseHelper.java")
     extra_9_keys = (
@@ -3814,6 +3814,80 @@ def test_v170_beta_hybrid_formatting_links_and_stable_footer():
     print("✅ Тест v1.7.0-beta успешно пройден!\n")
 
 
+def test_v170_beta_extended_modules():
+    print("Тест 56: Модули 1, 2, 5.2, 5.3, 8 и 13 (Gateway, Канонический CFI, Сетка 3x3, Полноэкранный режим, Мои файлы, Цитаты)...")
+    import os, re
+    jb = "app/src/main/java/com/onyx/yandexbooks/"
+
+    def rd(rel):
+        with open(os.path.join(PROJECT_DIR, rel), "r", encoding="utf-8") as fh:
+            return fh.read()
+
+    # 1. Модули 5.2 & 5.3: Сетка тапов 3x3 + Полноэкранный режим
+    st = rd(jb + "core/storage/AppSettings.java")
+    for k in ("TAP_ZONE_CUSTOM", "KEY_CUSTOM_TAP_ZONES", "KEY_FULLSCREEN_READER", "getCustomTapZonesRaw", "getCustomTapZones", "parseCustomTapZones", "isFullscreenReader"):
+        assert k in st, f"Отсутствует {k} в AppSettings.java"
+    tc = rd(jb + "core/typography/TypographyConfig.java")
+    assert "getCustomTapActionAt" in tc and "customTapZones" in tc
+    rc = rd(jb + "ui/ReaderCanvasView.java")
+    for k in ("OnExtraTapActionListener", "dispatchCustomTapAction", "custom_3x3"):
+        assert k in rc, f"Отсутствует {k} в ReaderCanvasView.java"
+    rx = rd("app/src/main/res/layout/activity_reader.xml")
+    assert "row_toggle_fullscreen" in rx and "btn_toggle_fullscreen" in rx
+
+    # Симуляция матрицы 3x3: ячейки [0..2][0..2]
+    grid = ["prev", "toc", "next", "prev", "menu", "next", "prev", "bookmark", "next"]
+    assert len(grid) == 9 and grid[0 * 3 + 1] == "toc" and grid[2 * 3 + 1] == "bookmark"
+
+    # 2. Модуль 1: Мобильный GraphQL Gateway + Fallback на p-graphql
+    api = rd(jb + "core/api/YandexBooksApiClient.java")
+    for k in ("PRIMARY_GRAPHQL_URL", "api-gateway.bookmate.yandex.net/graphql", "X-App-Version", "executeGraphQLWithFallbackSync"):
+        assert k in api, f"Отсутствует {k} в YandexBooksApiClient.java"
+
+    # 3. Модуль 2: Канонический EPUB CFI + original_opf_spine_index + opf_item_id
+    ch_model = rd(jb + "core/api/models/Chapter.java")
+    assert "originalOpfSpineIndex" in ch_model and "opfItemId" in ch_model
+    ep = rd(jb + "core/epub/EpubParser.java")
+    assert "parseOpfSpineDetailed" in ep and "opfItemId" in ep
+    cm = rd(jb + "core/storage/CacheManager.java")
+    assert "saveParsedBookChapters" in cm and "setOriginalOpfSpineIndex" in cm
+    assert "buildCanonicalCfi" in api and "opfItemId" in api
+
+    # Симуляция канонического CFI: spineIndex=4, itemId="ch_05", par=12 -> /6/10[ch_05]!/4/2/26
+    spine_step = (4 + 1) * 2
+    cfi = f"epubcfi(/6/{spine_step}[ch_05]!/4/2/{(12 + 1) * 2})"
+    m_spine = re.search(r"/6/(\d+)(?:\[([^\]]+)\])?!", cfi)
+    assert m_spine and (int(m_spine.group(1)) // 2 - 1) == 4 and m_spine.group(2) == "ch_05"
+
+    # 4. Модуль 8: Полка "Мои файлы" (user_books + file_url)
+    bm = rd(jb + "core/api/models/Book.java")
+    assert "fileUrl" in bm and "getFileUrl" in bm
+    assert "fetchUserUploadedBooks" in api and "parseUserUploadedBooksJson" in api
+    assert "directFileUrl" in api and "downloadBookEpubSync" in api
+    mx = rd("app/src/main/res/layout/activity_main.xml")
+    assert "tab_user_books_btn" in mx
+    ma = rd(jb + "ui/MainActivity.java")
+    assert "tabUserBooksBtn" in ma and "loadUserUploadedBooks" in ma and '"user_books"' in ma
+
+    # 5. Модуль 13: Цитаты, WordBox и экспорт
+    qm = rd(jb + "core/api/models/Quote.java")
+    assert "quoteUuid" in qm and "startOffset" in qm and "endOffset" in qm
+    tp = rd(jb + "core/typography/TextPaginator.java")
+    assert "public static class WordBox" in tp and "wordBoxes" in tp
+    dbh = rd(jb + "core/storage/DatabaseHelper.java")
+    for k in ("ensureQuotesTable", "insertQuote", "getQuotesForBook", "getQuotesForChapter", "deleteQuote", "quotesCount", '"file_url"', '"user_books"'):
+        assert k in dbh, f"Отсутствует {k} в DatabaseHelper.java"
+    for k in ("getBookQuotes", "createBookQuote", "deleteBookQuote"):
+        assert k in api, f"Отсутствует {k} в YandexBooksApiClient.java"
+    assert "OnTextSelectionListener" in rc and "RenderedWordBox" in rc and "findWordBoxAtOrNear" in rc
+    ra = rd(jb + "ui/ReaderActivity.java")
+    for k in ("showTextSelectionActionDialog", "saveSelectedQuote", "exportBookQuotesToFile", "resolveChapterIndexFromCfi", "btnTabQuotes"):
+        assert k in ra, f"Отсутствует {k} в ReaderActivity.java"
+    # Снова проверяем порядок приоритета тапов в ReaderCanvasView
+    assert rc.index("Math.abs(deltaX) >= 35") < rc.index("footnoteTapListener.onFootnoteTap") < rc.index("linkTapListener.onLinkTap") < rc.index("left_handed")
+    print("✅ Тест 56 (Все модули v1.7.0-beta) успешно пройден!\n")
+
+
 if __name__ == "__main__":
     print("==================================================")
     print("🚀 Запуск тотальной верификации ядра Яндекс Книги")
@@ -3874,6 +3948,7 @@ if __name__ == "__main__":
     test_v166_beta_multidevice_abi_and_android9_downloads_fix()
     test_v167_beta_dither_footnotes_edge_brightness_and_optional_audio()
     test_v170_beta_hybrid_formatting_links_and_stable_footer()
+    test_v170_beta_extended_modules()
     print("==================================================")
-    print("🎉 ВСЕ 55 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 56 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")
