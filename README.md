@@ -31,7 +31,7 @@
 * 🚀 **Актуальный выпуск (`v2.0.0`):** [**Страница релизов на GitHub (Releases)**](https://github.com/litvaerickson-spec/onyx-yandex-books/releases)
 * 🔐 **Контрольные суммы (SHA-256):** [`CHECKSUMS.md`](CHECKSUMS.md) и [`SHA256SUMS`](SHA256SUMS)
 * 🔄 **Обновление по воздуху (OTA без провода):** прямо на устройстве через **«Меню» → «Обновление ПО»** (или нажатием на строку статуса внизу экрана)
-* 📖 **Подробное руководство пользователя:** [`docs/guides/user_guide.md`](docs/guides/user_guide.md)
+* 📖 **Подробное руководство пользователя:** [`docs/guides/user_guide.md`](docs/guides/user_guide.md) · 📥 [**Скачать в PDF (`YandexBooksLite_UserGuide_v2.0.0.pdf`)**](docs/guides/YandexBooksLite_UserGuide_v2.0.0.pdf)
 * 📋 **Полный список изменений:** [`CHANGELOG.md`](CHANGELOG.md)
 * 🔨 **Скрипт сборки из исходников:** [`build_apk.sh`](build_apk.sh)
 
