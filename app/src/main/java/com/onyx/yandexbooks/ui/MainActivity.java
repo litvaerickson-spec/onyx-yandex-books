@@ -605,7 +605,7 @@ public class MainActivity extends Activity {
         int menuMinWDp = 76;
         int tabsBarDp = 38;
         int tabBtnDp = 32;
-        float tabSp = 11.5f;
+        float tabSp = 10.5f;
         int footerBarDp = 46;
         int footerBtnDp = 34;
         float footerTextSp = 12.5f;
@@ -613,15 +613,15 @@ public class MainActivity extends Activity {
 
         if (com.onyx.yandexbooks.core.storage.AppSettings.PANEL_SIZE_COMPACT.equalsIgnoreCase(mode)) {
             headerBarDp = 36; headerBtnDp = 28; headerTitleSp = 13f; headerBtnSp = 11f; menuMinWDp = 62;
-            tabsBarDp = 32; tabBtnDp = 28; tabSp = 11f;
+            tabsBarDp = 32; tabBtnDp = 28; tabSp = 9.5f;
             footerBarDp = 38; footerBtnDp = 28; footerTextSp = 11.5f; footerBtnSp = 11f;
         } else if (com.onyx.yandexbooks.core.storage.AppSettings.PANEL_SIZE_LARGE.equalsIgnoreCase(mode)) {
             headerBarDp = 52; headerBtnDp = 42; headerTitleSp = 15.5f; headerBtnSp = 14f; menuMinWDp = 88;
-            tabsBarDp = 44; tabBtnDp = 38; tabSp = 13f;
+            tabsBarDp = 44; tabBtnDp = 38; tabSp = 11.5f;
             footerBarDp = 54; footerBtnDp = 40; footerTextSp = 14f; footerBtnSp = 13.5f;
         } else if (com.onyx.yandexbooks.core.storage.AppSettings.PANEL_SIZE_XLARGE.equalsIgnoreCase(mode)) {
             headerBarDp = 60; headerBtnDp = 48; headerTitleSp = 17f; headerBtnSp = 15.5f; menuMinWDp = 100;
-            tabsBarDp = 50; tabBtnDp = 44; tabSp = 14f;
+            tabsBarDp = 50; tabBtnDp = 44; tabSp = 12.5f;
             footerBarDp = 62; footerBtnDp = 46; footerTextSp = 15.5f; footerBtnSp = 15f;
         }
 
@@ -634,9 +634,9 @@ public class MainActivity extends Activity {
         stylePanelButton(btnMainMenu, headerBtnDp, menuMinWDp, headerBtnSp, 12, density);
 
         setViewHeightPx(mainTabsBar, Math.round(tabsBarDp * density));
-        Button[] tabs = new Button[]{tabReadingBtn, tabToReadBtn, tabCatalogBtn, tabSearchBtn};
+        Button[] tabs = new Button[]{tabReadingBtn, tabToReadBtn, tabUserBooksBtn, tabCatalogBtn, tabSearchBtn};
         for (Button t : tabs) {
-            stylePanelButton(t, tabBtnDp, 0, tabSp, 2, density);
+            stylePanelButton(t, tabBtnDp, 0, tabSp, 1, density);
         }
 
         setViewHeightPx(shelfFooterBar, Math.round(footerBarDp * density));
@@ -973,9 +973,14 @@ public class MainActivity extends Activity {
         divider.setBackgroundColor(Color.BLACK);
         root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
 
+        final com.onyx.yandexbooks.core.eink.EinkScrollView scaleScroll = new com.onyx.yandexbooks.core.eink.EinkScrollView(this);
+        LinearLayout.LayoutParams scaleScrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
+        scaleScrollLp.setMargins(0, (int) (4 * density), 0, (int) (4 * density));
+        scaleScroll.setLayoutParams(scaleScrollLp);
+
         LinearLayout optionsLayout = new LinearLayout(this);
         optionsLayout.setOrientation(LinearLayout.VERTICAL);
-        optionsLayout.setPadding(0, (int) (6 * density), 0, (int) (6 * density));
+        optionsLayout.setPadding(0, (int) (4 * density), 0, (int) (4 * density));
 
         final float[] scales = new float[]{
                 com.onyx.yandexbooks.core.storage.AppSettings.UI_SCALE_DEFAULT,
@@ -1017,7 +1022,6 @@ public class MainActivity extends Activity {
             }
             optionsLayout.addView(btn);
         }
-        root.addView(optionsLayout);
 
         final boolean ditherOn = appSettings.isDitherCoversEnabled();
         final Button btnDither = createMenuButton(
@@ -1033,7 +1037,10 @@ public class MainActivity extends Activity {
                     }
                 }, density);
         btnDither.setBackgroundResource(ditherOn ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
-        root.addView(btnDither);
+        optionsLayout.addView(btnDither);
+
+        scaleScroll.addView(optionsLayout);
+        root.addView(scaleScroll);
 
         Button btnClose = new Button(this);
         btnClose.setText("Отмена");
@@ -1053,9 +1060,10 @@ public class MainActivity extends Activity {
         });
         root.addView(btnClose);
 
-        dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         final int targetW = (int) (dm.widthPixels * 0.88);
+        final int targetH = Math.min((int) (dm.heightPixels * 0.88), (int) (465 * density));
         dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
             @Override
             public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
@@ -1068,7 +1076,7 @@ public class MainActivity extends Activity {
             @Override
             public void onShow(DialogInterface d) {
                 if (dialog.getWindow() != null) {
-                    dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    dialog.getWindow().setLayout(targetW, targetH);
                 }
                 EpdController.requestFullRefresh(MainActivity.this, root);
             }
@@ -1084,7 +1092,7 @@ public class MainActivity extends Activity {
         dialog.show();
 
         if (dialog.getWindow() != null) {
-            dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
+            dialog.getWindow().setLayout(targetW, targetH);
         }
     }
 

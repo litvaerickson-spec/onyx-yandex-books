@@ -84,6 +84,7 @@ public class ReaderActivity extends Activity {
     private View readerTopDivider;
     private View readerBottomBar;
     private View readerFormatPanel;
+    private View readerFormatScroll;
 
     // Верхняя панель
     private Button btnReaderBack;
@@ -237,6 +238,7 @@ public class ReaderActivity extends Activity {
         readerTopDivider = findViewById(R.id.reader_top_divider);
         readerBottomBar = findViewById(R.id.reader_bottom_bar);
         readerFormatPanel = findViewById(R.id.reader_format_panel);
+        readerFormatScroll = findViewById(R.id.reader_format_scroll);
 
         btnReaderBack = (Button) findViewById(R.id.btn_reader_back);
         readerBookTitleTop = (TextView) findViewById(R.id.reader_book_title_top);
@@ -686,6 +688,9 @@ public class ReaderActivity extends Activity {
                     if (readerFormatPanel != null) {
                         int vis = (readerFormatPanel.getVisibility() == View.VISIBLE) ? View.GONE : View.VISIBLE;
                         readerFormatPanel.setVisibility(vis);
+                        if (vis == View.VISIBLE) {
+                            adjustFormatPanelHeight();
+                        }
                         EpdController.requestFullRefresh(ReaderActivity.this, null);
                     }
                 }
@@ -1082,6 +1087,26 @@ public class ReaderActivity extends Activity {
             btnSubtabSpacing.setTextColor(Color.BLACK);
             btnSubtabSpacing.setTypeface(null, active ? Typeface.BOLD : Typeface.NORMAL);
         }
+        adjustFormatPanelHeight();
+    }
+
+    private void adjustFormatPanelHeight() {
+        if (readerFormatScroll == null) return;
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        float density = dm.density;
+        int chromeReservedPx = Math.round(285 * density);
+        int maxAllowedPx = dm.heightPixels - chromeReservedPx;
+        int naturalContentPx = Math.round(310 * density);
+        ViewGroup.LayoutParams lp = readerFormatScroll.getLayoutParams();
+        if (lp != null) {
+            int targetHeight = (maxAllowedPx < naturalContentPx)
+                    ? Math.max(Math.round(135 * density), maxAllowedPx)
+                    : ViewGroup.LayoutParams.WRAP_CONTENT;
+            if (lp.height != targetHeight) {
+                lp.height = targetHeight;
+                readerFormatScroll.setLayoutParams(lp);
+            }
+        }
     }
 
     private void updateFontFamilyButtonText() {
@@ -1097,6 +1122,7 @@ public class ReaderActivity extends Activity {
         final float density = getResources().getDisplayMetrics().density;
         DisplayMetrics dm = getResources().getDisplayMetrics();
         final int targetW = Math.min((int) (dm.widthPixels * 0.92), (int) (580 * density));
+        final int targetH = Math.min((int) (dm.heightPixels * 0.88), (int) (425 * density));
 
         final LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -1207,7 +1233,11 @@ public class ReaderActivity extends Activity {
             fontListLayout.addView(itemLayout);
         }
 
-        root.addView(fontListLayout);
+        final com.onyx.yandexbooks.core.eink.EinkScrollView fontScroll = new com.onyx.yandexbooks.core.eink.EinkScrollView(this);
+        LinearLayout.LayoutParams fontScrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
+        fontScroll.setLayoutParams(fontScrollLp);
+        fontScroll.addView(fontListLayout);
+        root.addView(fontScroll);
 
         View bottomDivider = new View(this);
         bottomDivider.setBackgroundColor(Color.BLACK);
@@ -1231,7 +1261,7 @@ public class ReaderActivity extends Activity {
         });
         root.addView(btnClose);
 
-        dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         dialog.setCanceledOnTouchOutside(true);
 
         dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
@@ -1267,7 +1297,7 @@ public class ReaderActivity extends Activity {
             public void onShow(DialogInterface d) {
                 if (dialog.getWindow() != null) {
                     dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
-                    dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    dialog.getWindow().setLayout(targetW, targetH);
                 }
                 EpdController.requestFullRefresh(ReaderActivity.this, root);
             }
@@ -1283,7 +1313,7 @@ public class ReaderActivity extends Activity {
         dialog.show();
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
-            dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
+            dialog.getWindow().setLayout(targetW, targetH);
         }
     }
 
@@ -1931,6 +1961,7 @@ public class ReaderActivity extends Activity {
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
         updateOrientationButtonText();
+        adjustFormatPanelHeight();
         if (readerCanvas != null) {
             readerCanvas.post(new Runnable() {
                 @Override
@@ -2979,7 +3010,7 @@ public class ReaderActivity extends Activity {
                                 chapterPageCounts[i] = exactCounts[i];
                                 chapterPageExact[i] = true;
                             }
-                            recalculateTotalBookPages();
+                            updateMenuControls();
                             if (!currentPages.isEmpty() && currentPageIndex < currentPages.size() && readerCanvas != null) {
                                 String title = getActiveChapterTitle();
                                 double percent = calculateCurrentGlobalPercent();
@@ -3319,12 +3350,12 @@ public class ReaderActivity extends Activity {
         if (intentPercent > percent) {
             percent = intentPercent;
             if (intentChapter >= 0) {
-                targetChapter = intentChapter;
+                targetChapter = spineIndexToChapterIndex(intentChapter);
             }
         } else if (percent <= 0.0 && intentPercent > 0.0) {
             percent = intentPercent;
             if (intentChapter >= 0) {
-                targetChapter = intentChapter;
+                targetChapter = spineIndexToChapterIndex(intentChapter);
             }
         }
 

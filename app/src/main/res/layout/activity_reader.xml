@@ -295,6 +295,18 @@
                 android:layout_marginTop="4dp"
                 android:layout_marginBottom="6dp" />
 
+            <!-- Прокручиваемая обёртка подвкладок для ландшафта и крупных масштабов UI (145%-200%) -->
+            <com.onyx.yandexbooks.core.eink.EinkScrollView
+                android:id="@+id/reader_format_scroll"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:scrollbars="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
             <!-- Контейнер подвкладки 1: Вид -->
             <LinearLayout
                 android:id="@+id/layout_subtab_view_container"
@@ -932,6 +944,8 @@
                         android:includeFontPadding="false" />
                 </LinearLayout>
             </LinearLayout>
+            </LinearLayout>
+            </com.onyx.yandexbooks.core.eink.EinkScrollView>
         </LinearLayout>
 
         <!-- Тонкий разделитель перед главными 3 вкладками -->
