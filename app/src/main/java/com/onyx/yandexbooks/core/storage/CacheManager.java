@@ -12,6 +12,7 @@ import com.onyx.yandexbooks.core.api.YandexBooksApiClient;
 import com.onyx.yandexbooks.core.api.models.Book;
 import com.onyx.yandexbooks.core.api.models.Chapter;
 import com.onyx.yandexbooks.core.epub.EpubParser;
+import com.onyx.yandexbooks.core.ui.EinkDitherer;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -26,7 +27,10 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -107,6 +111,102 @@ public class CacheManager {
             bDir.mkdirs();
         }
         return new File(bDir, "toc.json");
+    }
+
+    public File getFootnotesFile(String bookUuid) {
+        File bDir = new File(booksDir, bookUuid);
+        if (!bDir.exists()) {
+            bDir.mkdirs();
+        }
+        return new File(bDir, "footnotes.json");
+    }
+
+    public void saveFootnotes(String bookUuid, Map<String, String> footnotes) {
+        if (bookUuid == null || footnotes == null) return;
+        FileOutputStream fos = null;
+        OutputStreamWriter writer = null;
+        try {
+            JSONObject obj = new JSONObject();
+            for (Map.Entry<String, String> e : footnotes.entrySet()) {
+                if (e.getKey() != null && e.getValue() != null) {
+                    obj.put(e.getKey(), e.getValue());
+                }
+            }
+            fos = new FileOutputStream(getFootnotesFile(bookUuid));
+            writer = new OutputStreamWriter(fos, "UTF-8");
+            writer.write(obj.toString());
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving footnotes", e);
+        } finally {
+            if (writer != null) {
+                try { writer.close(); } catch (Throwable ignored) {}
+            }
+            if (fos != null) {
+                try { fos.close(); } catch (Throwable ignored) {}
+            }
+        }
+    }
+
+    public Map<String, String> loadFootnotes(String bookUuid) {
+        Map<String, String> map = new HashMap<>();
+        if (bookUuid == null) return map;
+        File fnFile = getFootnotesFile(bookUuid);
+        if (!fnFile.exists() || fnFile.length() == 0) {
+            return map;
+        }
+        FileInputStream fis = null;
+        BufferedReader reader = null;
+        try {
+            fis = new FileInputStream(fnFile);
+            reader = new BufferedReader(new InputStreamReader(fis, "UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+            JSONObject obj = new JSONObject(sb.toString());
+            Iterator<String> keys = obj.keys();
+            while (keys.hasNext()) {
+                String k = keys.next();
+                String v = obj.optString(k, "");
+                if (!k.isEmpty() && !v.isEmpty()) {
+                    map.put(k, v);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error loading footnotes", e);
+        } finally {
+            if (reader != null) {
+                try { reader.close(); } catch (Throwable ignored) {}
+            }
+            if (fis != null) {
+                try { fis.close(); } catch (Throwable ignored) {}
+            }
+        }
+        return map;
+    }
+
+    /**
+     * Синхронное (для фонового потока) доизвлечение сносок для книг, скачанных до v1.6.7-beta.
+     */
+    public Map<String, String> ensureFootnotesExtractedSync(String bookUuid) {
+        File fnFile = getFootnotesFile(bookUuid);
+        if (fnFile.exists() && fnFile.length() > 0) {
+            return loadFootnotes(bookUuid);
+        }
+        Map<String, String> map = new HashMap<>();
+        File epub = getEpubFile(bookUuid);
+        if (epub != null && epub.exists() && epub.length() > 0) {
+            try {
+                EpubParser.ParseResult parsed = EpubParser.parseEpubFull(epub);
+                if (parsed != null && parsed.footnotes != null) {
+                    saveFootnotes(bookUuid, parsed.footnotes);
+                    return parsed.footnotes;
+                }
+            } catch (Throwable ignored) {}
+        }
+        saveFootnotes(bookUuid, map);
+        return map;
     }
 
     public void saveTocTree(String bookUuid, List<EpubParser.TocNode> tocTree) {
@@ -421,6 +521,7 @@ public class CacheManager {
             }
 
             saveTocTree(bookUuid, parsed.tocTree);
+            saveFootnotes(bookUuid, parsed.footnotes);
 
             List<Chapter> chapters = new ArrayList<>();
             for (int i = 0; i < parsed.chapters.size(); i++) {
@@ -467,6 +568,7 @@ public class CacheManager {
                             }
 
                             saveTocTree(bookUuid, parsed.tocTree);
+                            saveFootnotes(bookUuid, parsed.footnotes);
 
                             List<Chapter> chapters = new ArrayList<>();
                             for (int i = 0; i < parsed.chapters.size(); i++) {
@@ -574,6 +676,7 @@ public class CacheManager {
                         if (parsed == null || parsed.chapters.isEmpty()) return null;
 
                         saveTocTree(bookUuid, parsed.tocTree);
+                        saveFootnotes(bookUuid, parsed.footnotes);
 
                         List<Chapter> newChapters = new ArrayList<>();
                         for (int i = 0; i < parsed.chapters.size(); i++) {
@@ -987,6 +1090,9 @@ public class CacheManager {
                     opts.inPreferredConfig = Bitmap.Config.RGB_565;
                     Bitmap bmp = BitmapFactory.decodeFile(diskCover.getAbsolutePath(), opts);
                     if (bmp != null) {
+                        if (new AppSettings(context).isDitherCoversEnabled()) {
+                            bmp = EinkDitherer.applyFloydSteinbergDither(bmp);
+                        }
                         imageCache.put(key, bmp);
                         return bmp;
                     }
@@ -1007,6 +1113,9 @@ public class CacheManager {
                     if ((name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png")) && name.contains("cover")) {
                         Bitmap bmp = loadImageFromEpub(bookUuid, ze.getName(), reqWidth, reqHeight);
                         if (bmp != null) {
+                            if (new AppSettings(context).isDitherCoversEnabled()) {
+                                bmp = EinkDitherer.applyFloydSteinbergDither(bmp);
+                            }
                             imageCache.put(key, bmp);
                             return bmp;
                         }

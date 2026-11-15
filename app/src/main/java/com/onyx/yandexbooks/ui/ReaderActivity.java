@@ -117,6 +117,11 @@ public class ReaderActivity extends Activity {
     private Button btnToggleFontFamily;
     private Button btnToggleIndent;
     private Button btnToggleTapZones;
+    private Button btnToggleEdgeBrightness;
+    private View rowToggleAudioSync;
+    private Button btnToggleAudioSync;
+    private boolean hasLinkedAudio = false;
+    private boolean audioSyncPromptShown = false;
 
     // Элементы подвкладки «Формат»
     private Button btnToggleContrast; // Утолщение текста
@@ -206,6 +211,10 @@ public class ReaderActivity extends Activity {
 
         bookUuid = getIntent().getStringExtra("book_uuid");
         bookTitle = getIntent().getStringExtra("book_title");
+        String intentAudioUuid = getIntent().getStringExtra("linked_audio_uuid");
+        if (intentAudioUuid != null && !intentAudioUuid.trim().isEmpty()) {
+            hasLinkedAudio = true;
+        }
 
         readerCanvas = (ReaderCanvasView) findViewById(R.id.reader_canvas);
         readerLoadingOverlay = findViewById(R.id.reader_loading_overlay);
@@ -251,6 +260,12 @@ public class ReaderActivity extends Activity {
         btnToggleFontFamily = (Button) findViewById(R.id.btn_toggle_font_family);
         btnToggleIndent = (Button) findViewById(R.id.btn_toggle_indent);
         btnToggleTapZones = (Button) findViewById(R.id.btn_toggle_tap_zones);
+        btnToggleEdgeBrightness = (Button) findViewById(R.id.btn_toggle_edge_brightness);
+        rowToggleAudioSync = findViewById(R.id.row_toggle_audio_sync);
+        btnToggleAudioSync = (Button) findViewById(R.id.btn_toggle_audio_sync);
+        if (rowToggleAudioSync != null) {
+            updateAudioSyncRowVisibility();
+        }
 
         // Контролы подвкладки «Формат»
         btnToggleContrast = (Button) findViewById(R.id.btn_toggle_contrast);
@@ -383,6 +398,36 @@ public class ReaderActivity extends Activity {
                             (width != lastPaginatedWidth || height != lastPaginatedHeight)) {
                         repaginateCurrentChapter();
                     }
+                }
+            }
+        });
+
+        readerCanvas.setEdgeBrightnessEnabled(appSettings.isEdgeBrightnessSwipeEnabled());
+        readerCanvas.setInitialFrontlightLevels(appSettings.getEdgeFrontlightCold(), appSettings.getEdgeFrontlightWarm());
+
+        readerCanvas.setOnFootnoteTapListener(new ReaderCanvasView.OnFootnoteTapListener() {
+            @Override
+            public void onFootnoteTap(String marker, String noteText) {
+                EinkNotice.show(ReaderActivity.this, "Сноска " + marker, noteText);
+            }
+        });
+
+        readerCanvas.setOnEdgeBrightnessGestureListener(new ReaderCanvasView.OnEdgeBrightnessGestureListener() {
+            @Override
+            public void onEdgeBrightnessChanged(boolean isWarmEdge, int newPercent) {
+                if (isWarmEdge) {
+                    appSettings.setEdgeFrontlightWarm(newPercent);
+                } else {
+                    appSettings.setEdgeFrontlightCold(newPercent);
+                }
+                int cold = appSettings.getEdgeFrontlightCold();
+                int warm = appSettings.getEdgeFrontlightWarm();
+                if (EpdController.isOnyxDevice()) {
+                    EpdController.setFrontlight(ReaderActivity.this, cold, warm);
+                } else if (getWindow() != null) {
+                    WindowManager.LayoutParams lp = getWindow().getAttributes();
+                    lp.screenBrightness = Math.max(0.05f, Math.min(1.0f, newPercent / 100f));
+                    getWindow().setAttributes(lp);
                 }
             }
         });
@@ -714,6 +759,37 @@ public class ReaderActivity extends Activity {
             });
         }
 
+        updateEdgeBrightnessButtonText();
+        if (btnToggleEdgeBrightness != null) {
+            btnToggleEdgeBrightness.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    boolean next = !appSettings.isEdgeBrightnessSwipeEnabled();
+                    appSettings.setEdgeBrightnessSwipeEnabled(next);
+                    if (readerCanvas != null) {
+                        readerCanvas.setEdgeBrightnessEnabled(next);
+                    }
+                    updateEdgeBrightnessButtonText();
+                    EinkNotice.show(ReaderActivity.this, "Подсветка по краям",
+                            next
+                                    ? "Включена: вертикальный свайп по левому узкому краю регулирует тёплый свет, по правому — холодный.\n\nКороткие касания и зоны перелистывания работают как прежде."
+                                    : "Отключена: вертикальные движения по краям экрана игнорируются.");
+                }
+            });
+        }
+
+        updateAudioSyncButtonText();
+        if (btnToggleAudioSync != null) {
+            btnToggleAudioSync.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    boolean next = !appSettings.isAudioSyncEnabled();
+                    appSettings.setAudioSyncEnabled(next);
+                    updateAudioSyncButtonText();
+                }
+            });
+        }
+
         // Подвкладка 2: Формат (Жирный/Обычный, Переносы слов TeX, Контраст E-Ink)
         updateContrastButtonText();
         if (btnToggleContrast != null) {
@@ -850,6 +926,8 @@ public class ReaderActivity extends Activity {
         setupRowClick(R.id.row_toggle_font_family, btnToggleFontFamily);
         setupRowClick(R.id.row_toggle_indent, btnToggleIndent);
         setupRowClick(R.id.row_toggle_tap_zones, btnToggleTapZones);
+        setupRowClick(R.id.row_toggle_edge_brightness, btnToggleEdgeBrightness);
+        setupRowClick(R.id.row_toggle_audio_sync, btnToggleAudioSync);
         setupRowClick(R.id.row_toggle_contrast, btnToggleContrast);
         setupRowClick(R.id.row_toggle_hyphenation, btnToggleHyphenation);
         setupRowClick(R.id.row_toggle_eink_contrast, btnToggleEinkContrast);
@@ -1149,6 +1227,21 @@ public class ReaderActivity extends Activity {
         } else {
             btnToggleTapZones.setText("Стандарт");
         }
+    }
+
+    private void updateEdgeBrightnessButtonText() {
+        if (btnToggleEdgeBrightness == null || appSettings == null) return;
+        btnToggleEdgeBrightness.setText(appSettings.isEdgeBrightnessSwipeEnabled() ? "Свайп (Вкл)" : "Выключена");
+    }
+
+    private void updateAudioSyncButtonText() {
+        if (btnToggleAudioSync == null || appSettings == null) return;
+        btnToggleAudioSync.setText(appSettings.isAudioSyncEnabled() ? "Спрашивать" : "Выключена");
+    }
+
+    private void updateAudioSyncRowVisibility() {
+        if (rowToggleAudioSync == null) return;
+        rowToggleAudioSync.setVisibility(hasLinkedAudio ? View.VISIBLE : View.GONE);
     }
 
     private void cycleTapZoneMode() {
@@ -2182,6 +2275,7 @@ public class ReaderActivity extends Activity {
     private void loadBookData() {
         if (bookUuid != null && !bookUuid.isEmpty()) {
             dbHelper.updateBookShelf(bookUuid, "reading");
+            loadBookFootnotesAsync();
         }
         // Проверяем, есть ли уже главы в локальной БД
         List<Chapter> localChapters = dbHelper.getChapters(bookUuid);
@@ -2233,11 +2327,35 @@ public class ReaderActivity extends Activity {
                 if (cloudProgress.getLibraryCardId() != null && !cloudProgress.getLibraryCardId().isEmpty()) {
                     dbHelper.updateBookCardId(bookUuid, cloudProgress.getLibraryCardId());
                 }
-                if (cloudProgress.getPercent() <= 0 && (cloudProgress.getCfi() == null || cloudProgress.getCfi().isEmpty()) && cloudProgress.getParagraphIndex() <= 0) return;
+                final boolean audioAvailable = cloudProgress.getLinkedAudioUuid() != null
+                        && !cloudProgress.getLinkedAudioUuid().isEmpty();
+                if (audioAvailable) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            hasLinkedAudio = true;
+                            updateAudioSyncRowVisibility();
+                        }
+                    });
+                }
+                if (cloudProgress.getPercent() <= 0 && (cloudProgress.getCfi() == null || cloudProgress.getCfi().isEmpty()) && cloudProgress.getParagraphIndex() <= 0) {
+                    if (audioAvailable && cloudProgress.getAudioPercent() > 0.0) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                offerAudioSyncIfNewer(cloudProgress);
+                            }
+                        });
+                    }
+                    return;
+                }
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
                         applyCloudProgressIfNewer(cloudProgress);
+                        if (audioAvailable && cloudProgress.getAudioPercent() > 0.0) {
+                            offerAudioSyncIfNewer(cloudProgress);
+                        }
                     }
                 });
             }
@@ -2548,6 +2666,53 @@ public class ReaderActivity extends Activity {
         if (isNewer) {
             navigateToResolvedProgress(cloudProgress, targetChapter, targetParagraph, cloudPercent);
         }
+    }
+
+    private void loadBookFootnotesAsync() {
+        if (bookUuid == null || bookUuid.isEmpty() || cacheManager == null) return;
+        paginationExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                final Map<String, String> notes = cacheManager.ensureFootnotesExtractedSync(bookUuid);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (readerCanvas != null && notes != null && !notes.isEmpty()) {
+                            readerCanvas.setFootnotes(notes);
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    private void offerAudioSyncIfNewer(final ReadingProgress cloudProgress) {
+        if (audioSyncPromptShown || cloudProgress == null || chapters == null || chapters.isEmpty()) return;
+        if (cloudProgress.getLinkedAudioUuid() == null || cloudProgress.getLinkedAudioUuid().isEmpty()) return;
+        if (!appSettings.isAudioSyncEnabled()) return;
+
+        final double audioPct = cloudProgress.getAudioPercent();
+        long audioTs = cloudProgress.getAudioUpdatedAt();
+        if (audioPct <= 0.0 || audioPct >= 99.0) return;
+
+        ReadingProgress local = dbHelper.getProgress(bookUuid);
+        long localTs = (local != null) ? local.getTimestamp() : 0L;
+        double curPercent = calculateCurrentGlobalPercent();
+        if (audioTs > 0 && localTs > 0 && audioTs <= localTs) return;
+        if (Math.abs(audioPct - curPercent) < 2.0) return;
+
+        audioSyncPromptShown = true;
+        String msg = String.format(Locale.getDefault(),
+                "Вы слушали аудиоверсию этой книги до %.0f%%.\n\nПерейти к этому месту в тексте?",
+                audioPct);
+        EinkNotice.showConfirm(ReaderActivity.this, "Синхронизация с аудио", msg, "Перейти к аудио", "Остаться",
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        navigateToResolvedProgress(cloudProgress, -1, 0, audioPct);
+                    }
+                },
+                null);
     }
 
     private void loadChapter(final int index) {

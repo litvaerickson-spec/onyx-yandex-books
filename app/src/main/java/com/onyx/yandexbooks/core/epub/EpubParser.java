@@ -96,6 +96,7 @@ public class EpubParser {
         public List<ChapterData> chapters = new ArrayList<>();
         public List<TocNode> tocTree = new ArrayList<>();
         public String coverImagePath = null;
+        public Map<String, String> footnotes = new HashMap<>();
     }
 
     public static List<ChapterData> parseEpub(File epubFile) {
@@ -237,7 +238,10 @@ public class EpubParser {
                 }
             }
 
-            // 5. Если оглавление TOC было пустым, генерируем базовое оглавление из глав
+            // 5. Извлечение интерактивных сносок для всплывающего просмотра без потери страницы
+            extractFootnotes(zip, chapters, chapterHrefs, rawHtmlCache, result.footnotes);
+
+            // 6. Если оглавление TOC было пустым, генерируем базовое оглавление из глав
             if (tocTree.isEmpty()) {
                 for (int i = 0; i < chapters.size(); i++) {
                     ChapterData cd = chapters.get(i);
@@ -1095,9 +1099,12 @@ public class EpubParser {
             text = text.replaceAll("(?i)<hr\\s*/?>", "\n___SECTION_BREAK___\n");
             text = text.replaceAll("(?i)<p[^>]*>(\\s*|&nbsp;|<br\\s*/?>|\\*\\s*\\*\\s*\\*)</p>", "\n___SECTION_BREAK___\n");
 
+            // 2.1 Нормализация ссылок-сносок (<a href="...#id">1</a>, <sup><a...>1</a></sup>, [<a...>1</a>]) в токены [1] / [*]
+            text = normalizeInlineFootnoteLinks(text);
+
             // 3. Замена тегов переноса строк и закрытия структурных блоков на единичный \n
             text = text.replaceAll("(?i)<br\\s*/?>", "\n");
-            text = text.replaceAll("(?i)</?(?:p|div|h[1-6]|li|blockquote|tr|section|article|header|footer)[^>]*>", "\n");
+            text = text.replaceAll("(?i)</?(?:p|div|h[1-6]|li|blockquote|tr|section|article|header|footer|aside|dd)[^>]*>", "\n");
 
             // 4. Безопасное удаление всех остальных HTML-тегов с сохранением внутреннего текста
             text = text.replaceAll("<[^>]+>", "");
@@ -1201,6 +1208,204 @@ public class EpubParser {
         }
         matcher.appendTail(sb);
         return sb.toString();
+    }
+
+    /**
+     * Преобразует инлайновые HTML-ссылки сносок (<sup><a href="...#fn1">1</a></sup>, [<a href="#n1">1</a>], <a href="#fn">*</a>)
+     * в единые кликабельные маркеры вида [1] / [*], сохраняя пробел перед маркером для аккуратной разметки.
+     */
+    static String normalizeInlineFootnoteLinks(String html) {
+        if (html == null || html.isEmpty() || !html.contains("#")) {
+            return html;
+        }
+        Pattern fnLinkPattern = Pattern.compile(
+                "(?is)(?:<sup>\\s*|\\[\\s*)?<a\\b[^>]*?href\\s*=\\s*[\"'][^\"']*#[^\"']+[\"'][^>]*>(.*?)</a>(?:\\s*</sup>|\\s*\\])?");
+        Matcher m = fnLinkPattern.matcher(html);
+        StringBuffer sb = new StringBuffer();
+        while (m.find()) {
+            String innerRaw = m.group(1);
+            String cleanInner = innerRaw != null ? innerRaw.replaceAll("<[^>]+>", "").replaceAll("\\s+", " ").trim() : "";
+            String bare = normalizeFootnoteBareToken(cleanInner);
+            if (bare != null) {
+                m.appendReplacement(sb, Matcher.quoteReplacement(" [" + bare + "]"));
+            } else {
+                m.appendReplacement(sb, Matcher.quoteReplacement(m.group(0)));
+            }
+        }
+        m.appendTail(sb);
+        return sb.toString();
+    }
+
+    private static String normalizeFootnoteBareToken(String rawLabel) {
+        if (rawLabel == null) return null;
+        String s = rawLabel.trim();
+        if (s.startsWith("[") && s.endsWith("]") && s.length() >= 3) {
+            s = s.substring(1, s.length() - 1).trim();
+        }
+        if (s.startsWith("(") && s.endsWith(")") && s.length() >= 3) {
+            s = s.substring(1, s.length() - 1).trim();
+        }
+        if (s.matches("\\d{1,4}|\\*{1,3}")) {
+            return s;
+        }
+        return null;
+    }
+
+    /**
+     * Извлекает определения сносок для каждой главы из EPUB-архива (поддерживает <aside epub:type="footnote">,
+     * <p|div|li|dd|section id="...">, в т.ч. перекрёстные ссылки на отдельный notes.xhtml).
+     */
+    public static void extractFootnotes(
+            ZipFile zip,
+            List<ChapterData> chapters,
+            List<String> chapterHrefs,
+            Map<Integer, String> rawHtmlCache,
+            Map<String, String> outFootnotes) {
+        if (zip == null || chapters == null || chapters.isEmpty() || outFootnotes == null) {
+            return;
+        }
+        try {
+            Map<String, String> fileHtmlCache = new HashMap<>();
+            if (chapterHrefs != null && rawHtmlCache != null) {
+                for (Map.Entry<Integer, String> entry : rawHtmlCache.entrySet()) {
+                    int idx = entry.getKey();
+                    if (idx >= 0 && idx < chapterHrefs.size()) {
+                        String normPath = resolveZipPath("", chapterHrefs.get(idx));
+                        if (!normPath.isEmpty() && entry.getValue() != null) {
+                            fileHtmlCache.put(normPath, entry.getValue());
+                        }
+                    }
+                }
+            }
+
+            Pattern refPattern = Pattern.compile("(?is)<a\\b[^>]*?href\\s*=\\s*[\"']([^\"']*#[^\"']+)[\"'][^>]*>(.*?)</a>");
+
+            for (int chIdx = 0; chIdx < chapters.size(); chIdx++) {
+                ChapterData cd = chapters.get(chIdx);
+                if (cd == null || "ch_0_cover".equals(cd.id) || cd.fileHref == null || cd.fileHref.isEmpty()) {
+                    continue;
+                }
+                String srcNormHref = resolveZipPath("", cd.fileHref);
+                String srcHtml = fileHtmlCache.get(srcNormHref);
+                if (srcHtml == null) {
+                    srcHtml = readEntryRawHtml(zip, cd.fileHref);
+                    if (srcHtml != null) {
+                        fileHtmlCache.put(srcNormHref, srcHtml);
+                    }
+                }
+                if (srcHtml == null || srcHtml.isEmpty() || !srcHtml.contains("#")) {
+                    continue;
+                }
+
+                String srcBaseDir = "";
+                if (srcNormHref.contains("/")) {
+                    srcBaseDir = srcNormHref.substring(0, srcNormHref.lastIndexOf('/') + 1);
+                }
+
+                Matcher m = refPattern.matcher(srcHtml);
+                while (m.find()) {
+                    String href = m.group(1);
+                    String innerRaw = m.group(2);
+                    if (href == null) continue;
+                    String cleanLabel = innerRaw != null ? innerRaw.replaceAll("<[^>]+>", "").replaceAll("\\s+", " ").trim() : "";
+                    String bare = normalizeFootnoteBareToken(cleanLabel);
+                    if (bare == null) continue;
+
+                    int hashIdx = href.indexOf('#');
+                    if (hashIdx < 0 || hashIdx + 1 >= href.length()) continue;
+                    String filePart = href.substring(0, hashIdx).trim();
+                    String anchorId = href.substring(hashIdx + 1).trim();
+                    try {
+                        anchorId = URLDecoder.decode(anchorId, "UTF-8");
+                    } catch (Exception ignored) {}
+                    if (anchorId.isEmpty()) continue;
+
+                    String targetNormHref = filePart.isEmpty() ? srcNormHref : resolveZipPath(srcBaseDir, filePart);
+                    String targetHtml = fileHtmlCache.get(targetNormHref);
+                    if (targetHtml == null && !targetNormHref.isEmpty()) {
+                        targetHtml = readEntryRawHtml(zip, targetNormHref);
+                        if (targetHtml != null) {
+                            fileHtmlCache.put(targetNormHref, targetHtml);
+                        }
+                    }
+                    if (targetHtml == null || targetHtml.isEmpty()) continue;
+
+                    String noteText = extractElementTextById(targetHtml, anchorId, targetNormHref, bare);
+                    if (noteText == null || noteText.isEmpty()) continue;
+
+                    String marker = "[" + bare + "]";
+                    String scopedKey = "ch:" + chIdx + "|" + marker;
+                    if (!outFootnotes.containsKey(scopedKey)) {
+                        outFootnotes.put(scopedKey, noteText);
+                    }
+                    if (!outFootnotes.containsKey(marker)) {
+                        outFootnotes.put(marker, noteText);
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Error extracting footnotes", t);
+        }
+    }
+
+    private static String extractElementTextById(String html, String targetId, String targetHref, String bareMarker) {
+        if (html == null || targetId == null || targetId.isEmpty()) return null;
+        try {
+            Pattern startPat = Pattern.compile(
+                    "(?is)<(aside|div|p|li|dd|section)\\b[^>]*?\\bid\\s*=\\s*[\"']" + Pattern.quote(targetId) + "[\"'][^>]*>");
+            Matcher m = startPat.matcher(html);
+            if (!m.find()) {
+                return null;
+            }
+            String tagName = m.group(1).toLowerCase();
+            int bodyStart = m.end();
+            int limit = Math.min(html.length(), bodyStart + 6000);
+            Pattern tagPat = Pattern.compile("(?is)<(/?)" + Pattern.quote(tagName) + "\\b[^>]*>");
+            Matcher tm = tagPat.matcher(html);
+            tm.region(bodyStart, limit);
+            int depth = 1;
+            int bodyEnd = -1;
+            while (tm.find()) {
+                String fullTag = tm.group(0);
+                if (tm.group(1) != null && !tm.group(1).isEmpty()) {
+                    depth--;
+                    if (depth == 0) {
+                        bodyEnd = tm.start();
+                        break;
+                    }
+                } else if (!fullTag.endsWith("/>")) {
+                    depth++;
+                }
+            }
+            if (bodyEnd <= bodyStart) {
+                return null;
+            }
+            String rawInner = html.substring(bodyStart, bodyEnd);
+            rawInner = rawInner.replaceAll("(?is)<a\\b[^>]*>(?:\\s*[↑^←↩]\\s*)</a>", "");
+            String clean = cleanHtmlText(rawInner, targetHref).replaceAll("\\s+", " ").trim();
+            if (clean.isEmpty()) return null;
+
+            String bracketPrefix = "[" + bareMarker + "]";
+            if (clean.startsWith(bracketPrefix)) {
+                clean = clean.substring(bracketPrefix.length()).trim();
+            } else if (clean.startsWith(bareMarker + ".")) {
+                clean = clean.substring(bareMarker.length() + 1).trim();
+            } else if (clean.startsWith(bareMarker + ")")) {
+                clean = clean.substring(bareMarker.length() + 1).trim();
+            } else if (clean.startsWith(bareMarker + " ")) {
+                clean = clean.substring(bareMarker.length() + 1).trim();
+            }
+            if (clean.startsWith("^") || clean.startsWith("↑") || clean.startsWith("←")) {
+                clean = clean.substring(1).trim();
+            }
+            if (clean.isEmpty()) return null;
+            if (clean.length() > 1200) {
+                clean = clean.substring(0, 1197).trim() + "…";
+            }
+            return clean;
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
     private static String readStreamToString(InputStream is) throws Exception {

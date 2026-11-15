@@ -468,6 +468,75 @@
                         android:background="@drawable/btn_eink"
                         android:includeFontPadding="false" />
                 </LinearLayout>
+
+                <!-- Вертикальный свайп подсветки по узким краям экрана (без конфликта с тап-зонами) -->
+                <LinearLayout
+                    android:id="@+id/row_toggle_edge_brightness"
+                    android:layout_width="match_parent"
+                    android:layout_height="42dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:layout_marginTop="2dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Подсветка по краям"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/eink_black" />
+
+                    <Button
+                        android:id="@+id/btn_toggle_edge_brightness"
+                        android:layout_width="140dp"
+                        android:layout_height="36dp"
+                        android:minHeight="36dp"
+                        android:minWidth="36dp"
+                        android:text="Свайп (Вкл)"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/btn_eink_text_color"
+                        android:background="@drawable/btn_eink"
+                        android:includeFontPadding="false" />
+                </LinearLayout>
+
+                <!-- Опциональная синхронизация с аудиокнигой: скрыта (GONE), если у книги нет аудиоверсии -->
+                <LinearLayout
+                    android:id="@+id/row_toggle_audio_sync"
+                    android:layout_width="match_parent"
+                    android:layout_height="42dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:visibility="gone"
+                    android:layout_marginTop="2dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Синхр. с аудио"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/eink_black" />
+
+                    <Button
+                        android:id="@+id/btn_toggle_audio_sync"
+                        android:layout_width="140dp"
+                        android:layout_height="36dp"
+                        android:minHeight="36dp"
+                        android:minWidth="36dp"
+                        android:text="Спрашивать"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/btn_eink_text_color"
+                        android:background="@drawable/btn_eink"
+                        android:includeFontPadding="false" />
+                </LinearLayout>
             </LinearLayout>
 
             <!-- Контейнер подвкладки 2: Формат -->

@@ -17,6 +17,11 @@ import com.onyx.yandexbooks.core.typography.TextPaginator;
 import com.onyx.yandexbooks.core.typography.TypographyConfig;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Высокопроизводительный нативный компонент отрисовки книги на E-Ink дисплее.
@@ -57,13 +62,59 @@ public class ReaderCanvasView extends View {
         void onCanvasSizeChanged(int width, int height);
     }
 
+    public interface OnFootnoteTapListener {
+        void onFootnoteTap(String marker, String noteText);
+    }
+
+    public interface OnEdgeBrightnessGestureListener {
+        void onEdgeBrightnessChanged(boolean isWarmEdge, int newPercent);
+    }
+
+    private static class FootnoteHitbox {
+        final RectF bounds;
+        final String marker;
+        final String noteText;
+
+        FootnoteHitbox(RectF bounds, String marker, String noteText) {
+            this.bounds = bounds;
+            this.marker = marker;
+            this.noteText = noteText;
+        }
+    }
+
     private ImageLoader imageLoader;
     private OnCanvasSizeChangeListener sizeChangeListener;
+    private OnFootnoteTapListener footnoteTapListener;
+    private OnEdgeBrightnessGestureListener edgeBrightnessListener;
 
-    // Координаты и время для распознавания жестов свайпа и тапов
+    private Map<String, String> footnotesMap;
+    private final List<FootnoteHitbox> footnoteHitboxes = new ArrayList<>();
+    private static final Pattern FOOTNOTE_MARKER_PATTERN = Pattern.compile("\\[(\\d{1,4}|\\*{1,3})\\]");
+
+    // Координаты и время для распознавания жестов свайпа, сносок и боковых свайпов подсветки
     private float touchDownX = 0f;
     private float touchDownY = 0f;
     private long touchDownTime = 0L;
+    private boolean edgeBrightnessEnabled = true;
+    private boolean touchStartedInLeftEdge = false;
+    private boolean touchStartedInRightEdge = false;
+    private boolean isEdgeBrightnessDragging = false;
+    private int warmLightLevel = 50;
+    private int coldLightLevel = 50;
+    private int dragStartLightLevel = 50;
+    private int lastDispatchedLightLevel = -1;
+    private String brightnessHudText = null;
+    private final Paint brightnessHudBgPaint = new Paint();
+    private final Paint brightnessHudBorderPaint = new Paint();
+    private final Paint brightnessHudTextPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint footnoteUnderlinePaint = new Paint();
+    private final Runnable hideBrightnessHudRunnable = new Runnable() {
+        @Override
+        public void run() {
+            brightnessHudText = null;
+            invalidate();
+        }
+    };
 
     public ReaderCanvasView(Context context) {
         super(context);
@@ -178,6 +229,28 @@ public class ReaderCanvasView extends View {
         this.imageLoader = loader;
     }
 
+    public void setFootnotes(Map<String, String> footnotes) {
+        this.footnotesMap = footnotes;
+        invalidate();
+    }
+
+    public void setOnFootnoteTapListener(OnFootnoteTapListener listener) {
+        this.footnoteTapListener = listener;
+    }
+
+    public void setOnEdgeBrightnessGestureListener(OnEdgeBrightnessGestureListener listener) {
+        this.edgeBrightnessListener = listener;
+    }
+
+    public void setEdgeBrightnessEnabled(boolean enabled) {
+        this.edgeBrightnessEnabled = enabled;
+    }
+
+    public void setInitialFrontlightLevels(int coldLevel, int warmLevel) {
+        this.coldLightLevel = Math.max(0, Math.min(100, coldLevel));
+        this.warmLightLevel = Math.max(0, Math.min(100, warmLevel));
+    }
+
     public void setPage(TextPaginator.Page page, int globalPageIndex, int totalBookPages, String chapterTitle, int currentChapterIndex, int totalChapters, double globalPercent) {
         setPage(page, globalPageIndex, totalBookPages, chapterTitle, currentChapterIndex, totalChapters, globalPercent,
                 page != null ? (page.pageIndex + 1) : 1, Math.max(1, totalBookPages));
@@ -232,9 +305,12 @@ public class ReaderCanvasView extends View {
 
         // Фон для E-Ink Carta (Чистый белый или глубокий черный для ночи)
         canvas.drawColor(bgColor);
+        footnoteHitboxes.clear();
         textPaint.setColor(textColor);
         headerPaint.setColor(textColor);
         footerPaint.setColor(textColor);
+        footnoteUnderlinePaint.setColor(textColor);
+        footnoteUnderlinePaint.setStrokeWidth(Math.max(1f, dpToPx(1f)));
 
         if (currentPage == null) {
             return;
@@ -357,6 +433,7 @@ public class ReaderCanvasView extends View {
                     for (int i = 0; i < words.length; i++) {
                         int drawX = Math.round(wordX);
                         canvas.drawText(words[i], drawX, drawY, textPaint);
+                        collectWordFootnoteHitboxes(canvas, words[i], wordX, drawY, textPaint, fm);
                         wordX += textPaint.measureText(words[i]) + textPaint.measureText(" ") + line.wordSpacing;
                         if (wordX > maxAllowedX + 4f) {
                             break;
@@ -367,6 +444,7 @@ public class ReaderCanvasView extends View {
                     int drawX = Math.round(lineX);
                     int drawY = Math.round(currentY);
                     canvas.drawText(drawText, drawX, drawY, textPaint);
+                    collectWordFootnoteHitboxes(canvas, drawText, lineX, drawY, textPaint, fm);
                 }
 
                 currentY += lineHeight;
@@ -407,25 +485,153 @@ public class ReaderCanvasView extends View {
         // Страница и процент справа с привязкой к физической сетке пикселей
         int drawFooterX = Math.round(getWidth() - config.getPaddingRightPx() - pageInfoWidth);
         canvas.drawText(pageInfo, drawFooterX, drawFooterY, footerPaint);
+
+        // 3. Временный контрастный HUD подсветки при вертикальном свайпе по краю экрана (без анимации для E-Ink)
+        if (brightnessHudText != null && !brightnessHudText.isEmpty()) {
+            drawBrightnessHud(canvas, brightnessHudText, isNight);
+        }
+    }
+
+    private String resolveFootnoteText(String marker) {
+        if (footnotesMap == null || footnotesMap.isEmpty() || marker == null) {
+            return null;
+        }
+        String scopedKey = "ch:" + currentChapterIndex + "|" + marker;
+        String text = footnotesMap.get(scopedKey);
+        if (text != null && !text.isEmpty()) {
+            return text;
+        }
+        return footnotesMap.get(marker);
+    }
+
+    private void collectWordFootnoteHitboxes(Canvas canvas, String segment, float segmentX, int baselineY, Paint paint, Paint.FontMetrics fm) {
+        if (footnotesMap == null || footnotesMap.isEmpty() || segment == null || segment.indexOf('[') < 0) {
+            return;
+        }
+        Matcher m = FOOTNOTE_MARKER_PATTERN.matcher(segment);
+        float hitPad = dpToPx(10f);
+        float topY = baselineY + fm.ascent - hitPad;
+        float bottomY = baselineY + fm.descent + hitPad;
+        float underlineY = baselineY + Math.max(2f, dpToPx(2f));
+        while (m.find()) {
+            String marker = m.group(0);
+            String noteText = resolveFootnoteText(marker);
+            if (noteText == null || noteText.isEmpty()) continue;
+
+            float preW = paint.measureText(segment, 0, m.start());
+            float markerW = paint.measureText(segment, m.start(), m.end());
+            float left = segmentX + preW;
+            float right = left + markerW;
+            canvas.drawLine(left, underlineY, right, underlineY, footnoteUnderlinePaint);
+            footnoteHitboxes.add(new FootnoteHitbox(
+                    new RectF(left - hitPad, topY, right + hitPad, bottomY),
+                    marker,
+                    noteText
+            ));
+        }
+    }
+
+    private void drawBrightnessHud(Canvas canvas, String label, boolean isNight) {
+        brightnessHudTextPaint.setTextSize(spToPx(14));
+        brightnessHudTextPaint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
+        brightnessHudTextPaint.setColor(isNight ? Color.WHITE : Color.BLACK);
+        float textW = brightnessHudTextPaint.measureText(label);
+        Paint.FontMetrics fm = brightnessHudTextPaint.getFontMetrics();
+        float textH = fm.descent - fm.ascent;
+        float padH = dpToPx(14f);
+        float padV = dpToPx(8f);
+        float boxW = textW + padH * 2f;
+        float boxH = textH + padV * 2f;
+        float left = (getWidth() - boxW) * 0.5f;
+        float top = Math.max(dpToPx(28f), (config != null ? config.getPaddingTopPx() + dpToPx(22f) : dpToPx(28f)));
+        RectF rect = new RectF(left, top, left + boxW, top + boxH);
+
+        brightnessHudBgPaint.setStyle(Paint.Style.FILL);
+        brightnessHudBgPaint.setColor(isNight ? Color.BLACK : Color.WHITE);
+        brightnessHudBorderPaint.setStyle(Paint.Style.STROKE);
+        brightnessHudBorderPaint.setStrokeWidth(Math.max(2f, dpToPx(1.5f)));
+        brightnessHudBorderPaint.setColor(isNight ? Color.WHITE : Color.BLACK);
+
+        canvas.drawRect(rect, brightnessHudBgPaint);
+        canvas.drawRect(rect, brightnessHudBorderPaint);
+        canvas.drawText(label, left + padH, top + padV - fm.ascent, brightnessHudTextPaint);
     }
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        float width = getWidth();
+        float height = getHeight();
         switch (event.getAction()) {
             case MotionEvent.ACTION_DOWN:
                 touchDownX = event.getX();
                 touchDownY = event.getY();
                 touchDownTime = System.currentTimeMillis();
+                isEdgeBrightnessDragging = false;
+                touchStartedInLeftEdge = edgeBrightnessEnabled && width > 0 && touchDownX <= width * 0.10f;
+                touchStartedInRightEdge = edgeBrightnessEnabled && width > 0 && touchDownX >= width * 0.90f;
+                dragStartLightLevel = touchStartedInLeftEdge ? warmLightLevel : coldLightLevel;
+                lastDispatchedLightLevel = -1;
+                return true;
+
+            case MotionEvent.ACTION_MOVE:
+                if (edgeBrightnessEnabled && (touchStartedInLeftEdge || touchStartedInRightEdge) && height > 0) {
+                    float moveX = event.getX();
+                    float moveY = event.getY();
+                    float dx = moveX - touchDownX;
+                    float dy = moveY - touchDownY;
+                    float edgeThresholdPx = Math.max(24f, dpToPx(20f));
+                    if (!isEdgeBrightnessDragging) {
+                        boolean stillInEdge = touchStartedInLeftEdge
+                                ? (moveX <= width * 0.16f)
+                                : (moveX >= width * 0.84f);
+                        if (stillInEdge && Math.abs(dy) >= edgeThresholdPx && Math.abs(dy) > Math.abs(dx) * 1.8f) {
+                            isEdgeBrightnessDragging = true;
+                            removeCallbacks(hideBrightnessHudRunnable);
+                        }
+                    }
+                    if (isEdgeBrightnessDragging) {
+                        float sensitivityPx = Math.max(dpToPx(180f), height * 0.55f);
+                        int deltaPct = Math.round((-dy / sensitivityPx) * 100f);
+                        int nextLevel = Math.max(0, Math.min(100, dragStartLightLevel + deltaPct));
+                        if (touchStartedInLeftEdge) {
+                            warmLightLevel = nextLevel;
+                            brightnessHudText = "Тёплый свет: " + nextLevel + "%";
+                        } else {
+                            coldLightLevel = nextLevel;
+                            brightnessHudText = "Холодный свет: " + nextLevel + "%";
+                        }
+                        if (edgeBrightnessListener != null && (lastDispatchedLightLevel < 0 || Math.abs(nextLevel - lastDispatchedLightLevel) >= 2)) {
+                            lastDispatchedLightLevel = nextLevel;
+                            edgeBrightnessListener.onEdgeBrightnessChanged(touchStartedInLeftEdge, nextLevel);
+                        }
+                        invalidate();
+                        return true;
+                    }
+                }
+                return true;
+
+            case MotionEvent.ACTION_CANCEL:
+                if (isEdgeBrightnessDragging) {
+                    isEdgeBrightnessDragging = false;
+                    postDelayed(hideBrightnessHudRunnable, 1200L);
+                }
                 return true;
 
             case MotionEvent.ACTION_UP:
                 float upX = event.getX();
                 float upY = event.getY();
+                if (isEdgeBrightnessDragging) {
+                    isEdgeBrightnessDragging = false;
+                    if (edgeBrightnessListener != null) {
+                        int finalLevel = touchStartedInLeftEdge ? warmLightLevel : coldLightLevel;
+                        edgeBrightnessListener.onEdgeBrightnessChanged(touchStartedInLeftEdge, finalLevel);
+                    }
+                    postDelayed(hideBrightnessHudRunnable, 1200L);
+                    return true;
+                }
                 float deltaX = upX - touchDownX;
                 float deltaY = upY - touchDownY;
                 long duration = System.currentTimeMillis() - touchDownTime;
-                float width = getWidth();
-                float height = getHeight();
 
                 if (interactionListener != null) {
                     // 1. Определение горизонтального свайпа (смещение >= 35px, горизонталь преобладает над вертикалью)
@@ -438,6 +644,18 @@ public class ReaderCanvasView extends View {
                             interactionListener.onPageBackward();
                         }
                     } else if (duration < 700) {
+                        // 1.1 Проверка попадания в кликабельную сноску ДО зон перелистывания (не теряя страницу)
+                        float tapSlop = dpToPx(16f);
+                        if (footnoteTapListener != null && Math.abs(deltaX) < tapSlop && Math.abs(deltaY) < tapSlop) {
+                            for (int i = 0; i < footnoteHitboxes.size(); i++) {
+                                FootnoteHitbox hb = footnoteHitboxes.get(i);
+                                if (hb.bounds.contains(upX, upY)) {
+                                    footnoteTapListener.onFootnoteTap(hb.marker, hb.noteText);
+                                    return true;
+                                }
+                            }
+                        }
+
                         String tapMode = (config != null) ? config.getTapZoneMode() : "standard";
                         if ("left_handed".equalsIgnoreCase(tapMode)) {
                             // Режим «Для левшей»: левый край делится по вертикали:

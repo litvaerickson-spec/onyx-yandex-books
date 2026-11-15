@@ -127,6 +127,9 @@ public class AppSettings {
     public static final String KEY_CONTRAST_MODE = "contrast_mode";
     public static final String KEY_VERTICAL_MARGIN = "vertical_margin_mode";
     public static final String KEY_NIGHT_MODE = "night_mode_enabled";
+    public static final String KEY_DITHER_COVERS = "dither_covers_enabled";
+    public static final String KEY_EDGE_BRIGHTNESS_SWIPE = "edge_brightness_swipe";
+    public static final String KEY_AUDIO_SYNC_ENABLED = "audio_sync_enabled";
 
     public int getFontSizeSp() { return prefs.getInt(KEY_FONT_SIZE, 18); }
     public void setFontSizeSp(int size) { prefs.edit().putInt(KEY_FONT_SIZE, size).apply(); }
@@ -154,6 +157,27 @@ public class AppSettings {
 
     public boolean isNightMode() { return prefs.getBoolean(KEY_NIGHT_MODE, false); }
     public void setNightMode(boolean enabled) { prefs.edit().putBoolean(KEY_NIGHT_MODE, enabled).apply(); }
+
+    public boolean isDitherCoversEnabled() { return prefs.getBoolean(KEY_DITHER_COVERS, true); }
+    public void setDitherCoversEnabled(boolean enabled) { prefs.edit().putBoolean(KEY_DITHER_COVERS, enabled).apply(); }
+
+    public boolean isEdgeBrightnessSwipeEnabled() { return prefs.getBoolean(KEY_EDGE_BRIGHTNESS_SWIPE, true); }
+    public void setEdgeBrightnessSwipeEnabled(boolean enabled) { prefs.edit().putBoolean(KEY_EDGE_BRIGHTNESS_SWIPE, enabled).apply(); }
+
+    public boolean isAudioSyncEnabled() { return prefs.getBoolean(KEY_AUDIO_SYNC_ENABLED, true); }
+    public void setAudioSyncEnabled(boolean enabled) { prefs.edit().putBoolean(KEY_AUDIO_SYNC_ENABLED, enabled).apply(); }
+
+    public int getEdgeFrontlightCold() { return clampBrightness(prefs.getInt("edge_frontlight_cold", 50)); }
+    public void setEdgeFrontlightCold(int level) { prefs.edit().putInt("edge_frontlight_cold", clampBrightness(level)).apply(); }
+
+    public int getEdgeFrontlightWarm() { return clampBrightness(prefs.getInt("edge_frontlight_warm", 50)); }
+    public void setEdgeFrontlightWarm(int level) { prefs.edit().putInt("edge_frontlight_warm", clampBrightness(level)).apply(); }
+
+    public static int clampBrightness(int level) {
+        if (level < 0) return 0;
+        if (level > 100) return 100;
+        return level;
+    }
 
     public float getUiScale() {
         return prefs.getFloat(KEY_UI_SCALE, UI_SCALE_DEFAULT);

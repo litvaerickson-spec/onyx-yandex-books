@@ -484,7 +484,7 @@ public class MainActivity extends Activity {
         root.addView(menuScroll);
 
         TextView tvBetaNotice = new TextView(this);
-        tvBetaNotice.setText("Яндекс Книги Lite v1.6.6-beta [BETA]");
+        tvBetaNotice.setText("Яндекс Книги Lite v1.6.7-beta [BETA]");
         tvBetaNotice.setTextSize(11);
         tvBetaNotice.setTypeface(null, Typeface.BOLD);
         tvBetaNotice.setTextColor(Color.BLACK);
@@ -1005,6 +1005,22 @@ public class MainActivity extends Activity {
             optionsLayout.addView(btn);
         }
         root.addView(optionsLayout);
+
+        final boolean ditherOn = appSettings.isDitherCoversEnabled();
+        final Button btnDither = createMenuButton(
+                "Дизеринг обложек (E-Ink 16 градаций): " + (ditherOn ? "Вкл" : "Выкл"),
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        boolean next = !appSettings.isDitherCoversEnabled();
+                        appSettings.setDitherCoversEnabled(next);
+                        CoverLoader.getInstance(MainActivity.this).clearMemoryCache();
+                        dialog.dismiss();
+                        loadBooks(currentShelf);
+                    }
+                }, density);
+        btnDither.setBackgroundResource(ditherOn ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
+        root.addView(btnDither);
 
         Button btnClose = new Button(this);
         btnClose.setText("Отмена");
@@ -2494,6 +2510,11 @@ public class MainActivity extends Activity {
         intent.putExtra("book_percent", book.getPercent());
         intent.putExtra("book_chapter", book.getCurrentChapterIndex());
         intent.putExtra("book_paragraph", book.getCurrentParagraphIndex());
+        if (book.getLinkedAudioUuid() != null && !book.getLinkedAudioUuid().isEmpty()) {
+            intent.putExtra("linked_audio_uuid", book.getLinkedAudioUuid());
+            intent.putExtra("audio_percent", book.getAudioPercent());
+            intent.putExtra("audio_updated_at", book.getAudioUpdatedAt());
+        }
         startActivity(intent);
     }
 

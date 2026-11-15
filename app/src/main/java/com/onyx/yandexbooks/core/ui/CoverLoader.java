@@ -18,6 +18,7 @@ import android.util.LruCache;
 import android.widget.ImageView;
 
 import com.onyx.yandexbooks.core.network.HttpClientFactory;
+import com.onyx.yandexbooks.core.storage.AppSettings;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -37,6 +38,7 @@ public class CoverLoader {
 
     private static CoverLoader instance;
 
+    private final Context appContext;
     private final LruCache<String, Bitmap> memoryCache;
     private final File diskCacheDir;
     private final OkHttpClient httpClient;
@@ -62,6 +64,7 @@ public class CoverLoader {
     }
 
     private CoverLoader(Context context) {
+        this.appContext = context.getApplicationContext();
         // Кэш в памяти на ~30 обложек (около 4-6 МБ)
         int maxMemory = (int) (Runtime.getRuntime().maxMemory() / 1024);
         int cacheSize = Math.max(1024, maxMemory / 8);
@@ -75,6 +78,12 @@ public class CoverLoader {
         httpClient = HttpClientFactory.getClient();
         executor = Executors.newFixedThreadPool(3);
         mainHandler = new Handler(Looper.getMainLooper());
+    }
+
+    public void clearMemoryCache() {
+        try {
+            memoryCache.evictAll();
+        } catch (Throwable ignored) {}
     }
 
     public void loadCover(final ImageView imageView, final String bookUuid, final String coverUrl, final String title) {
@@ -108,6 +117,10 @@ public class CoverLoader {
                 // Загрузка из сети
                 if (bitmap == null && coverUrl != null && !coverUrl.trim().isEmpty() && !coverUrl.equals("null")) {
                     bitmap = downloadBitmap(coverUrl, diskFile);
+                }
+
+                if (bitmap != null && new AppSettings(appContext).isDitherCoversEnabled()) {
+                    bitmap = EinkDitherer.applyFloydSteinbergDither(bitmap);
                 }
 
                 if (bitmap == null) {

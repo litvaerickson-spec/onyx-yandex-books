@@ -81,10 +81,22 @@ public class Book implements Serializable {
 
     private String documentUuid;
     private String cfi;
+    private String linkedAudioUuid;
+    private double audioPercent;
+    private long audioUpdatedAt;
 
     public String getDocumentUuid() { return documentUuid; }
     public void setDocumentUuid(String documentUuid) { this.documentUuid = documentUuid; }
 
     public String getCfi() { return cfi; }
     public void setCfi(String cfi) { this.cfi = cfi; }
+
+    public String getLinkedAudioUuid() { return linkedAudioUuid; }
+    public void setLinkedAudioUuid(String linkedAudioUuid) { this.linkedAudioUuid = linkedAudioUuid; }
+
+    public double getAudioPercent() { return audioPercent; }
+    public void setAudioPercent(double audioPercent) { this.audioPercent = audioPercent; }
+
+    public long getAudioUpdatedAt() { return audioUpdatedAt; }
+    public void setAudioUpdatedAt(long audioUpdatedAt) { this.audioUpdatedAt = audioUpdatedAt; }
 }

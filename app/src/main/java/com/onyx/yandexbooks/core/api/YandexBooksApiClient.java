@@ -646,7 +646,85 @@ public class YandexBooksApiClient {
         book.setShelfType(mappedShelf);
         book.setLastReadTimestamp(pr.timestamp);
 
+        AudioMeta audioMeta = extractLinkedAudioMeta(card, bObj);
+        if (audioMeta != null && audioMeta.hasAudio()) {
+            book.setLinkedAudioUuid(audioMeta.audioUuid);
+            book.setAudioPercent(audioMeta.percent);
+            book.setAudioUpdatedAt(audioMeta.updatedAt);
+        }
+
         return book;
+    }
+
+    private static class AudioMeta {
+        String audioUuid = "";
+        double percent = 0.0;
+        long updatedAt = 0L;
+
+        boolean hasAudio() {
+            return audioUuid != null && !audioUuid.isEmpty() && !"null".equalsIgnoreCase(audioUuid);
+        }
+    }
+
+    private AudioMeta extractLinkedAudioMeta(JSONObject card, JSONObject bObj) {
+        try {
+            AudioMeta meta = new AudioMeta();
+            JSONObject audioObj = null;
+            JSONObject[] containers = new JSONObject[] { bObj, card };
+            String[] objKeys = new String[] { "linked_audiobook", "linkedAudioBook", "audio_book", "audiobook" };
+            for (JSONObject c : containers) {
+                if (c == null) continue;
+                for (String k : objKeys) {
+                    JSONObject sub = c.optJSONObject(k);
+                    if (sub != null) {
+                        audioObj = sub;
+                        break;
+                    }
+                }
+                if (audioObj != null) break;
+            }
+            // Если сама карточка является текстовой книгой, аудиообъект внутри card.optJSONObject("audiobook")
+            // или связанные поля audiobook_uuid / linked_audio_uuid могут присутствовать опционально.
+            if (audioObj != null) {
+                meta.audioUuid = audioObj.optString("uuid", audioObj.optString("id", ""));
+                ParsedProgress apr = extractProgress(audioObj, audioObj.optJSONObject("progress"));
+                meta.percent = apr.percent;
+                meta.updatedAt = apr.timestamp;
+            }
+            if (!meta.hasAudio()) {
+                String[] idKeys = new String[] { "linked_audio_uuid", "audiobook_uuid", "linked_audiobook_uuid" };
+                for (JSONObject c : containers) {
+                    if (c == null) continue;
+                    for (String k : idKeys) {
+                        String val = c.optString(k, "");
+                        if (val != null && !val.isEmpty() && !"null".equalsIgnoreCase(val)) {
+                            meta.audioUuid = val;
+                            break;
+                        }
+                    }
+                    if (meta.hasAudio()) break;
+                }
+            }
+            if (meta.hasAudio() && meta.percent <= 0.0) {
+                for (JSONObject c : containers) {
+                    if (c == null) continue;
+                    JSONObject ap = c.optJSONObject("audio_progress");
+                    if (ap != null) {
+                        double p = ap.optDouble("percent", ap.optDouble("progress", 0.0));
+                        if (p > 0.0 && p <= 1.0) p *= 100.0;
+                        meta.percent = Math.max(0.0, Math.min(100.0, p));
+                        long ts = ap.optLong("updated_at", 0L);
+                        if (ts <= 0L) ts = parseIsoTimestamp(ap.optString("updated_at", null));
+                        if (ts > 0 && ts < 100000000000L) ts *= 1000L;
+                        if (ts > 0L) meta.updatedAt = ts;
+                        break;
+                    }
+                }
+            }
+            return meta.hasAudio() ? meta : null;
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
     private String parseAuthorString(JSONObject bObj, JSONObject card) {
@@ -914,6 +992,7 @@ public class YandexBooksApiClient {
                     long cardTs = 0L;
                     int cardChapter = 0;
                     int cardParagraph = 0;
+                    AudioMeta linkedAudioMeta = null;
 
                     Response cardResp = null;
                     try {
@@ -934,6 +1013,7 @@ public class YandexBooksApiClient {
                                     cardParagraph = pr.paragraphIndex;
                                     cardTs = pr.timestamp;
                                     cardId = extractLibraryCardId(card, bObj, bookUuid);
+                                    linkedAudioMeta = extractLinkedAudioMeta(card, bObj);
                                 }
                             }
                         }
@@ -963,6 +1043,11 @@ public class YandexBooksApiClient {
                         }
                         if (gqlCfiStart != null && !gqlCfiStart.isEmpty()) {
                             progress.setCfi(gqlCfiStart);
+                        }
+                        if (linkedAudioMeta != null && linkedAudioMeta.hasAudio()) {
+                            progress.setLinkedAudioUuid(linkedAudioMeta.audioUuid);
+                            progress.setAudioPercent(linkedAudioMeta.percent);
+                            progress.setAudioUpdatedAt(linkedAudioMeta.updatedAt);
                         }
                         progress.setSyncedWithServer(true);
                         postSuccess(callback, progress);
