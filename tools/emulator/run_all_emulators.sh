@@ -110,8 +110,8 @@ main() {
         exit 1
     fi
 
-    if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
-        log_err "/dev/kvm is required for KVM-accelerated Android emulator."
+    if [[ ! -c /dev/kvm ]]; then
+        log_err "/dev/kvm device node is required for KVM-accelerated Android emulator."
         exit 1
     fi
 
@@ -139,7 +139,7 @@ main() {
         log_info "Starting AVD '${avd}'..."
         printf '============================================================\n'
         start_ts="$(date +%s)"
-        if IMAGE_NAME="${IMAGE_NAME}" AVD_NAME="${avd}" bash "${SCRIPT_DIR}/run_emulator_e2e.sh" "${apk_path}"; then
+        if env "IMAGE_NAME=${IMAGE_NAME}" "AVD_NAME=${avd}" bash "${SCRIPT_DIR}/run_emulator_e2e.sh" "${apk_path}"; then
             dur="$(( $(date +%s) - start_ts ))"
             results+=("PASS | ${avd} (${dur}s)")
             passed=$((passed + 1))

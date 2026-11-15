@@ -266,20 +266,21 @@ def _run_tests(args):
     shell(f"am start -n {PKG}/.ui.MainActivity")
     time.sleep(3.0)
     # Dismiss any offline/network EinkNotice popup so MainActivity is cleanly interactive
-    for _ in range(3):
+    for _ in range(5):
         root = dump_ui()
         if find_node(root, res_id_contains="btn_main_menu") or find_node(root, text_equals="Меню", clickable_only=True):
             break
         dismiss_btn = (
             find_node(root, text_equals="Понятно", clickable_only=True)
             or find_node(root, text_equals="ОК", clickable_only=True)
+            or find_node(root, text_equals="OK", clickable_only=True)
             or find_node(root, text_equals="Закрыть", clickable_only=True)
         )
         if dismiss_btn:
-            tap_node(dismiss_btn, "Dismiss initial notice dialog")
-            time.sleep(1.0)
+            tap_node(dismiss_btn, "Dismiss initial notice / AOSP system dialog")
+            time.sleep(1.5)
         else:
-            break
+            time.sleep(1.0)
 
     try:
         root, btn_menu = wait_for_node(res_id_contains="btn_main_menu", timeout=8)
@@ -289,8 +290,14 @@ def _run_tests(args):
     screencap(os.path.join(args.artifacts, f"{args.tag}_02_main_shelf.png"))
 
     # 4. Open Main Menu -> re-enable network -> "Архив версий и откат ПО"
+    m_ver = re.search(r"versionName=([^\s]+)", pkg_dump)
+    installed_ver = m_ver.group(1) if m_ver else ""
     tap_node(btn_menu, "Main Menu button")
     root, btn_archive = wait_for_node(text_contains="Архив версий", timeout=10)
+    menu_joined = " | ".join(all_visible_texts(root))
+    if installed_ver and installed_ver not in menu_joined:
+        raise AssertionError(f"Expected version '{installed_ver}' in Main Menu UI, got: {menu_joined}")
+    print(f"[check] Main Menu shows installed version '{installed_ver}': OK")
     screencap(os.path.join(args.artifacts, f"{args.tag}_03_main_menu.png"))
 
     shell("svc wifi enable", check=False)
@@ -321,6 +328,11 @@ def _run_tests(args):
     print(f"[fs] /sdcard/Books/YandexBooks/backup:\n{bk_files}")
     if "yandex-books-lite-v1.6.1-beta.apk" not in dl_files:
         raise AssertionError("Downloaded APK yandex-books-lite-v1.6.1-beta.apk not found in /sdcard/Download!")
+    bk_content = shell("cat /sdcard/Books/YandexBooks/backup/*.json", check=False)
+    for setting_key in ("dither_covers_enabled", "edge_brightness_swipe", "audio_sync_enabled"):
+        if setting_key not in bk_content:
+            raise AssertionError(f"v1.6.7-beta setting '{setting_key}' missing from live Android backup!")
+    print("[check] Live Android backup includes v1.6.7-beta settings (dither/edge_brightness/audio_sync): OK")
 
     # Verify DownloadProvider DB directly on real Android OS!
     dm_query = shell("content query --uri content://downloads/my_downloads", check=False)
