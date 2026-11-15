@@ -47,4 +47,4 @@
 
 * **Файл:** `yandex-books-lite-v1.7.0-beta.apk`
 * **Размер:** 5 200 384 байт (4.96 МБ)
-* **SHA-256:** `74da2ca234e947e41c562e74857f1958e4601cacd3b0a1dd895e81efe93cf43a`
+* **SHA-256:** `261e9506b67a37e1ad76a442bac9d12840f1b4c87e2f55c3fd5b5c41931a8775`
