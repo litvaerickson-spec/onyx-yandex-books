@@ -1413,6 +1413,7 @@ public class AppUpdateManager {
 
         // 1. Сначала пробуем открыть реальную папку Download в диспетчере файлов (а не пустую БД DownloadManager)
         if (downloadDir != null && downloadDir.exists()) {
+            // 1. Сначала пробуем штатный диспетчер файлов Onyx (resource/folder)
             try {
                 if (android.os.Build.VERSION.SDK_INT >= 24) {
                     try {
@@ -1428,25 +1429,10 @@ public class AppUpdateManager {
                     return;
                 }
             } catch (Throwable ignored) {}
-
-            // Пробуем стандартный DocumentsUI (Android 8+) на папку Download
-            if (android.os.Build.VERSION.SDK_INT >= 26) {
-                try {
-                    Intent docIntent = new Intent(Intent.ACTION_VIEW);
-                    docIntent.setDataAndType(
-                            Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADownload"),
-                            "vnd.android.document/directory"
-                    );
-                    docIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    if (pm != null && docIntent.resolveActivity(pm) != null) {
-                        activity.startActivity(docIntent);
-                        return;
-                    }
-                } catch (Throwable ignored) {}
-            }
         }
 
         // 2. Проверяем регистрацию в системной БД DownloadManager перед запуском ACTION_VIEW_DOWNLOADS
+        // (на Android 8-10 передача .../document/primary%3ADownload через ACTION_VIEW роняла системный DocumentsUI FilesActivity)
         boolean dmReady = android.os.Build.VERSION.SDK_INT >= 29;
         if (!dmReady && apkFile != null && apkFile.exists()) {
             dmReady = registerApkInSystemDownloads(activity, apkFile, null);
@@ -1461,6 +1447,22 @@ public class AppUpdateManager {
                     return;
                 }
             } catch (Exception ignored) {}
+        }
+
+        // 3. Резервный вариант для Android 8+: корень Downloads в DocumentsUI
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            try {
+                Intent rootIntent = new Intent(Intent.ACTION_VIEW);
+                rootIntent.setDataAndType(
+                        Uri.parse("content://com.android.providers.downloads.documents/root/downloads"),
+                        "vnd.android.document/root"
+                );
+                rootIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                if (pm != null && rootIntent.resolveActivity(pm) != null) {
+                    activity.startActivity(rootIntent);
+                    return;
+                }
+            } catch (Throwable ignored) {}
         }
 
         if (!silentFallback && apkFile != null) {

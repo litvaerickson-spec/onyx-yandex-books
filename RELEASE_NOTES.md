@@ -1,4 +1,4 @@
-# Описание выпуска — Яндекс Книги Lite v1.6.5-beta [BETA]
+# Описание выпуска — Яндекс Книги Lite v1.6.6-beta [BETA]
 
 ### ВАЖНОЕ ОБЪЯВЛЕНИЕ ДЛЯ ПОЛЬЗОВАТЕЛЕЙ: ТЕСТОВАЯ BETA-ВЕРСИЯ
 
@@ -11,24 +11,23 @@
 **Важное предупреждение при откате на стабильную версию 1.6.0 (и версии ниже 1.6.1-beta):** стабильная версия 1.6.0 **не подтягивает автоматически** авторизацию, настройки и локальный бэкап, а **скачанные книги во внутреннем кэше самой программы удаляются системой Android при удалении приложения**. После установки 1.6.0 потребуется **заново авторизоваться** в аккаунте Яндекса (полки и облачный прогресс подгрузятся с сервера) и при необходимости повторно скачать нужные книги *(файлы в общей памяти /sdcard/ сохраняются)*.
 
 **Дата выпуска:** 15 ноября 2026 г.
-**Версия:** 1.6.5-beta (`versionCode = 59`, `minSdkVersion = 17`, `targetSdkVersion = 28`)
+**Версия:** 1.6.6-beta (`versionCode = 60`, `minSdkVersion = 17`, `targetSdkVersion = 28`)
 **Целевые платформы:** Onyx Boox от Darwin 1 (Android 4.2.2) и Darwin 5 до Go 10.3 / Page / Palma (Android 12–14), Bigme B6 (Android 14) и другие устройства на базе Android 4.2–14.
 
-## Что исправлено в v1.6.5-beta
+## Что исправлено в v1.6.6-beta
 
-### 1. Исправлена реальная причина «пустого окна Загрузки» (Android 6.0 / Darwin 5)
-* В предыдущей сборке вызов `DownloadManager.addCompletedDownload(..., showNotification=false)` на Android 6.0 выбрасывал `SecurityException` из-за отсутствующего разрешения `DOWNLOAD_WITHOUT_NOTIFICATION` и молча подавлялся, из-за чего скачанный APK отката не попадал в базу `DownloadProvider` и экран «Загрузки» открывался пустым («Ничего нет»).
-* В `AndroidManifest.xml` добавлено разрешение `android.permission.DOWNLOAD_WITHOUT_NOTIFICATION`.
-* В `AppUpdateManager.registerApkInSystemDownloads()` основной вызов теперь передаёт `showNotification=true` (видимость `VISIBILITY_VISIBLE_NOTIFY_COMPLETED` в списке «Загрузки»), проверяет реальное наличие файла через `DownloadManager.Query` (`queryDownloadManagerHasFile`) вместо кэша `SharedPreferences`, логирует сбои и при необходимости пробует `getCanonicalPath()`.
-* Перед открытием `ACTION_VIEW_DOWNLOADS` проверяется реальная регистрация APK в `DownloadManager` — если система не добавила запись, диалог подсказывает точный путь `/sdcard/Download/` в диспетчере файлов Onyx.
+### 1. Исправлено открытие системного окна «Загрузки» (проверено на реальных эмуляторах Android 6.0 и 9.0)
+* По результатам E2E-тестирования на реальном эмуляторе Android 9.0 (API 28) обнаружено, что передача `content://com.android.externalstorage.documents/document/primary%3ADownload` через `ACTION_VIEW` вызывала `IllegalArgumentException: Invalid URI` внутри системного `com.android.documentsui/.files.FilesActivity`.
+* В `AppUpdateManager.openDownloadsFolder()` восстановлен правильный приоритет: 1) штатный диспетчер файлов Onyx (`resource/folder`), 2) проверка регистрации в `DownloadManager` и открытие системного окна через `DownloadManager.ACTION_VIEW_DOWNLOADS`, 3) резервный корень `content://com.android.providers.downloads.documents/root/downloads` (`vnd.android.document/root`), 4) информативный диалог с точным путём `/sdcard/Download/`.
+* В сборку APK (`build_apk.sh`, `app/build.gradle`) включены все 4 нативные архитектуры `libconscrypt_jni.so`: `armeabi-v7a`, `arm64-v8a`, `x86`, `x86_64`.
 
-### 2. Включает все исправления v1.6.4-beta, v1.6.3-beta и v1.6.2-beta
-* **Чистые уведомления на всех версиях:** текст релизов и все диалоги `EinkNotice` отображаются с жирными заголовками без сырых тегов разметки (включая совместимость со старыми клиентами `1.6.0` и `1.6.1-beta`).
-* **Полный бэкап всех 17 настроек `AppSettings`:** сохранение и раннее восстановление до `UiScaleHelper.applyScale()` в `MainActivity.onCreate()`.
-* **Внешний вид и эргономика:** раздел **«Внешний вид и интерфейс ПО»**, увеличенные панели на Darwin 5 и отступ часов `6..48 dp`.
+### 2. Включает все исправления v1.6.5-beta — v1.6.2-beta
+* **Исправление пустого окна «Загрузки» на Android 6.0 (Darwin 5):** добавлено разрешение `DOWNLOAD_WITHOUT_NOTIFICATION`, `showNotification=true` в `addCompletedDownload()`, живая проверка видимости через `DownloadManager.Query`.
+* **Чистые уведомления на всех версиях:** единый стиль `EinkNotice` без сырых тегов и обратная совместимость описаний со старыми клиентами `1.6.0` и `1.6.1-beta`.
+* **Полный бэкап всех 17 настроек `AppSettings`** и раздел **«Внешний вид и интерфейс ПО»** (панели, отступ часов `6..48 dp`).
 
 ## Контрольные суммы дистрибутива (SHA-256)
 
-* **Файл:** `yandex-books-lite-v1.6.5-beta.apk`
-* **Размер:** 3 365 221 байт (3.21 МБ)
-* **SHA-256:** `f3e76f49c95f7fa126d5a180b8320500de4cd4bc23047476160655839bf2abb7`
+* **Файл:** `yandex-books-lite-v1.6.6-beta.apk`
+* **Размер:** 5 143 040 байт (4.90 МБ)
+* **SHA-256:** `8ba37c033ae667a6a02c5ef9bd55943e52a1ece1d5c0024305adf0a64dffd4d6`

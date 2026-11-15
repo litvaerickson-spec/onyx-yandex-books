@@ -10,11 +10,11 @@ android {
         applicationId "com.onyx.yandexbooks"
         minSdk 17
         targetSdk 28
-        versionCode 59
-        versionName "1.6.5-beta"
+        versionCode 60
+        versionName "1.6.6-beta"
 
         ndk {
-            abiFilters 'armeabi-v7a', 'armeabi'
+            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
         }
     }
 

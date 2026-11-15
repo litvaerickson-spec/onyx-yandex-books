@@ -83,7 +83,11 @@ cd build
 "$BUILD_TOOLS/aapt" add unaligned.apk classes.dex
 mkdir -p lib
 cp -r ../libs/jni/* lib/
-"$BUILD_TOOLS/aapt" add unaligned.apk lib/armeabi-v7a/libconscrypt_jni.so lib/x86/libconscrypt_jni.so
+"$BUILD_TOOLS/aapt" add unaligned.apk \
+  lib/armeabi-v7a/libconscrypt_jni.so \
+  lib/arm64-v8a/libconscrypt_jni.so \
+  lib/x86/libconscrypt_jni.so \
+  lib/x86_64/libconscrypt_jni.so
 cd ..
 
 echo "[5/6] Выравнивание байтов (zipalign)..."
