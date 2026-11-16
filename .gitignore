@@ -22,7 +22,11 @@ build/
 __pycache__/
 *.py[cod]
 
-# Internal marketing & PR drafts
+# Internal marketing, specs, dev logs, and agent configs
+.agents/
+AGENTS.md
+DEV_LOG.md
+UPGRADE_AND_IMPLEMENTATION_SPEC.md
 docs/marketing/
 marketing/
 marketing_materials/
@@ -30,11 +34,16 @@ marketing_materials/
 # Test generated artifacts
 docs/physical_test_*
 docs/virtual_test_*
+docs/virtual_darwin_*
+docs/virtual_run_*/
+docs/live_screen_*
+docs/test_*_preview.png
 docs/emulator_verify/
 tools/emulator/artifacts/
 
-# Temporary release notes drafts (use CHANGELOG.md and RELEASE_NOTES.md for official logs)
+# Temporary / per-version release notes drafts (use CHANGELOG.md and RELEASE_NOTES.md)
 docs/release_notes_*.md
+RELEASE_NOTES_v*.md
 !RELEASE_NOTES.md
 
 # Design proposals drafts
