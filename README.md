@@ -139,10 +139,9 @@ flowchart TD
 ├── RELEASE_NOTES.md                   # Описание текущего релиза
 ├── CHECKSUMS.md / SHA256SUMS          # Контрольные суммы SHA-256 релизных дистрибутивов
 ├── version.json                       # CDN-манифест для OTA-обновлений по воздуху
-├── UPGRADE_AND_IMPLEMENTATION_SPEC.md # Архитектурный план модернизации
 ├── build_apk.sh                       # Скрипт сборки и v1/v2/v3 подписи релизного APK
 ├── tools/                             # Юнит- и системные тесты + эмуляторный E2E (tools/emulator/)
-├── docs/                              # Спецификации, скриншоты верификации и docs/guides/user_guide.md
+├── docs/                              # Документация, руководство (MD/PDF) и спецификации
 ├── app/                               # Исходный код Android-приложения
 └── libs/                              # Conscrypt JNI (armeabi-v7a, arm64-v8a, x86, x86_64) и зависимости
 ```
