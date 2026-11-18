@@ -168,6 +168,10 @@ public class ReaderCanvasView extends View {
     private Typeface epubItalicTf;
     private Typeface epubBoldItalicTf;
     private String epubFontsSignature = "";
+    private Typeface customBoldTf;
+    private Typeface customItalicTf;
+    private Typeface customBoldItalicTf;
+    private String customFontsSignature = "";
     private static final Pattern FOOTNOTE_MARKER_PATTERN = Pattern.compile("\\[(\\d{1,4}|\\*{1,3})\\]");
 
     // Координаты и время для распознавания жестов свайпа, сносок и боковых свайпов подсветки
@@ -255,6 +259,40 @@ public class ReaderCanvasView extends View {
         return textPaint;
     }
 
+    public Paint buildPaintForConfig(TypographyConfig cfg) {
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setHinting(Paint.HINTING_ON);
+        p.setSubpixelText(false);
+        p.setDither(false);
+        if (cfg == null) {
+            p.set(textPaint);
+            return p;
+        }
+        p.setTextSize(spToPx(cfg.getFontSizeSp()));
+        p.setFakeBoldText(cfg.isBoldText());
+        if ("high".equalsIgnoreCase(cfg.getContrastMode())) {
+            p.setStrokeWidth(0.2f);
+            p.setStyle(Paint.Style.FILL_AND_STROKE);
+        } else {
+            p.setStrokeWidth(0f);
+            p.setStyle(Paint.Style.FILL);
+        }
+        Typeface tf;
+        if (cfg.isUseEpubFonts() && epubRegularTf != null) {
+            tf = epubRegularTf;
+        } else {
+            tf = FontHelper.getTypeface(getContext(), cfg.getFontFamily());
+        }
+        if (!cfg.isUseEpubFonts() && cfg.getCustomFontPath() != null) {
+            File f = new File(cfg.getCustomFontPath());
+            if (f.exists()) {
+                try { tf = Typeface.createFromFile(f); } catch (Exception ignored) {}
+            }
+        }
+        p.setTypeface(tf);
+        return p;
+    }
+
     public void setInteractionListener(OnReaderInteractionListener listener) {
         this.interactionListener = listener;
     }
@@ -271,7 +309,22 @@ public class ReaderCanvasView extends View {
         if (config.isUseEpubFonts() && epubRegularTf != null) {
             baseTf = epubRegularTf;
         } else {
-            baseTf = FontHelper.getTypeface(getContext(), config.getFontFamily());
+            String ff = config.getFontFamily();
+            baseTf = FontHelper.getTypeface(getContext(), ff);
+            if (ff != null && ff.startsWith(FontHelper.CUSTOM_PREFIX)) {
+                if (!ff.equals(customFontsSignature)) {
+                    customFontsSignature = ff;
+                    Map<String, String> sibs = FontHelper.resolveCustomFontFamilyPaths(ff);
+                    customBoldTf = loadTypefaceFromPath(sibs.get("bold"));
+                    customItalicTf = loadTypefaceFromPath(sibs.get("italic"));
+                    customBoldItalicTf = loadTypefaceFromPath(sibs.get("bold_italic"));
+                }
+            } else {
+                customFontsSignature = "";
+                customBoldTf = null;
+                customItalicTf = null;
+                customBoldItalicTf = null;
+            }
         }
         textPaint.setTypeface(baseTf);
 
@@ -780,6 +833,21 @@ public class ReaderCanvasView extends View {
                 if (italic && !derived.isItalic()) {
                     runPaint.setTextSkewX(-0.22f);
                 }
+                return;
+            }
+        }
+
+        if (!useEpub && customFontsSignature != null && !customFontsSignature.isEmpty()) {
+            if (bold && italic && customBoldItalicTf != null) {
+                runPaint.setTypeface(customBoldItalicTf);
+                return;
+            }
+            if (bold && customBoldTf != null) {
+                runPaint.setTypeface(customBoldTf);
+                return;
+            }
+            if (italic && customItalicTf != null) {
+                runPaint.setTypeface(customItalicTf);
                 return;
             }
         }

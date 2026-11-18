@@ -184,13 +184,13 @@ public class CacheManager {
 
     public boolean isFormattedCacheCurrent(String bookUuid) {
         if (bookUuid == null) return true;
-        File flag = getBookFile(bookUuid, "format_v170.flag");
+        File flag = getBookFile(bookUuid, "format_v201.flag");
         return flag.exists() && flag.length() > 0;
     }
 
     public void markFormattedCacheCurrent(String bookUuid) {
         if (bookUuid == null) return;
-        writeTextFile(getBookFile(bookUuid, "format_v170.flag"), "v1.7.0");
+        writeTextFile(getBookFile(bookUuid, "format_v201.flag"), "v2.0.1");
     }
 
     public void saveBookEpubFonts(String bookUuid, Map<String, String> fonts) {

@@ -168,14 +168,15 @@ public class YandexBooksApiClient {
     }
 
     /**
-     * Загрузка всех книг пользователя с пагинацией (до 100 книг на страницу).
+     * Загрузка всех книг пользователя с полной постраничной пагинацией (независимо от лимита per_page сервера).
      */
     public void getAllUserBooks(final ApiCallback<List<Book>> callback) {
         final List<Book> allBooks = new ArrayList<>();
-        loadLibraryPage(1, allBooks, callback);
+        final java.util.Set<String> seenUuids = new java.util.HashSet<>();
+        loadLibraryPage(1, allBooks, seenUuids, callback);
     }
 
-    private void loadLibraryPage(final int page, final List<Book> accumulated, final ApiCallback<List<Book>> callback) {
+    private void loadLibraryPage(final int page, final List<Book> accumulated, final java.util.Set<String> seenUuids, final ApiCallback<List<Book>> callback) {
         String endpoint = BASE_URL + "/profile/library_cards?per_page=100&page=" + page;
         Request request = createAuthRequestBuilder(endpoint).get().build();
 
@@ -183,7 +184,6 @@ public class YandexBooksApiClient {
             @Override
             public void onFailure(Call call, final IOException e) {
                 if (!accumulated.isEmpty()) {
-                    // Если хоть какие-то страницы успели загрузиться, отдаем их
                     postSuccess(callback, accumulated);
                 } else {
                     postError(callback, "Ошибка сети: " + e.getMessage());
@@ -204,25 +204,33 @@ public class YandexBooksApiClient {
                 }
 
                 try {
-                    String body = response.body().string();
+                    String body = response.body() != null ? response.body().string() : "";
                     JSONObject json = new JSONObject(body);
                     JSONArray cardsArray = json.optJSONArray("library_cards");
+                    if (cardsArray == null) cardsArray = json.optJSONArray("items");
+                    JSONObject metaObj = json.optJSONObject("meta");
+                    int totalExpected = (metaObj != null) ? metaObj.optInt("total", -1) : -1;
 
                     int countOnPage = 0;
+                    int newlyAdded = 0;
                     if (cardsArray != null) {
                         countOnPage = cardsArray.length();
                         for (int i = 0; i < countOnPage; i++) {
                             JSONObject card = cardsArray.getJSONObject(i);
                             Book book = parseBookFromCard(card);
-                            if (book != null) {
+                            if (book != null && book.getUuid() != null && seenUuids.add(book.getUuid())) {
                                 accumulated.add(book);
+                                newlyAdded++;
                             }
                         }
                     }
 
-                    // Если пришло 100 элементов, возможно есть следующая страница
-                    if (countOnPage >= 100 && page < 10) {
-                        loadLibraryPage(page + 1, accumulated, callback);
+                    // Сервер Bookmate v5 может ограничивать per_page на уровне 20/30/50 записей:
+                    // продолжаем запрашивать следующие страницы до тех пор, пока приходят новые книги.
+                    boolean hasMoreByMeta = (totalExpected > 0 && accumulated.size() < totalExpected);
+                    boolean hasMoreByNewItems = (countOnPage > 0 && newlyAdded > 0);
+                    if ((hasMoreByMeta || hasMoreByNewItems) && page < 40) {
+                        loadLibraryPage(page + 1, accumulated, seenUuids, callback);
                     } else {
                         postSuccess(callback, accumulated);
                     }
@@ -233,6 +241,8 @@ public class YandexBooksApiClient {
                     } else {
                         postError(callback, "Ошибка парсинга: " + e.getMessage());
                     }
+                } finally {
+                    response.close();
                 }
             }
         });
@@ -648,9 +658,12 @@ public class YandexBooksApiClient {
             result.timestamp = 0L;
         }
 
-        // 7. Защита от искажения 100%: если книга читается (reading) и глава 0, процент не может быть 100%
-        if (result.percent >= 99.0 && "reading".equalsIgnoreCase(state) && result.chapterIndex == 0) {
+        // 7. Защита от искажения 100% (только если позиция чтения пуста при state="reading" и chapter==0 и ровно >=99.9%)
+        if (result.percent >= 99.9 && "reading".equalsIgnoreCase(state) && result.chapterIndex == 0 && !hasPosObject && !hasLastRead) {
             result.percent = 0.0;
+        }
+        if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state) || "completed".equalsIgnoreCase(state) || "done".equalsIgnoreCase(state)) {
+            result.percent = 100.0;
         }
 
         return result;
@@ -692,13 +705,24 @@ public class YandexBooksApiClient {
             JSONObject lc = card.optJSONObject("library_card");
             if (lc != null) state = lc.optString("state", "");
         }
+        boolean isUploadedUserBook = card.optBoolean("is_user_book", false)
+                || card.optBoolean("uploaded", false)
+                || bObj.optBoolean("is_user_book", false)
+                || bObj.optBoolean("uploaded", false)
+                || "user_book".equalsIgnoreCase(card.optString("kind", ""))
+                || "user_book".equalsIgnoreCase(bObj.optString("kind", ""))
+                || !bObj.optString("file_url", "").isEmpty()
+                || !card.optString("file_url", "").isEmpty();
         String mappedShelf;
-        if ("reading".equalsIgnoreCase(state) || (pr.percent > 0.0 && pr.percent < 99.0)) {
+        if (isUploadedUserBook) {
+            mappedShelf = "user_books";
+        } else if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state) || "completed".equalsIgnoreCase(state) || "done".equalsIgnoreCase(state) || pr.percent >= 99.5) {
+            mappedShelf = "done";
+            if (pr.percent >= 99.0) pr.percent = 100.0;
+        } else if ("reading".equalsIgnoreCase(state) || (pr.percent > 0.0 && pr.percent < 99.5)) {
             mappedShelf = "reading";
         } else if ("want_to_read".equalsIgnoreCase(state) || "to_read".equalsIgnoreCase(state) || "planned".equalsIgnoreCase(state)) {
             mappedShelf = "to_read";
-        } else if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state) || "completed".equalsIgnoreCase(state) || "done".equalsIgnoreCase(state) || (pr.percent >= 99.0 && pr.chapterIndex > 0)) {
-            mappedShelf = "done";
         } else {
             mappedShelf = "to_read";
         }
@@ -1244,71 +1268,151 @@ public class YandexBooksApiClient {
 
     /**
      * Загрузка списка пользовательских загруженных файлов (Модуль 8: User Uploads).
+     * Последовательно опрашивает реальные эндпоинты Bookmate v5:
+     * /profile/uploads -> /profile/books -> /users/{login}/books (с поддержкой постраничной пагинации).
      */
     public void fetchUserUploadedBooks(final ApiCallback<List<Book>> callback) {
-        fetchUserUploadedBooksFromUrl(BASE_URL + "/profile/user_books?per_page=100", true, callback);
-    }
-
-    private void fetchUserUploadedBooksFromUrl(final String url, final boolean allowGatewayRetry, final ApiCallback<List<Book>> callback) {
-        Request request = createAuthRequestBuilder(url).get().build();
-        httpClient.newCall(request).enqueue(new Callback() {
+        new Thread(new Runnable() {
             @Override
-            public void onFailure(Call call, IOException e) {
-                if (allowGatewayRetry) {
-                    fetchUserUploadedBooksFromUrl(REST_GATEWAY_URL + "/profile/user_books?per_page=100", false, callback);
-                } else {
+            public void run() {
+                try {
+                    List<Book> collected = new ArrayList<>();
+                    java.util.Set<String> seenUuids = new java.util.HashSet<>();
+
+                    // 1. Основной эндпоинт личных загрузок Bookmate v5: /profile/uploads
+                    boolean uploadsEndpointWorked = fetchPaginatedUserBooksSync(BASE_URL + "/profile/uploads", false, collected, seenUuids);
+
+                    // 2. Если /profile/uploads пуст или вернул ошибку, проверяем /profile/books (фильтруя личные/загруженные файлы)
+                    if (!uploadsEndpointWorked || collected.isEmpty()) {
+                        fetchPaginatedUserBooksSync(BASE_URL + "/profile/books", true, collected, seenUuids);
+                    }
+
+                    // 3. Также пробуем /users/{login}/books, если логин профиля известен
+                    if (collected.isEmpty()) {
+                        String login = ensureUserLoginSync();
+                        if (login != null && !login.isEmpty()) {
+                            String encLogin = java.net.URLEncoder.encode(login, "UTF-8").replace("+", "%20");
+                            fetchPaginatedUserBooksSync(BASE_URL + "/users/" + encLogin + "/books", true, collected, seenUuids);
+                        }
+                    }
+
+                    postSuccess(callback, collected);
+                } catch (Exception e) {
+                    Log.e(TAG, "Error loading user uploaded books", e);
                     postError(callback, "Ошибка загрузки «Мои файлы»: " + e.getMessage());
                 }
             }
+        }).start();
+    }
 
-            @Override
-            public void onResponse(Call call, Response response) throws IOException {
-                if (!response.isSuccessful()) {
-                    int code = response.code();
-                    response.close();
-                    if (allowGatewayRetry && code >= 400) {
-                        fetchUserUploadedBooksFromUrl(REST_GATEWAY_URL + "/profile/user_books?per_page=100", false, callback);
-                        return;
-                    }
-                    if (code == 404) {
-                        postSuccess(callback, new ArrayList<Book>());
-                        return;
-                    }
-                    postError(callback, "Ошибка загрузки «Мои файлы»: HTTP " + code);
-                    return;
+    private boolean fetchPaginatedUserBooksSync(String baseEndpoint, boolean filterPersonalOnly,
+                                                List<Book> out, java.util.Set<String> seenUuids) {
+        boolean anyOk = false;
+        for (int page = 1; page <= 20; page++) {
+            String url = baseEndpoint + "?per_page=100&page=" + page;
+            Response resp = null;
+            try {
+                Request req = createAuthRequestBuilder(url).get().build();
+                resp = httpClient.newCall(req).execute();
+                if (!resp.isSuccessful()) {
+                    return anyOk;
                 }
-                try {
-                    String body = response.body().string();
-                    List<Book> result = parseUserUploadedBooksJson(body);
-                    postSuccess(callback, result);
-                } catch (Exception e) {
-                    Log.e(TAG, "Error parsing user_books", e);
-                    postError(callback, "Ошибка разбора «Мои файлы»: " + e.getMessage());
+                anyOk = true;
+                String body = resp.body() != null ? resp.body().string() : "";
+                List<Book> pageItems = parseUserUploadedBooksJson(body, filterPersonalOnly);
+                int added = 0;
+                for (Book b : pageItems) {
+                    if (b != null && b.getUuid() != null && seenUuids.add(b.getUuid())) {
+                        out.add(b);
+                        added++;
+                    }
+                }
+                if (pageItems.isEmpty() || added == 0) {
+                    break;
+                }
+            } catch (Exception e) {
+                return anyOk;
+            } finally {
+                if (resp != null) try { resp.close(); } catch (Exception ignored) {}
+            }
+        }
+        return anyOk;
+    }
+
+    private String ensureUserLoginSync() {
+        String cached = tokenStorage != null ? tokenStorage.getUserLogin() : "";
+        if (cached != null && !cached.trim().isEmpty()) {
+            return cached.trim();
+        }
+        Response resp = null;
+        try {
+            Request req = createAuthRequestBuilder(BASE_URL + "/profile").get().build();
+            resp = httpClient.newCall(req).execute();
+            if (resp.isSuccessful() && resp.body() != null) {
+                String body = resp.body().string();
+                JSONObject json = new JSONObject(body);
+                JSONObject u = json.optJSONObject("user");
+                if (u == null) u = json;
+                String login = u.optString("login", u.optString("username", ""));
+                if (login != null && !login.trim().isEmpty() && !"null".equalsIgnoreCase(login)) {
+                    if (tokenStorage != null) {
+                        tokenStorage.setUserLogin(login.trim());
+                    }
+                    return login.trim();
                 }
             }
-        });
+        } catch (Exception ignored) {
+        } finally {
+            if (resp != null) try { resp.close(); } catch (Exception ignored) {}
+        }
+        return "";
     }
 
     public List<Book> parseUserUploadedBooksJson(String jsonBody) throws org.json.JSONException {
+        return parseUserUploadedBooksJson(jsonBody, false);
+    }
+
+    public List<Book> parseUserUploadedBooksJson(String jsonBody, boolean filterPersonalOnly) throws org.json.JSONException {
         List<Book> result = new ArrayList<>();
         if (jsonBody == null || jsonBody.trim().isEmpty()) return result;
         JSONObject json = new JSONObject(jsonBody);
-        JSONArray arr = json.optJSONArray("user_books");
+        JSONArray arr = json.optJSONArray("uploads");
+        if (arr == null) arr = json.optJSONArray("user_books");
+        if (arr == null) arr = json.optJSONArray("documents");
+        if (arr == null) arr = json.optJSONArray("files");
         if (arr == null) arr = json.optJSONArray("books");
         if (arr == null) arr = json.optJSONArray("items");
+        if (arr == null) arr = json.optJSONArray("library_cards");
         if (arr == null) return result;
         for (int i = 0; i < arr.length(); i++) {
             JSONObject item = arr.optJSONObject(i);
             if (item == null) continue;
+            JSONObject bObj = item.optJSONObject("book");
+            String fileUrl = item.optString("file_url", item.optString("download_url", item.optString("document_url", "")));
+            if (fileUrl.isEmpty() && bObj != null) {
+                fileUrl = bObj.optString("file_url", bObj.optString("download_url", bObj.optString("document_url", "")));
+            }
+            if ("null".equalsIgnoreCase(fileUrl)) fileUrl = "";
+
+            boolean looksPersonal = !fileUrl.isEmpty()
+                    || item.optBoolean("is_user_book", false)
+                    || item.optBoolean("uploaded", false)
+                    || item.optBoolean("is_private", false)
+                    || "user_book".equalsIgnoreCase(item.optString("kind", ""))
+                    || "upload".equalsIgnoreCase(item.optString("kind", ""))
+                    || (bObj != null && (bObj.optBoolean("is_user_book", false)
+                    || bObj.optBoolean("uploaded", false)
+                    || bObj.optBoolean("is_private", false)
+                    || "user_book".equalsIgnoreCase(bObj.optString("kind", ""))));
+
+            if (filterPersonalOnly && !looksPersonal) {
+                continue;
+            }
+
             Book book = parseBookFromCard(item);
             if (book == null) continue;
             book.setShelfType("user_books");
-            JSONObject bObj = item.optJSONObject("book");
-            String fileUrl = item.optString("file_url", item.optString("download_url", ""));
-            if (fileUrl.isEmpty() && bObj != null) {
-                fileUrl = bObj.optString("file_url", bObj.optString("download_url", ""));
-            }
-            if (!fileUrl.isEmpty() && !"null".equalsIgnoreCase(fileUrl)) {
+            if (!fileUrl.isEmpty()) {
                 book.setFileUrl(fileUrl);
             }
             if (book.getAuthor() == null || book.getAuthor().trim().isEmpty()) {
@@ -2229,6 +2333,117 @@ public class YandexBooksApiClient {
             "fragment seriesFragment on Series { authors { __typename ...personFragment } cover { __typename ...coverFragment } name uuid items { followersCount total } }\n" +
             "fragment topicFragment on Topic { name slug totalBook uuid parent { name slug totalBook uuid } }\n";
 
+    public static class CatalogCategory {
+        public final String uuid;
+        public final String title;
+
+        public CatalogCategory(String uuid, String title) {
+            this.uuid = uuid;
+            this.title = title;
+        }
+    }
+
+    /**
+     * Возвращает список категорий и тематических подборок каталога Яндекс Книг.
+     */
+    public void getCatalogCategories(final ApiCallback<List<CatalogCategory>> callback) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                List<CatalogCategory> categories = new ArrayList<>();
+                java.util.Set<String> seenUuids = new java.util.HashSet<>();
+
+                // 1. Встроенные актуальные рубрики Яндекс Книг (проверены по витрине books.yandex.ru)
+                addCategoryUnique(categories, seenUuids, "uQfUIsur", "Новинки");
+                addCategoryUnique(categories, seenUuids, "DyY40A8l", "Суперхиты");
+                addCategoryUnique(categories, seenUuids, "MsYy9bE8", "Российская фантастика");
+                addCategoryUnique(categories, seenUuids, "XLLytQg2", "Славянское фэнтези");
+                addCategoryUnique(categories, seenUuids, "Mb1nPGHx", "Лучшие современные детективы");
+                addCategoryUnique(categories, seenUuids, "oRidVXsN", "Лучшие триллеры XXI века");
+                addCategoryUnique(categories, seenUuids, "JUzuIVzn", "Нобелевская премия");
+                addCategoryUnique(categories, seenUuids, "nwavRdj8", "Саморазвитие");
+                addCategoryUnique(categories, seenUuids, "j2wlhX4Z", "Затягивает с первой главы");
+                addCategoryUnique(categories, seenUuids, "ySg3hPn4", "Только в Яндекс Книгах");
+
+                // 2. Дополняем динамическими подборками из /api/v5/popular_searches/ru
+                Response popResp = null;
+                try {
+                    Request req = createAuthRequestBuilder(BASE_URL + "/popular_searches/ru").get().build();
+                    popResp = httpClient.newCall(req).execute();
+                    if (popResp.isSuccessful() && popResp.body() != null) {
+                        JSONObject json = new JSONObject(popResp.body().string());
+                        JSONObject pop = json.optJSONObject("popular_searches");
+                        if (pop != null) {
+                            JSONArray res = pop.optJSONArray("resources");
+                            if (res != null) {
+                                for (int i = 0; i < res.length(); i++) {
+                                    JSONObject item = res.optJSONObject(i);
+                                    if (item == null) continue;
+                                    String url = item.optString("url", "");
+                                    String title = item.optString("title", "").trim();
+                                    if (url.contains("/bookshelves/") && !title.isEmpty()) {
+                                        String[] parts = url.split("/bookshelves/");
+                                        if (parts.length > 1) {
+                                            String u = parts[1].trim();
+                                            if (u.contains("?")) u = u.substring(0, u.indexOf('?'));
+                                            addCategoryUnique(categories, seenUuids, u, title);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {
+                } finally {
+                    if (popResp != null) try { popResp.close(); } catch (Exception ignored) {}
+                }
+
+                // 3. Дополняем пользовательскими/тематическими полками из /api/v5/bookshelves
+                Response shelvesResp = null;
+                try {
+                    Request req = createAuthRequestBuilder(BASE_URL + "/bookshelves?per_page=20&page=1").get().build();
+                    shelvesResp = httpClient.newCall(req).execute();
+                    if (shelvesResp.isSuccessful() && shelvesResp.body() != null) {
+                        JSONObject json = new JSONObject(shelvesResp.body().string());
+                        JSONArray arr = json.optJSONArray("bookshelves");
+                        if (arr != null) {
+                            for (int i = 0; i < arr.length(); i++) {
+                                JSONObject sh = arr.optJSONObject(i);
+                                if (sh == null) continue;
+                                String u = sh.optString("uuid", "").trim();
+                                String t = sh.optString("title", "").replace("\n", " ").trim();
+                                int count = sh.optInt("books_count", 0);
+                                if (!u.isEmpty() && !t.isEmpty() && count > 0) {
+                                    addCategoryUnique(categories, seenUuids, u, t);
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {
+                } finally {
+                    if (shelvesResp != null) try { shelvesResp.close(); } catch (Exception ignored) {}
+                }
+
+                postSuccess(callback, categories);
+            }
+        }).start();
+    }
+
+    private static void addCategoryUnique(List<CatalogCategory> list, java.util.Set<String> seen, String uuid, String title) {
+        if (uuid == null || uuid.trim().isEmpty() || title == null || title.trim().isEmpty()) return;
+        if (seen.add(uuid.trim())) {
+            list.add(new CatalogCategory(uuid.trim(), title.trim()));
+        }
+    }
+
+    public void getCatalogBooksByShelf(String shelfUuid, final ApiCallback<List<Book>> callback) {
+        if (shelfUuid == null || shelfUuid.trim().isEmpty()) {
+            getRecommendations(callback);
+            return;
+        }
+        loadBookshelfByUuid(shelfUuid.trim(), callback);
+    }
+
     /**
      * Загрузка рекомендаций и популярных книг каталога Яндекс Книг.
      */
@@ -2239,14 +2454,14 @@ public class YandexBooksApiClient {
         httpClient.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-                loadBookshelfByUuid("byugcjMZ", callback);
+                loadBookshelfByUuid("uQfUIsur", callback);
             }
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
                 if (!response.isSuccessful()) {
                     response.close();
-                    loadBookshelfByUuid("byugcjMZ", callback);
+                    loadBookshelfByUuid("uQfUIsur", callback);
                     return;
                 }
 
@@ -2254,7 +2469,7 @@ public class YandexBooksApiClient {
                     String body = response.body().string();
                     JSONObject json = new JSONObject(body);
                     JSONObject pop = json.optJSONObject("popular_searches");
-                    String shelfUuid = "byugcjMZ";
+                    String shelfUuid = "uQfUIsur";
                     if (pop != null) {
                         JSONArray res = pop.optJSONArray("resources");
                         if (res != null && res.length() > 0) {
@@ -2273,14 +2488,14 @@ public class YandexBooksApiClient {
                     }
                     loadBookshelfByUuid(shelfUuid, callback);
                 } catch (Exception e) {
-                    loadBookshelfByUuid("byugcjMZ", callback);
+                    loadBookshelfByUuid("uQfUIsur", callback);
                 }
             }
         });
     }
 
     private void loadBookshelfByUuid(String shelfUuid, final ApiCallback<List<Book>> callback) {
-        String endpoint = BASE_URL + "/bookshelves/" + shelfUuid + "/books";
+        String endpoint = BASE_URL + "/bookshelves/" + shelfUuid + "/books?per_page=50";
         Request request = createAuthRequestBuilder(endpoint).get().build();
 
         httpClient.newCall(request).enqueue(new Callback() {
@@ -2919,45 +3134,101 @@ public class YandexBooksApiClient {
     }
 
     /**
-     * Загрузка облачных цитат книги (Модуль 13).
+     * Загружает логин/имя текущего авторизованного профиля для отображения в меню и фильтрации личных данных.
+     */
+    public void fetchCurrentUserLogin(final ApiCallback<String> callback) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                String login = ensureUserLoginSync();
+                postSuccess(callback, login != null ? login : "");
+            }
+        }).start();
+    }
+
+    /**
+     * Загрузка ЛИЧНЫХ облачных цитат пользователя для конкретной книги (Модуль 13).
+     * НИКОГДА не обращается к публичной ленте /books/{uuid}/quotes, чтобы исключить утечку чужих цитат!
      */
     public void getBookQuotes(final String bookUuid, final ApiCallback<List<Quote>> callback) {
         if (bookUuid == null || bookUuid.isEmpty()) {
             postSuccess(callback, new ArrayList<Quote>());
             return;
         }
-        String url = BASE_URL + "/books/" + bookUuid + "/quotes?per_page=100";
-        Request request = createAuthRequestBuilder(url).get().build();
-        httpClient.newCall(request).enqueue(new Callback() {
+        new Thread(new Runnable() {
             @Override
-            public void onFailure(Call call, IOException e) {
-                postError(callback, "Ошибка загрузки цитат: " + e.getMessage());
-            }
-
-            @Override
-            public void onResponse(Call call, Response response) throws IOException {
+            public void run() {
                 try {
-                    if (!response.isSuccessful()) {
-                        int code = response.code();
-                        if (code == 404) {
-                            postSuccess(callback, new ArrayList<Quote>());
-                        } else {
-                            postError(callback, "HTTP " + code);
+                    List<Quote> mine = new ArrayList<>();
+                    java.util.Set<String> seen = new java.util.HashSet<>();
+
+                    // 1. Приоритетно запрашиваем личные цитаты профиля (/profile/quotes)
+                    boolean profileEndpointOk = fetchPersonalQuotesPagedSync(
+                            BASE_URL + "/profile/quotes?book_uuid=" + bookUuid, bookUuid, mine, seen);
+
+                    // 2. Fallback: эндпоинт личных цитат текущего пользователя (/users/{login}/quotes)
+                    if (!profileEndpointOk) {
+                        String login = ensureUserLoginSync();
+                        if (login != null && !login.isEmpty()) {
+                            String encLogin = java.net.URLEncoder.encode(login, "UTF-8").replace("+", "%20");
+                            fetchPersonalQuotesPagedSync(
+                                    BASE_URL + "/users/" + encLogin + "/quotes", bookUuid, mine, seen);
                         }
-                        return;
                     }
-                    String body = response.body() != null ? response.body().string() : "";
-                    postSuccess(callback, parseQuotesJson(body, bookUuid));
+
+                    postSuccess(callback, mine);
                 } catch (Exception e) {
-                    postError(callback, "Ошибка разбора цитат: " + e.getMessage());
-                } finally {
-                    response.close();
+                    postError(callback, "Ошибка загрузки личных цитат: " + e.getMessage());
                 }
             }
-        });
+        }).start();
+    }
+
+    private boolean fetchPersonalQuotesPagedSync(String baseUrl, String targetBookUuid,
+                                                 List<Quote> out, java.util.Set<String> seenKeys) {
+        String myLogin = tokenStorage != null ? tokenStorage.getUserLogin() : "";
+        boolean anyOk = false;
+        for (int page = 1; page <= 10; page++) {
+            String sep = baseUrl.contains("?") ? "&" : "?";
+            String url = baseUrl + sep + "per_page=100&page=" + page;
+            Response resp = null;
+            try {
+                Request req = createAuthRequestBuilder(url).get().build();
+                resp = httpClient.newCall(req).execute();
+                if (!resp.isSuccessful()) {
+                    return anyOk;
+                }
+                anyOk = true;
+                String body = resp.body() != null ? resp.body().string() : "";
+                List<Quote> parsed = parseQuotesJson(body, targetBookUuid, myLogin, true);
+                JSONObject json = body.trim().isEmpty() ? null : new JSONObject(body);
+                JSONArray rawArr = json != null ? (json.optJSONArray("quotes") != null ? json.optJSONArray("quotes") : json.optJSONArray("items")) : null;
+                int rawLen = rawArr != null ? rawArr.length() : 0;
+                for (Quote q : parsed) {
+                    String key = (q.quoteUuid != null && !q.quoteUuid.isEmpty())
+                            ? q.quoteUuid
+                            : (q.chapterIndex + "|" + q.text);
+                    if (seenKeys.add(key)) {
+                        out.add(q);
+                    }
+                }
+                if (rawLen < 20) {
+                    break;
+                }
+            } catch (Exception e) {
+                return anyOk;
+            } finally {
+                if (resp != null) try { resp.close(); } catch (Exception ignored) {}
+            }
+        }
+        return anyOk;
     }
 
     public List<Quote> parseQuotesJson(String body, String bookUuid) throws org.json.JSONException {
+        return parseQuotesJson(body, bookUuid, null, false);
+    }
+
+    public List<Quote> parseQuotesJson(String body, String bookUuid, String expectedUserLogin, boolean filterByBookAndOwner) throws org.json.JSONException {
         List<Quote> result = new ArrayList<>();
         if (body == null || body.trim().isEmpty()) return result;
         JSONObject json = new JSONObject(body);
@@ -2967,6 +3238,30 @@ public class YandexBooksApiClient {
         for (int i = 0; i < arr.length(); i++) {
             JSONObject obj = arr.optJSONObject(i);
             if (obj == null) continue;
+
+            if (filterByBookAndOwner) {
+                // Строгая фильтрация чужих цитат: отсекаем любые записи других пользователей
+                if (obj.has("is_mine") && !obj.optBoolean("is_mine", true)) continue;
+                if (obj.has("mine") && !obj.optBoolean("mine", true)) continue;
+                JSONObject uObj = obj.optJSONObject("user");
+                if (uObj != null && expectedUserLogin != null && !expectedUserLogin.isEmpty()) {
+                    String qLogin = uObj.optString("login", uObj.optString("username", ""));
+                    if (!qLogin.isEmpty() && !expectedUserLogin.equalsIgnoreCase(qLogin)) {
+                        continue;
+                    }
+                }
+
+                // Фильтрация по целевой книге (т.к. /profile/quotes или /users/{login}/quotes могут вернуть цитаты всех книг)
+                String itemBookUuid = obj.optString("item_uuid", obj.optString("book_uuid", ""));
+                if (itemBookUuid.isEmpty()) {
+                    JSONObject bObj = obj.optJSONObject("book");
+                    if (bObj != null) itemBookUuid = bObj.optString("uuid", "");
+                }
+                if (bookUuid != null && !bookUuid.isEmpty() && !itemBookUuid.isEmpty() && !bookUuid.equals(itemBookUuid)) {
+                    continue;
+                }
+            }
+
             String text = obj.optString("content", obj.optString("text", ""));
             if (text == null || text.trim().isEmpty() || "null".equals(text)) continue;
             Quote q = new Quote();

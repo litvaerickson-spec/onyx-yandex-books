@@ -70,8 +70,14 @@ public class MainActivity extends Activity {
     private EinkListView booksListView;
     private LinearLayout mainHeaderBar, mainTabsBar, shelfFooterBar;
     private TextView mainHeaderTitle;
-    private Button tabReadingBtn, tabToReadBtn, tabUserBooksBtn, tabCatalogBtn, tabSearchBtn;
+    private Button tabReadingBtn, tabToReadBtn, tabDoneBtn, tabUserBooksBtn, tabCatalogBtn, tabSearchBtn;
     private Button btnToggleReaderMode, btnCheckUpdate, btnMainMenu;
+    private LinearLayout catalogBarContainer;
+    private View catalogBarDivider;
+    private Button btnCatalogCategory, btnCatalogReload;
+    private String selectedCatalogShelfUuid = "uQfUIsur";
+    private String selectedCatalogShelfTitle = "Новинки";
+    private List<YandexBooksApiClient.CatalogCategory> cachedCatalogCategories = new ArrayList<>();
     private LinearLayout searchBarContainer;
     private View searchBarDivider;
     private EditText searchQueryInput;
@@ -166,9 +172,31 @@ public class MainActivity extends Activity {
         shelfFooterBar = (LinearLayout) findViewById(R.id.shelf_footer_bar);
         tabReadingBtn = (Button) findViewById(R.id.tab_reading_btn);
         tabToReadBtn = (Button) findViewById(R.id.tab_to_read_btn);
+        tabDoneBtn = (Button) findViewById(R.id.tab_done_btn);
         tabUserBooksBtn = (Button) findViewById(R.id.tab_user_books_btn);
         tabCatalogBtn = (Button) findViewById(R.id.tab_catalog_btn);
         tabSearchBtn = (Button) findViewById(R.id.tab_search_btn);
+
+        catalogBarContainer = (LinearLayout) findViewById(R.id.catalog_bar_container);
+        catalogBarDivider = findViewById(R.id.catalog_bar_divider);
+        btnCatalogCategory = (Button) findViewById(R.id.btn_catalog_category);
+        btnCatalogReload = (Button) findViewById(R.id.btn_catalog_reload);
+        if (btnCatalogCategory != null) {
+            btnCatalogCategory.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showCatalogCategoryDialog();
+                }
+            });
+        }
+        if (btnCatalogReload != null) {
+            btnCatalogReload.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    loadCatalog();
+                }
+            });
+        }
 
         btnToggleReaderMode = (Button) findViewById(R.id.btn_toggle_reader_mode);
         btnCheckUpdate = (Button) findViewById(R.id.btn_check_update);
@@ -386,6 +414,32 @@ public class MainActivity extends Activity {
         divider.setBackgroundColor(Color.BLACK);
         root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
 
+        final TextView accountView = new TextView(this);
+        String savedLogin = (tokenStorage != null) ? tokenStorage.getUserLogin() : "";
+        accountView.setText("Аккаунт: " + ((savedLogin != null && !savedLogin.trim().isEmpty()) ? savedLogin : "определяется..."));
+        accountView.setTextSize(11);
+        accountView.setTypeface(null, Typeface.BOLD);
+        accountView.setTextColor(Color.BLACK);
+        accountView.setGravity(Gravity.CENTER);
+        accountView.setPadding(0, (int) (4 * density), 0, (int) (2 * density));
+        root.addView(accountView);
+        if ((savedLogin == null || savedLogin.trim().isEmpty()) && apiClient != null && tokenStorage != null && tokenStorage.isAuthorized()) {
+            apiClient.fetchCurrentUserLogin(new YandexBooksApiClient.ApiCallback<String>() {
+                @Override
+                public void onSuccess(String login) {
+                    if (login != null && !login.trim().isEmpty()) {
+                        accountView.setText("Аккаунт: " + login);
+                    } else {
+                        accountView.setText("Аккаунт: авторизован");
+                    }
+                }
+                @Override
+                public void onError(String errorMessage) {
+                    accountView.setText("Аккаунт: авторизован");
+                }
+            });
+        }
+
         final com.onyx.yandexbooks.core.eink.EinkScrollView menuScroll = new com.onyx.yandexbooks.core.eink.EinkScrollView(this);
         LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
         scrollLp.setMargins(0, (int) (4 * density), 0, (int) (4 * density));
@@ -497,7 +551,7 @@ public class MainActivity extends Activity {
         root.addView(menuScroll);
 
         TextView tvBetaNotice = new TextView(this);
-        tvBetaNotice.setText("Яндекс Книги Lite v2.0.0");
+        tvBetaNotice.setText("Яндекс Книги Lite v" + AppUpdateManager.getInstance().getCurrentVersionName(this));
         tvBetaNotice.setTextSize(11);
         tvBetaNotice.setTypeface(null, Typeface.BOLD);
         tvBetaNotice.setTextColor(Color.BLACK);
@@ -634,9 +688,10 @@ public class MainActivity extends Activity {
         stylePanelButton(btnMainMenu, headerBtnDp, menuMinWDp, headerBtnSp, 12, density);
 
         setViewHeightPx(mainTabsBar, Math.round(tabsBarDp * density));
-        Button[] tabs = new Button[]{tabReadingBtn, tabToReadBtn, tabUserBooksBtn, tabCatalogBtn, tabSearchBtn};
+        float effectiveTabSp = Math.max(8.5f, tabSp - 1.0f);
+        Button[] tabs = new Button[]{tabReadingBtn, tabToReadBtn, tabDoneBtn, tabUserBooksBtn, tabCatalogBtn, tabSearchBtn};
         for (Button t : tabs) {
-            stylePanelButton(t, tabBtnDp, 0, tabSp, 1, density);
+            stylePanelButton(t, tabBtnDp, 0, effectiveTabSp, 1, density);
         }
 
         setViewHeightPx(shelfFooterBar, Math.round(footerBarDp * density));
@@ -1463,16 +1518,44 @@ public class MainActivity extends Activity {
                 new Runnable() {
                     @Override
                     public void run() {
-                        tokenStorage.clear();
+                        if (dbHelper != null) {
+                            dbHelper.clearUserAccountDataOnLogout(MainActivity.this);
+                        }
+                        if (tokenStorage != null) {
+                            tokenStorage.clear();
+                        }
+                        clearWebViewSessionCookiesOnLogout();
                         currentBooks.clear();
                         adapter.notifyDataSetChanged();
                         updateTabBadges();
                         updateEmptyState();
-                        startActivityForResult(new Intent(MainActivity.this, AuthActivity.class), REQUEST_AUTH);
+                        Intent authIntent = new Intent(MainActivity.this, AuthActivity.class);
+                        authIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                        startActivityForResult(authIntent, REQUEST_AUTH);
                     }
                 },
                 null
         );
+    }
+
+    @SuppressWarnings("deprecation")
+    private void clearWebViewSessionCookiesOnLogout() {
+        try {
+            android.webkit.CookieSyncManager.createInstance(this);
+            android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+            if (cm != null) {
+                cm.removeSessionCookie();
+                cm.removeAllCookie();
+                try {
+                    java.lang.reflect.Method flush = cm.getClass().getMethod("flush");
+                    flush.invoke(cm);
+                } catch (Throwable ignored) {}
+            }
+            android.webkit.CookieSyncManager.getInstance().sync();
+        } catch (Throwable ignored) {}
+        try {
+            android.webkit.WebStorage.getInstance().deleteAllData();
+        } catch (Throwable ignored) {}
     }
 
     private Dialog showEinkLoadingDialog(String title, String message) {
@@ -1576,6 +1659,15 @@ public class MainActivity extends Activity {
             }
         });
 
+        if (tabDoneBtn != null) {
+            tabDoneBtn.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    switchTab("done");
+                }
+            });
+        }
+
         if (tabUserBooksBtn != null) {
             tabUserBooksBtn.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -1604,26 +1696,31 @@ public class MainActivity extends Activity {
         currentShelf = shelf;
         updateTabStyles();
 
-        if ("search".equals(shelf)) {
-            if (searchBarContainer != null) {
-                searchBarContainer.setVisibility(View.VISIBLE);
-                if (searchBarDivider != null) searchBarDivider.setVisibility(View.VISIBLE);
-                if (searchQueryInput != null) searchQueryInput.requestFocus();
-            }
+        boolean isSearch = "search".equals(shelf);
+        boolean isCatalog = "catalog".equals(shelf);
+        if (searchBarContainer != null) {
+            searchBarContainer.setVisibility(isSearch ? View.VISIBLE : View.GONE);
+        }
+        if (searchBarDivider != null) {
+            searchBarDivider.setVisibility(isSearch ? View.VISIBLE : View.GONE);
+        }
+        if (catalogBarContainer != null) {
+            catalogBarContainer.setVisibility(isCatalog ? View.VISIBLE : View.GONE);
+        }
+        if (catalogBarDivider != null) {
+            catalogBarDivider.setVisibility(isCatalog ? View.VISIBLE : View.GONE);
+        }
+
+        if (isSearch) {
+            if (searchQueryInput != null) searchQueryInput.requestFocus();
             updateEmptyState();
             updateShelfFooter();
+        } else if (isCatalog) {
+            loadCatalog();
+        } else if ("user_books".equals(shelf)) {
+            loadUserUploadedBooks();
         } else {
-            if (searchBarContainer != null) {
-                searchBarContainer.setVisibility(View.GONE);
-                if (searchBarDivider != null) searchBarDivider.setVisibility(View.GONE);
-            }
-            if ("catalog".equals(shelf)) {
-                loadCatalog();
-            } else if ("user_books".equals(shelf)) {
-                loadUserUploadedBooks();
-            } else {
-                loadBooks(shelf);
-            }
+            loadBooks(shelf);
         }
     }
 
@@ -1651,7 +1748,67 @@ public class MainActivity extends Activity {
         );
     }
 
+    private void updateCatalogCategoryButtonText() {
+        if (btnCatalogCategory != null) {
+            btnCatalogCategory.setText("Категория: " + selectedCatalogShelfTitle + " ▼");
+        }
+    }
+
+    private void showCatalogCategoryDialog() {
+        if (cachedCatalogCategories == null || cachedCatalogCategories.isEmpty()) {
+            apiClient.getCatalogCategories(new YandexBooksApiClient.ApiCallback<List<YandexBooksApiClient.CatalogCategory>>() {
+                @Override
+                public void onSuccess(List<YandexBooksApiClient.CatalogCategory> cats) {
+                    if (cats != null && !cats.isEmpty()) {
+                        cachedCatalogCategories = cats;
+                    }
+                    showCatalogCategoryPickerDialog();
+                }
+
+                @Override
+                public void onError(String errorMessage) {
+                    showCatalogCategoryPickerDialog();
+                }
+            });
+            return;
+        }
+        showCatalogCategoryPickerDialog();
+    }
+
+    private void showCatalogCategoryPickerDialog() {
+        if (isFinishing()) return;
+        final List<YandexBooksApiClient.CatalogCategory> list = (cachedCatalogCategories != null && !cachedCatalogCategories.isEmpty())
+                ? cachedCatalogCategories
+                : java.util.Collections.singletonList(new YandexBooksApiClient.CatalogCategory("uQfUIsur", "Новинки"));
+
+        String[] titles = new String[list.size()];
+        for (int i = 0; i < list.size(); i++) {
+            String t = list.get(i).title;
+            titles[i] = list.get(i).uuid.equals(selectedCatalogShelfUuid) ? ("● " + t) : ("○ " + t);
+        }
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Категории каталога");
+        builder.setItems(titles, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                YandexBooksApiClient.CatalogCategory chosen = list.get(which);
+                selectedCatalogShelfUuid = chosen.uuid;
+                selectedCatalogShelfTitle = chosen.title;
+                updateCatalogCategoryButtonText();
+                loadCatalog();
+            }
+        });
+        builder.setNegativeButton("Закрыть", null);
+        AlertDialog d = builder.create();
+        if (d.getWindow() != null) {
+            d.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        }
+        d.show();
+    }
+
     private void loadCatalog() {
+        updateCatalogCategoryButtonText();
         if (!isNetworkAvailable()) {
             currentBooks.clear();
             adapter.notifyDataSetChanged();
@@ -1672,10 +1829,23 @@ public class MainActivity extends Activity {
         updateEmptyState();
         updateShelfFooter();
 
-        loadingTextView.setText("Загрузка каталога Яндекс Книг...");
+        loadingTextView.setText("Загрузка: " + selectedCatalogShelfTitle + "...");
         loadingTextView.setVisibility(View.VISIBLE);
 
-        apiClient.getRecommendations(new YandexBooksApiClient.ApiCallback<List<Book>>() {
+        if (cachedCatalogCategories == null || cachedCatalogCategories.isEmpty()) {
+            apiClient.getCatalogCategories(new YandexBooksApiClient.ApiCallback<List<YandexBooksApiClient.CatalogCategory>>() {
+                @Override
+                public void onSuccess(List<YandexBooksApiClient.CatalogCategory> cats) {
+                    if (cats != null && !cats.isEmpty()) {
+                        cachedCatalogCategories = cats;
+                    }
+                }
+                @Override
+                public void onError(String errorMessage) {}
+            });
+        }
+
+        apiClient.getCatalogBooksByShelf(selectedCatalogShelfUuid, new YandexBooksApiClient.ApiCallback<List<Book>>() {
             @Override
             public void onSuccess(List<Book> books) {
                 loadingTextView.setVisibility(View.GONE);
@@ -1816,6 +1986,7 @@ public class MainActivity extends Activity {
     private void updateTabStyles() {
         boolean isReading = "reading".equals(currentShelf);
         boolean isToRead = "to_read".equals(currentShelf);
+        boolean isDone = "done".equals(currentShelf);
         boolean isUserBooks = "user_books".equals(currentShelf);
         boolean isCatalog = "catalog".equals(currentShelf);
         boolean isSearch = "search".equals(currentShelf);
@@ -1827,6 +1998,12 @@ public class MainActivity extends Activity {
         tabToReadBtn.setBackgroundResource(isToRead ? R.drawable.tab_eink_active : R.drawable.tab_eink_inactive);
         tabToReadBtn.setTextColor(Color.BLACK);
         tabToReadBtn.setTypeface(null, isToRead ? Typeface.BOLD : Typeface.NORMAL);
+
+        if (tabDoneBtn != null) {
+            tabDoneBtn.setBackgroundResource(isDone ? R.drawable.tab_eink_active : R.drawable.tab_eink_inactive);
+            tabDoneBtn.setTextColor(Color.BLACK);
+            tabDoneBtn.setTypeface(null, isDone ? Typeface.BOLD : Typeface.NORMAL);
+        }
 
         if (tabUserBooksBtn != null) {
             tabUserBooksBtn.setBackgroundResource(isUserBooks ? R.drawable.tab_eink_active : R.drawable.tab_eink_inactive);
@@ -1846,10 +2023,14 @@ public class MainActivity extends Activity {
     private void updateTabBadges() {
         int readingCount = dbHelper.getBooksCountByShelf("reading");
         int toReadCount = dbHelper.getBooksCountByShelf("to_read");
+        int doneCount = dbHelper.getBooksCountByShelf("done");
         int userBooksCount = dbHelper.getBooksCountByShelf("user_books");
 
         tabReadingBtn.setText("Читаю (" + readingCount + ")");
         tabToReadBtn.setText("В планах (" + toReadCount + ")");
+        if (tabDoneBtn != null) {
+            tabDoneBtn.setText("Прочит. (" + doneCount + ")");
+        }
         if (tabUserBooksBtn != null) {
             tabUserBooksBtn.setText("Файлы (" + userBooksCount + ")");
         }
@@ -1956,6 +2137,10 @@ public class MainActivity extends Activity {
                         emptyShelfHintView.setText("Попробуйте изменить поисковый запрос или имя автора.");
                         if (btnRefreshShelf != null) btnRefreshShelf.setText("Очистить поиск");
                     }
+                } else if ("done".equals(currentShelf)) {
+                    emptyShelfTitleView.setText("Нет прочитанных книг");
+                    emptyShelfHintView.setText("Завершённые книги появятся здесь автоматически после 100% чтения или отметки «Прочитано».");
+                    if (btnRefreshShelf != null) btnRefreshShelf.setText("Обновить список");
                 } else if ("user_books".equals(currentShelf)) {
                     emptyShelfTitleView.setText("Личные файлы отсутствуют");
                     emptyShelfHintView.setText("Здесь отображаются книги (EPUB/FB2), загруженные вами в профиль Яндекс Книг / Букмейта.");
@@ -3006,18 +3191,33 @@ public class MainActivity extends Activity {
         btnShelfDone.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if ("done".equals(curShelfRef[0])) {
+                if ("done".equals(curShelfRef[0]) && book.getPercent() >= 99.5) {
                     EinkNotice.show(MainActivity.this, "Полка", "Книга уже в разделе «Прочитано».");
                     return;
                 }
                 btnShelfDone.setEnabled(false);
+                book.setPercent(100.0);
+                ReadingProgress doneProg = new ReadingProgress(
+                        book.getUuid(),
+                        100.0,
+                        Math.max(0, book.getCurrentChapterIndex()),
+                        0,
+                        0,
+                        System.currentTimeMillis()
+                );
+                if (book.getLibraryCardId() != null) doneProg.setLibraryCardId(book.getLibraryCardId());
+                if (book.getDocumentUuid() != null) doneProg.setDocumentUuid(book.getDocumentUuid());
+                dbHelper.saveProgress(doneProg);
+                if (syncManager != null) {
+                    syncManager.saveAndSyncProgress(doneProg, true, null);
+                }
                 moveBookToShelf(book, "done", new Runnable() {
                     @Override
                     public void run() {
                         btnShelfDone.setEnabled(true);
                         curShelfRef[0] = "done";
                         updateShelfButtonStyles(btnShelfReading, btnShelfToRead, btnShelfDone, "done");
-                        EinkNotice.show(MainActivity.this, "Полка", "«" + book.getTitle() + "» перенесена в раздел «Прочитано».");
+                        EinkNotice.show(MainActivity.this, "Полка", "«" + book.getTitle() + "» отмечена на 100% и перенесена в «Прочитано».");
                         adapter.notifyDataSetChanged();
                     }
                 });

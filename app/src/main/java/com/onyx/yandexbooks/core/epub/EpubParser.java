@@ -197,6 +197,7 @@ public class EpubParser {
             // 4. Загрузка глав непосредственно из spine с сохранением HTML/CSS разметки и ссылок
             Map<Integer, String> rawHtmlCache = new HashMap<>();
             Map<String, String> cssFileCache = new HashMap<>();
+            Map<String, EpubFormatting.CssSheet> parsedCssSheetCache = new HashMap<>();
             List<ChapterData> chapters = new ArrayList<>();
 
             if (chapterHrefs.size() == 1) {
@@ -215,7 +216,7 @@ public class EpubParser {
                     if (rawHtml == null) rawHtml = "";
                     rawHtmlCache.put(s, rawHtml);
 
-                    EpubFormatting.CssSheet cssSheet = EpubFormatting.buildCssSheet(zip, rawHtml, href, cssFileCache);
+                    EpubFormatting.CssSheet cssSheet = EpubFormatting.buildCssSheet(zip, rawHtml, href, cssFileCache, parsedCssSheetCache);
                     String richText = EpubFormatting.extractRichHtmlText(rawHtml, href, cssSheet);
 
                     ChapterData cd = new ChapterData();

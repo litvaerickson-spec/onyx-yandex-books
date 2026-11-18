@@ -1262,6 +1262,83 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         }
     }
 
+    /**
+     * Заменяет синхронизированные облачные цитаты (synced = 1) только личными цитатами пользователя,
+     * сохраняя локальные несинхронизированные цитаты (synced = 0).
+     */
+    public synchronized void replaceSyncedCloudQuotes(String bookUuid, List<Quote> personalCloudQuotes) {
+        if (bookUuid == null || bookUuid.isEmpty()) return;
+        try {
+            SQLiteDatabase db = getWritableDatabase();
+            ensureQuotesTable(db);
+            db.delete("quotes", "book_uuid = ? AND synced = 1", new String[]{bookUuid});
+            if (personalCloudQuotes != null && !personalCloudQuotes.isEmpty()) {
+                upsertCloudQuotes(bookUuid, personalCloudQuotes);
+            }
+        } catch (Exception e) {
+            android.util.Log.e("DatabaseHelper", "Failed to replace synced cloud quotes", e);
+        }
+    }
+
+    /**
+     * Однократная очистка облачных цитат (synced = 1) после обновления с 2.0.0,
+     * куда могли попасть чужие публичные цитаты из /books/{uuid}/quotes.
+     */
+    public synchronized void purgeLegacyCloudQuotesIfNeeded(AppSettings settings) {
+        if (settings == null || settings.isQuotesPurgedV201()) return;
+        try {
+            SQLiteDatabase db = getWritableDatabase();
+            ensureQuotesTable(db);
+            db.delete("quotes", "synced = 1", null);
+            settings.setQuotesPurgedV201(true);
+        } catch (Exception e) {
+            android.util.Log.w("DatabaseHelper", "Failed to purge legacy cloud quotes", e);
+        }
+    }
+
+    /**
+     * Полная очистка пользовательских данных и внешнего бэкапа при выходе из аккаунта,
+     * чтобы при повторном входе или переустановке не восстанавливался прежний аккаунт.
+     */
+    public synchronized void clearUserAccountDataOnLogout(Context context) {
+        try {
+            SQLiteDatabase db = getWritableDatabase();
+            for (String tbl : new String[]{"books", "chapters", "progress", "bookmarks", "quotes", "sync_queue", "hidden_books"}) {
+                try {
+                    db.delete(tbl, null, null);
+                } catch (Throwable ignored) {}
+            }
+        } catch (Throwable t) {
+            android.util.Log.w("DatabaseHelper", "Failed to clear DB on logout", t);
+        }
+
+        if (context == null) return;
+        try {
+            new com.onyx.yandexbooks.core.auth.TokenStorage(context).clear();
+        } catch (Throwable ignored) {}
+
+        try {
+            java.io.File extDir = android.os.Environment.getExternalStorageDirectory();
+            if (extDir != null && extDir.exists()) {
+                java.io.File backupDir = new java.io.File(extDir, "Books/YandexBooks/backup");
+                if (backupDir.exists()) {
+                    for (String name : new String[]{
+                            "backup_meta.json",
+                            DATABASE_NAME,
+                            DATABASE_NAME + "-wal",
+                            DATABASE_NAME + "-shm",
+                            DATABASE_NAME + "-journal"
+                    }) {
+                        java.io.File f = new java.io.File(backupDir, name);
+                        if (f.exists()) f.delete();
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            android.util.Log.w("DatabaseHelper", "Failed to remove backup files on logout", t);
+        }
+    }
+
     public static class BackupSummary {
         public boolean success;
         public int booksCount;
@@ -1336,6 +1413,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             meta.put("edge_brightness_swipe", settings.isEdgeBrightnessSwipeEnabled());
             meta.put("audio_sync_enabled", settings.isAudioSyncEnabled());
             meta.put("use_epub_fonts", settings.isUseEpubFonts());
+            meta.put("text_align_mode", settings.getTextAlignMode());
             meta.put("panel_size_mode", settings.getPanelSizeMode());
             meta.put("card_density_mode", settings.getCardDensityMode());
             meta.put("reader_footer_offset_dp", settings.getReaderFooterOffsetDp());
@@ -1403,12 +1481,16 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 fis.close();
 
                 org.json.JSONObject meta = new org.json.JSONObject(sb.toString());
-                String token = meta.optString("access_token", "");
-                if (!token.isEmpty()) {
-                    ts.saveTokens(token, meta.optString("refresh_token", ""), 31536000L);
-                    ts.setUserLogin(meta.optString("user_login", ""));
-                    restoredAny = true;
+                if (meta.optBoolean("logged_out", false)) {
+                    return false;
                 }
+                String token = meta.optString("access_token", "");
+                if (token.isEmpty()) {
+                    return false;
+                }
+                ts.saveTokens(token, meta.optString("refresh_token", ""), 31536000L);
+                ts.setUserLogin(meta.optString("user_login", ""));
+                restoredAny = true;
                 AppSettings settings = new AppSettings(context);
                 if (meta.has("ui_scale")) settings.setUiScale((float) meta.optDouble("ui_scale", 1.0));
                 if (meta.has("reader_mode")) settings.setReaderMode(meta.optString("reader_mode", AppSettings.READER_MODE_ONYX));
@@ -1430,13 +1512,14 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 if (meta.has("edge_brightness_swipe")) settings.setEdgeBrightnessSwipeEnabled(meta.optBoolean("edge_brightness_swipe", true));
                 if (meta.has("audio_sync_enabled")) settings.setAudioSyncEnabled(meta.optBoolean("audio_sync_enabled", true));
                 if (meta.has("use_epub_fonts")) settings.setUseEpubFonts(meta.optBoolean("use_epub_fonts", false));
+                if (meta.has("text_align_mode")) settings.setTextAlignMode(meta.optString("text_align_mode", AppSettings.TEXT_ALIGN_JUSTIFY));
                 if (meta.has("panel_size_mode")) settings.setPanelSizeMode(meta.optString("panel_size_mode", AppSettings.PANEL_SIZE_COMFORTABLE));
                 if (meta.has("card_density_mode")) settings.setCardDensityMode(meta.optString("card_density_mode", AppSettings.CARD_DENSITY_NORMAL));
                 if (meta.has("reader_footer_offset_dp")) settings.setReaderFooterOffsetDp(meta.optInt("reader_footer_offset_dp", AppSettings.DEFAULT_FOOTER_OFFSET_DP));
             }
 
             java.io.File backupDb = new java.io.File(backupDir, DATABASE_NAME);
-            if (backupDb.exists() && backupDb.length() > 0 && (getBooksCountByShelf("reading") + getBooksCountByShelf("to_read") == 0)) {
+            if (restoredAny && backupDb.exists() && backupDb.length() > 0 && (getBooksCountByShelf("reading") + getBooksCountByShelf("to_read") == 0)) {
                 try {
                     close();
                 } catch (Throwable ignored) {}

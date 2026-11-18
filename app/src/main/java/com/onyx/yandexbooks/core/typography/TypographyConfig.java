@@ -31,6 +31,7 @@ public class TypographyConfig implements Serializable {
 
     private boolean isHyphenationEnabled = true;
     private boolean isJustifyEnabled = true;
+    private String textAlignMode = "justify"; // justify, left, book
     private boolean isBoldText = false; // Натуральная четкая отрисовка без искусственного утолщения
     private String fontFamily = "literata"; // literata, charis_sil, pt_serif, pt_sans, serif, sans-serif, monospace
     private String contrastMode = "normal"; // normal, high
@@ -79,8 +80,29 @@ public class TypographyConfig implements Serializable {
     public boolean isHyphenationEnabled() { return isHyphenationEnabled; }
     public void setHyphenationEnabled(boolean hyphenationEnabled) { isHyphenationEnabled = hyphenationEnabled; }
 
-    public boolean isJustifyEnabled() { return isJustifyEnabled; }
-    public void setJustifyEnabled(boolean justifyEnabled) { isJustifyEnabled = justifyEnabled; }
+    public boolean isJustifyEnabled() { return isJustifyEnabled && !"left".equalsIgnoreCase(textAlignMode); }
+    public void setJustifyEnabled(boolean justifyEnabled) {
+        isJustifyEnabled = justifyEnabled;
+        if (!justifyEnabled) {
+            this.textAlignMode = "left";
+        } else if ("left".equalsIgnoreCase(this.textAlignMode)) {
+            this.textAlignMode = "justify";
+        }
+    }
+
+    public String getTextAlignMode() { return textAlignMode != null ? textAlignMode : "justify"; }
+    public void setTextAlignMode(String mode) {
+        if ("left".equalsIgnoreCase(mode)) {
+            this.textAlignMode = "left";
+            this.isJustifyEnabled = false;
+        } else if ("book".equalsIgnoreCase(mode)) {
+            this.textAlignMode = "book";
+            this.isJustifyEnabled = true;
+        } else {
+            this.textAlignMode = "justify";
+            this.isJustifyEnabled = true;
+        }
+    }
 
     public boolean isBoldText() { return isBoldText; }
     public void setBoldText(boolean boldText) { isBoldText = boldText; }

@@ -72,6 +72,8 @@ public class AppSettings {
     public static final int MIN_FOOTER_OFFSET_DP = 6;
     public static final int MAX_FOOTER_OFFSET_DP = 48;
 
+    private static final String KEY_QUOTES_PURGED_V201 = "quotes_purged_v201";
+
     private final SharedPreferences prefs;
 
     public AppSettings(Context context) {
@@ -194,6 +196,10 @@ public class AppSettings {
     public static final String KEY_EDGE_BRIGHTNESS_SWIPE = "edge_brightness_swipe";
     public static final String KEY_AUDIO_SYNC_ENABLED = "audio_sync_enabled";
     public static final String KEY_USE_EPUB_FONTS = "use_epub_fonts";
+    public static final String KEY_TEXT_ALIGN_MODE = "text_align_mode";
+    public static final String TEXT_ALIGN_JUSTIFY = "justify";
+    public static final String TEXT_ALIGN_LEFT = "left";
+    public static final String TEXT_ALIGN_BOOK = "book";
 
     public int getFontSizeSp() { return prefs.getInt(KEY_FONT_SIZE, 18); }
     public void setFontSizeSp(int size) { prefs.edit().putInt(KEY_FONT_SIZE, size).apply(); }
@@ -233,6 +239,20 @@ public class AppSettings {
 
     public boolean isUseEpubFonts() { return prefs.getBoolean(KEY_USE_EPUB_FONTS, false); }
     public void setUseEpubFonts(boolean enabled) { prefs.edit().putBoolean(KEY_USE_EPUB_FONTS, enabled).apply(); }
+
+    public String getTextAlignMode() {
+        String val = prefs.getString(KEY_TEXT_ALIGN_MODE, TEXT_ALIGN_JUSTIFY);
+        if (TEXT_ALIGN_LEFT.equalsIgnoreCase(val)) return TEXT_ALIGN_LEFT;
+        if (TEXT_ALIGN_BOOK.equalsIgnoreCase(val)) return TEXT_ALIGN_BOOK;
+        return TEXT_ALIGN_JUSTIFY;
+    }
+
+    public void setTextAlignMode(String mode) {
+        String safe = TEXT_ALIGN_JUSTIFY;
+        if (TEXT_ALIGN_LEFT.equalsIgnoreCase(mode)) safe = TEXT_ALIGN_LEFT;
+        else if (TEXT_ALIGN_BOOK.equalsIgnoreCase(mode)) safe = TEXT_ALIGN_BOOK;
+        prefs.edit().putString(KEY_TEXT_ALIGN_MODE, safe).apply();
+    }
 
     public int getEdgeFrontlightCold() { return clampBrightness(prefs.getInt("edge_frontlight_cold", 50)); }
     public void setEdgeFrontlightCold(int level) { prefs.edit().putInt("edge_frontlight_cold", clampBrightness(level)).apply(); }
@@ -288,4 +308,12 @@ public class AppSettings {
 
     public int getInt(String key, int defValue) { return prefs.getInt(key, defValue); }
     public void putInt(String key, int value) { prefs.edit().putInt(key, value).apply(); }
+
+    public boolean isQuotesPurgedV201() {
+        return prefs.getBoolean(KEY_QUOTES_PURGED_V201, false);
+    }
+
+    public void setQuotesPurgedV201(boolean purged) {
+        prefs.edit().putBoolean(KEY_QUOTES_PURGED_V201, purged).apply();
+    }
 }

@@ -69,7 +69,7 @@ public class AuthActivity extends Activity {
     private volatile boolean isCloudPolling = false;
 
     private static final String BOOKMATE_CLIENT_ID = "4483e97bab6e486a9822973109a14d05";
-    private static final String DIRECT_AUTH_URL = "https://oauth.yandex.ru/authorize?response_type=token&client_id=" + BOOKMATE_CLIENT_ID;
+    private static final String DIRECT_AUTH_URL = "https://oauth.yandex.ru/authorize?response_type=token&client_id=" + BOOKMATE_CLIENT_ID + "&force_confirm=yes";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {

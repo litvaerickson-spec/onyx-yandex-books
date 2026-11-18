@@ -163,16 +163,47 @@ public class EpubFormatting {
         }
     }
 
+    private static final Pattern CSS_COMMENT_PATTERN = Pattern.compile("(?s)/\\*.*?\\*/");
+    private static final Pattern CSS_AT_RULE_PATTERN = Pattern.compile("(?is)@(?:font-face|page|import|charset|namespace)[^{;]*(?:\\{[^}]*\\}|;)");
+    private static final Pattern CSS_RULE_PATTERN = Pattern.compile("([^{}@]+)\\{([^}]*)\\}");
+    private static final Pattern ZERO_CSS_LEN_PATTERN = Pattern.compile("^0(?:\\.?0+)?(?:px|em|rem|pt|%|mm|cm|ex)?$");
+    private static final Pattern POS_CSS_LEN_PATTERN = Pattern.compile("^([0-9]+(?:\\.[0-9]+)?)\\s*(em|rem|pt|px|%)?$");
+    private static final Pattern HTML_ENTITY_NUM_PATTERN = Pattern.compile("&#(x[0-9a-fA-F]+|[0-9]+);");
+    private static final Pattern IMG_TAG_PATTERN = Pattern.compile("<img\\b[^>]*?src\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SVG_IMG_PATTERN = Pattern.compile("<image\\b[^>]*?(?:xlink:href|href)\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
+    private static final Pattern BODY_TAG_PATTERN = Pattern.compile("(?is)<body\\b[^>]*>(.*)</body>");
+    private static final Pattern STRIP_HEAD_PATTERN = Pattern.compile("(?is)<(script|style|head)\\b[^>]*>.*?</\\1>");
+    private static final Pattern HR_TAG_PATTERN = Pattern.compile("(?i)<hr\\b[^>]*/?>");
+    private static final Pattern EMPTY_P_TAG_PATTERN = Pattern.compile("(?i)<p[^>]*>(\\s*|&nbsp;|<br\\s*/?>|\\*\\s*\\*\\s*\\*)</p>");
+    private static final Pattern ATTR_ID_PATTERN = Pattern.compile("(?is)(?:^|\\s)id\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))");
+    private static final Pattern ATTR_CLASS_PATTERN = Pattern.compile("(?is)(?:^|\\s)class\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))");
+    private static final Pattern ATTR_ALIGN_PATTERN = Pattern.compile("(?is)(?:^|\\s)align\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))");
+    private static final Pattern ATTR_STYLE_PATTERN = Pattern.compile("(?is)(?:^|\\s)style\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))");
+    private static final Pattern ATTR_HREF_PATTERN = Pattern.compile("(?is)(?:^|\\s)href\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))");
+
     public static final class CssSheet {
         private final Map<String, CssRuleProps> rules = new HashMap<>();
 
+        public void mergeSheet(CssSheet other) {
+            if (other == null || other.rules.isEmpty()) return;
+            for (Map.Entry<String, CssRuleProps> e : other.rules.entrySet()) {
+                CssRuleProps existing = rules.get(e.getKey());
+                if (existing == null) {
+                    CssRuleProps copy = new CssRuleProps();
+                    copy.mergeFrom(e.getValue());
+                    rules.put(e.getKey(), copy);
+                } else {
+                    existing.mergeFrom(e.getValue());
+                }
+            }
+        }
+
         public void parseCss(String cssText) {
             if (cssText == null || cssText.isEmpty()) return;
-            String cleaned = cssText.replaceAll("(?s)/\\*.*?\\*/", " ");
+            String cleaned = CSS_COMMENT_PATTERN.matcher(cssText).replaceAll(" ");
             // Игнорируем @font-face / @page / @media оболочки при разборе простых правил
-            cleaned = cleaned.replaceAll("(?is)@(?:font-face|page|import|charset|namespace)[^{;]*(?:\\{[^}]*\\}|;)", " ");
-            Pattern rulePat = Pattern.compile("([^{}@]+)\\{([^}]*)\\}");
-            Matcher m = rulePat.matcher(cleaned);
+            cleaned = CSS_AT_RULE_PATTERN.matcher(cleaned).replaceAll(" ");
+            Matcher m = CSS_RULE_PATTERN.matcher(cleaned);
             while (m.find()) {
                 String selectorGroup = m.group(1);
                 String decls = m.group(2);
@@ -295,12 +326,12 @@ public class EpubFormatting {
 
         private static boolean isZeroCssLength(String val) {
             if (val == null || val.isEmpty()) return false;
-            return val.matches("^0(?:\\.?0+)?(?:px|em|rem|pt|%|mm|cm|ex)?$");
+            return ZERO_CSS_LEN_PATTERN.matcher(val).matches();
         }
 
         private static boolean isPositiveCssLength(String val) {
             if (val == null || val.isEmpty()) return false;
-            Matcher m = Pattern.compile("^([0-9]+(?:\\.[0-9]+)?)\\s*(em|rem|pt|px|%)?$").matcher(val);
+            Matcher m = POS_CSS_LEN_PATTERN.matcher(val);
             if (!m.find()) return false;
             try {
                 float num = Float.parseFloat(m.group(1));
@@ -314,7 +345,7 @@ public class EpubFormatting {
 
         private static boolean isSignificantIndent(String val) {
             if (val == null || val.isEmpty()) return false;
-            Matcher m = Pattern.compile("^([0-9]+(?:\\.[0-9]+)?)\\s*(em|rem|pt|px|%)?$").matcher(val);
+            Matcher m = POS_CSS_LEN_PATTERN.matcher(val);
             if (!m.find()) return false;
             try {
                 float num = Float.parseFloat(m.group(1));
@@ -374,6 +405,12 @@ public class EpubFormatting {
      * Загружает стили из подключенных .css файлов в EPUB и встроенных блоков &lt;style&gt;.
      */
     public static CssSheet buildCssSheet(ZipFile zip, String html, String chapterFileHref, Map<String, String> cssFileCache) {
+        return buildCssSheet(zip, html, chapterFileHref, cssFileCache, null);
+    }
+
+    public static CssSheet buildCssSheet(ZipFile zip, String html, String chapterFileHref,
+                                         Map<String, String> cssFileCache,
+                                         Map<String, CssSheet> parsedCssSheetCache) {
         CssSheet sheet = new CssSheet();
         if (html == null || html.isEmpty()) return sheet;
         String baseDir = "";
@@ -389,15 +426,27 @@ public class EpubFormatting {
                     String rawHref = hm.group(1);
                     String resolved = resolveZipPath(baseDir, rawHref);
                     if (!resolved.isEmpty()) {
-                        String cssText = (cssFileCache != null) ? cssFileCache.get(resolved) : null;
-                        if (cssText == null) {
-                            cssText = readZipEntryText(zip, resolved);
-                            if (cssFileCache != null && cssText != null) {
-                                cssFileCache.put(resolved, cssText);
+                        CssSheet cachedSheet = (parsedCssSheetCache != null) ? parsedCssSheetCache.get(resolved) : null;
+                        if (cachedSheet != null) {
+                            sheet.mergeSheet(cachedSheet);
+                        } else {
+                            String cssText = (cssFileCache != null) ? cssFileCache.get(resolved) : null;
+                            if (cssText == null) {
+                                cssText = readZipEntryText(zip, resolved);
+                                if (cssFileCache != null && cssText != null) {
+                                    cssFileCache.put(resolved, cssText);
+                                }
                             }
-                        }
-                        if (cssText != null && !cssText.isEmpty()) {
-                            sheet.parseCss(cssText);
+                            if (cssText != null && !cssText.isEmpty()) {
+                                if (parsedCssSheetCache != null) {
+                                    CssSheet fileSheet = new CssSheet();
+                                    fileSheet.parseCss(cssText);
+                                    parsedCssSheetCache.put(resolved, fileSheet);
+                                    sheet.mergeSheet(fileSheet);
+                                } else {
+                                    sheet.parseCss(cssText);
+                                }
+                            }
                         }
                     }
                 }
@@ -429,19 +478,19 @@ public class EpubFormatting {
             }
 
             String work = html;
-            Matcher bodyMatcher = Pattern.compile("(?is)<body\\b[^>]*>(.*)</body>").matcher(work);
+            Matcher bodyMatcher = BODY_TAG_PATTERN.matcher(work);
             if (bodyMatcher.find()) {
                 work = bodyMatcher.group(1);
             } else {
-                work = work.replaceAll("(?is)<(script|style|head)\\b[^>]*>.*?</\\1>", "");
+                work = STRIP_HEAD_PATTERN.matcher(work).replaceAll("");
             }
 
             // 1. Картинки <img> и <image> переводим в маркеры до удаления прочих тегов
             work = replaceImagesWithTokens(work, baseDir);
 
             // 2. Разделители <hr> и пустые ***-абзацы
-            work = work.replaceAll("(?i)<hr\\b[^>]*/?>", "\n___SECTION_BREAK___\n");
-            work = work.replaceAll("(?i)<p[^>]*>(\\s*|&nbsp;|<br\\s*/?>|\\*\\s*\\*\\s*\\*)</p>", "\n___SECTION_BREAK___\n");
+            work = HR_TAG_PATTERN.matcher(work).replaceAll("\n___SECTION_BREAK___\n");
+            work = EMPTY_P_TAG_PATTERN.matcher(work).replaceAll("\n___SECTION_BREAK___\n");
 
             // 3. Короткие ссылки-сноски ([1], [*]) нормализуем к виду [1] для существующих всплывающих сносок
             work = EpubParser.normalizeInlineFootnoteLinks(work);
@@ -520,8 +569,10 @@ public class EpubFormatting {
     }
 
     private static String replaceImagesWithTokens(String html, String baseDir) {
-        Pattern imgPattern = Pattern.compile("<img\\b[^>]*?src\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
-        Matcher mImg = imgPattern.matcher(html);
+        if (html == null || (!html.contains("<img") && !html.contains("<IMG") && !html.contains("<image") && !html.contains("<IMAGE"))) {
+            return html;
+        }
+        Matcher mImg = IMG_TAG_PATTERN.matcher(html);
         StringBuffer sbImg = new StringBuffer();
         while (mImg.find()) {
             String resolved = resolveZipPath(baseDir, mImg.group(1));
@@ -534,8 +585,7 @@ public class EpubFormatting {
         mImg.appendTail(sbImg);
         String text = sbImg.toString();
 
-        Pattern svgImgPattern = Pattern.compile("<image\\b[^>]*?(?:xlink:href|href)\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
-        Matcher mSvg = svgImgPattern.matcher(text);
+        Matcher mSvg = SVG_IMG_PATTERN.matcher(text);
         StringBuffer sbSvg = new StringBuffer();
         while (mSvg.find()) {
             String resolved = resolveZipPath(baseDir, mSvg.group(1));
@@ -959,8 +1009,14 @@ public class EpubFormatting {
         }
     }
 
+    private static boolean isContainerBlockTag(String tagName) {
+        return "div".equals(tagName) || "section".equals(tagName) || "article".equals(tagName)
+                || "header".equals(tagName) || "footer".equals(tagName) || "aside".equals(tagName);
+    }
+
     private static void applyTagAndCssToBlockStyle(String tagName, String classAttr, CssRuleProps css, BlockStyle style) {
         String lowerCls = classAttr != null ? classAttr.toLowerCase(Locale.US) : "";
+        boolean isContainer = isContainerBlockTag(tagName);
 
         if (isHeadingTag(tagName)) {
             style.role = tagName.charAt(1); // '1'..'6'
@@ -977,15 +1033,15 @@ public class EpubFormatting {
             style.spaceBottom = true;
         } else if ("li".equals(tagName) || "dd".equals(tagName) || "pre".equals(tagName)) {
             style.role = 'N';
-        } else if (lowerCls.contains("epigraph") || lowerCls.contains("subtitle") || lowerCls.contains("dedication")) {
+        } else if (lowerCls.contains("epigraph") || lowerCls.contains("dedication")) {
             style.role = 'E';
             style.spaceTop = true;
             style.spaceBottom = true;
-        } else if (lowerCls.contains("footnote") || lowerCls.contains("note") || lowerCls.contains("endnote")) {
+        } else if (!isContainer && (lowerCls.contains("footnote") || lowerCls.contains("endnote"))) {
             style.role = 'N';
-        } else if (lowerCls.contains("title") || lowerCls.contains("chapter") || lowerCls.contains("header")) {
+        } else if (!isContainer && (lowerCls.contains("subtitle") || lowerCls.contains("chapter-title") || lowerCls.contains("chapter_title"))) {
             if (style.role == 'P') {
-                style.role = 'E';
+                if (style.align == 'D') style.align = 'C';
                 style.spaceTop = true;
                 style.spaceBottom = true;
             }
@@ -993,10 +1049,10 @@ public class EpubFormatting {
 
         if (css != null) {
             if (css.align != '\0') style.align = css.align;
-            if (Boolean.TRUE.equals(css.noIndent) && style.role == 'P') style.role = 'N';
-            if (Boolean.TRUE.equals(css.quote)) style.role = 'Q';
-            if (Boolean.TRUE.equals(css.spaceTop)) style.spaceTop = true;
-            if (Boolean.TRUE.equals(css.spaceBottom)) style.spaceBottom = true;
+            // Не переводим обычный абзац <p> с text-indent:0 в роль 'N' (сноска), чтобы сохранялись пользовательские отступ и выравнивание по ширине
+            if (Boolean.TRUE.equals(css.quote) && !isContainer) style.role = 'Q';
+            if (Boolean.TRUE.equals(css.spaceTop) && !isContainer) style.spaceTop = true;
+            if (Boolean.TRUE.equals(css.spaceBottom) && !isContainer) style.spaceBottom = true;
             if (Boolean.TRUE.equals(css.pageBreakBefore)) style.pageBreakBefore = true;
             if (Boolean.TRUE.equals(css.pageBreakAfter)) style.pageBreakAfter = true;
         }
@@ -1055,8 +1111,7 @@ public class EpubFormatting {
                 .replace("&apos;", "'");
 
         if (text.contains("&#")) {
-            Pattern pattern = Pattern.compile("&#(x[0-9a-fA-F]+|[0-9]+);");
-            Matcher matcher = pattern.matcher(text);
+            Matcher matcher = HTML_ENTITY_NUM_PATTERN.matcher(text);
             StringBuffer sb = new StringBuffer();
             while (matcher.find()) {
                 String val = matcher.group(1);
@@ -1102,8 +1157,14 @@ public class EpubFormatting {
     }
 
     private static String extractAttr(String attrsStr, String attrName) {
-        if (attrsStr == null || attrsStr.isEmpty()) return null;
-        Pattern p = Pattern.compile("(?is)(?:^|\\s)" + Pattern.quote(attrName) + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))");
+        if (attrsStr == null || attrsStr.isEmpty() || attrsStr.indexOf('=') < 0) return null;
+        Pattern p;
+        if ("id".equals(attrName)) p = ATTR_ID_PATTERN;
+        else if ("class".equals(attrName)) p = ATTR_CLASS_PATTERN;
+        else if ("align".equals(attrName)) p = ATTR_ALIGN_PATTERN;
+        else if ("style".equals(attrName)) p = ATTR_STYLE_PATTERN;
+        else if ("href".equals(attrName)) p = ATTR_HREF_PATTERN;
+        else p = Pattern.compile("(?is)(?:^|\\s)" + Pattern.quote(attrName) + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))");
         Matcher m = p.matcher(attrsStr);
         if (m.find()) {
             if (m.group(1) != null) return m.group(1);

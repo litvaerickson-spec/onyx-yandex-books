@@ -133,8 +133,14 @@ public class ReaderActivity extends Activity {
     private boolean audioSyncPromptShown = false;
 
     // Элементы подвкладки «Формат»
+    private Button btnToggleTextAlign; // Выравнивание текста
     private Button btnToggleContrast; // Утолщение текста
-    private Button btnToggleHyphenation; // Переносы слов TeX
+    private Button btnToggleHyphenation; // Переносы слов
+
+    private static final int REQUEST_IMPORT_FONT = 7001;
+    private double pendingRepagAnchorFraction = -1.0;
+    private Runnable pendingRepagRunnable = null;
+    private Runnable pendingPrepagRunnable = null;
     private Button btnToggleEinkContrast; // Контраст E-Ink
     private Button btnToggleNightMode; // Цветовая тема (Светлая / Тёмная)
     private Button btnToggleEpubFonts; // Шрифт книги из EPUB (v1.7.0)
@@ -284,6 +290,7 @@ public class ReaderActivity extends Activity {
         }
 
         // Контролы подвкладки «Формат»
+        btnToggleTextAlign = (Button) findViewById(R.id.btn_toggle_text_align);
         btnToggleContrast = (Button) findViewById(R.id.btn_toggle_contrast);
         btnToggleHyphenation = (Button) findViewById(R.id.btn_toggle_hyphenation);
         btnToggleEinkContrast = (Button) findViewById(R.id.btn_toggle_eink_contrast);
@@ -310,6 +317,7 @@ public class ReaderActivity extends Activity {
         typographyConfig.setLineSpacingMultiplier(appSettings.getLineSpacingMultiplier());
         typographyConfig.setParagraphIndentPx(appSettings.getParagraphIndentPx());
         typographyConfig.setHyphenationEnabled(appSettings.isHyphenationEnabled());
+        typographyConfig.setTextAlignMode(appSettings.getTextAlignMode());
         typographyConfig.setBoldText(appSettings.isBoldText());
         typographyConfig.setContrastMode(appSettings.getContrastMode());
         typographyConfig.setVerticalMarginMode(appSettings.getVerticalMarginMode());
@@ -334,6 +342,7 @@ public class ReaderActivity extends Activity {
         apiClient = new YandexBooksApiClient(tokenStorage);
         cacheManager = new CacheManager(this, apiClient);
         dbHelper = DatabaseHelper.getInstance(this);
+        dbHelper.purgeLegacyCloudQuotesIfNeeded(appSettings);
         syncManager = new SyncManager(this, apiClient);
 
         if (readerCanvas != null && bookUuid != null) {
@@ -428,6 +437,11 @@ public class ReaderActivity extends Activity {
         });
 
         readerCanvas.setEdgeBrightnessEnabled(appSettings.isEdgeBrightnessSwipeEnabled());
+        int[] initialFl = EpdController.readFrontlightPercent(this);
+        if (initialFl != null && initialFl.length >= 2) {
+            appSettings.setEdgeFrontlightCold(initialFl[0]);
+            appSettings.setEdgeFrontlightWarm(initialFl[1]);
+        }
         readerCanvas.setInitialFrontlightLevels(appSettings.getEdgeFrontlightCold(), appSettings.getEdgeFrontlightWarm());
 
         readerCanvas.setOnFootnoteTapListener(new ReaderCanvasView.OnFootnoteTapListener() {
@@ -479,9 +493,9 @@ public class ReaderActivity extends Activity {
                 }
                 int cold = appSettings.getEdgeFrontlightCold();
                 int warm = appSettings.getEdgeFrontlightWarm();
-                if (EpdController.isOnyxDevice()) {
-                    EpdController.setFrontlight(ReaderActivity.this, cold, warm);
-                } else if (getWindow() != null) {
+                boolean applied = EpdController.isOnyxDevice()
+                        && EpdController.setFrontlight(ReaderActivity.this, cold, warm, isWarmEdge);
+                if (!applied && getWindow() != null) {
                     WindowManager.LayoutParams lp = getWindow().getAttributes();
                     lp.screenBrightness = Math.max(0.05f, Math.min(1.0f, newPercent / 100f));
                     getWindow().setAttributes(lp);
@@ -750,7 +764,8 @@ public class ReaderActivity extends Activity {
                     int size = 12 + seekBar.getProgress();
                     typographyConfig.setFontSizeSp(size);
                     appSettings.setFontSizeSp(size);
-                    repaginateCurrentChapter();
+                    if (fontSizeLabel != null) fontSizeLabel.setText(String.valueOf(size));
+                    scheduleDebouncedRepaginate();
                 }
             });
         }
@@ -766,7 +781,7 @@ public class ReaderActivity extends Activity {
                         appSettings.setFontSizeSp(next);
                         if (fontSizeLabel != null) fontSizeLabel.setText(String.valueOf(next));
                         if (seekbarFontSize != null) seekbarFontSize.setProgress(next - 12);
-                        repaginateCurrentChapter();
+                        scheduleDebouncedRepaginate();
                     }
                 }
             });
@@ -783,7 +798,7 @@ public class ReaderActivity extends Activity {
                         appSettings.setFontSizeSp(next);
                         if (fontSizeLabel != null) fontSizeLabel.setText(String.valueOf(next));
                         if (seekbarFontSize != null) seekbarFontSize.setProgress(next - 12);
-                        repaginateCurrentChapter();
+                        scheduleDebouncedRepaginate();
                     }
                 }
             });
@@ -872,6 +887,16 @@ public class ReaderActivity extends Activity {
 
         // Подвкладка 2: Формат (Жирный/Обычный, Переносы слов TeX, Контраст E-Ink)
         updateContrastButtonText();
+        updateTextAlignButtonText();
+        if (btnToggleTextAlign != null) {
+            btnToggleTextAlign.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    cycleTextAlignMode();
+                }
+            });
+        }
+
         if (btnToggleContrast != null) {
             btnToggleContrast.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -1033,6 +1058,7 @@ public class ReaderActivity extends Activity {
         setupRowClick(R.id.row_toggle_edge_brightness, btnToggleEdgeBrightness);
         setupRowClick(R.id.row_toggle_fullscreen, btnToggleFullscreen);
         setupRowClick(R.id.row_toggle_audio_sync, btnToggleAudioSync);
+        setupRowClick(R.id.row_toggle_text_align, btnToggleTextAlign);
         setupRowClick(R.id.row_toggle_contrast, btnToggleContrast);
         setupRowClick(R.id.row_toggle_hyphenation, btnToggleHyphenation);
         setupRowClick(R.id.row_toggle_eink_contrast, btnToggleEinkContrast);
@@ -1141,7 +1167,7 @@ public class ReaderActivity extends Activity {
         root.addView(titleView);
 
         TextView hintView = new TextView(this);
-        hintView.setText("8 оптимизированных шрифтов для экранов E-Ink");
+        hintView.setText("Встроенные шрифты, папка /Fonts устройства и импорт .ttf / .otf");
         hintView.setTextSize(10);
         hintView.setTextColor(Color.BLACK);
         hintView.setGravity(Gravity.CENTER);
@@ -1157,7 +1183,7 @@ public class ReaderActivity extends Activity {
         fontListLayout.setPadding(0, (int) (4 * density), 0, (int) (4 * density));
 
         final String currentFontId = typographyConfig.getFontFamily();
-        final List<FontHelper.FontItem> fonts = FontHelper.getAvailableFonts();
+        final List<FontHelper.FontItem> fonts = FontHelper.getAvailableFonts(this);
         final List<LinearLayout> fontItemViews = new ArrayList<LinearLayout>();
 
         final int[] focusedIndex = new int[] { 0 };
@@ -1221,9 +1247,6 @@ public class ReaderActivity extends Activity {
                     typographyConfig.setFontFamily(fontItem.id);
                     appSettings.setFontFamily(fontItem.id);
                     updateFontFamilyButtonText();
-                    if (readerCanvas != null) {
-                        readerCanvas.setTypographyConfig(typographyConfig);
-                    }
                     repaginateCurrentChapter();
                     EpdController.requestFullRefresh(ReaderActivity.this, null);
                 }
@@ -1243,6 +1266,31 @@ public class ReaderActivity extends Activity {
         bottomDivider.setBackgroundColor(Color.BLACK);
         root.addView(bottomDivider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(1, density)));
 
+        LinearLayout bottomBtnRow = new LinearLayout(this);
+        bottomBtnRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams bottomRowLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (34 * density));
+        bottomRowLp.setMargins(0, (int) (6 * density), 0, 0);
+        bottomBtnRow.setLayoutParams(bottomRowLp);
+
+        Button btnImportFont = new Button(this);
+        btnImportFont.setText("+ Добавить шрифт");
+        btnImportFont.setTextSize(11);
+        btnImportFont.setTypeface(null, Typeface.BOLD);
+        btnImportFont.setTextColor(Color.BLACK);
+        btnImportFont.setBackgroundResource(R.drawable.btn_eink_primary);
+        btnImportFont.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams btnImportLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
+        btnImportLp.setMargins(0, 0, (int) (6 * density), 0);
+        btnImportFont.setLayoutParams(btnImportLp);
+        btnImportFont.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                launchImportFontPicker();
+            }
+        });
+        bottomBtnRow.addView(btnImportFont);
+
         Button btnClose = new Button(this);
         btnClose.setText("Закрыть");
         btnClose.setTextSize(12);
@@ -1250,8 +1298,7 @@ public class ReaderActivity extends Activity {
         btnClose.setTextColor(Color.BLACK);
         btnClose.setBackgroundResource(R.drawable.btn_eink);
         btnClose.setPadding(0, 0, 0, 0);
-        LinearLayout.LayoutParams btnCloseLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (32 * density));
-        btnCloseLp.setMargins(0, (int) (6 * density), 0, 0);
+        LinearLayout.LayoutParams btnCloseLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f);
         btnClose.setLayoutParams(btnCloseLp);
         btnClose.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -1259,7 +1306,8 @@ public class ReaderActivity extends Activity {
                 dialog.dismiss();
             }
         });
-        root.addView(btnClose);
+        bottomBtnRow.addView(btnClose);
+        root.addView(bottomBtnRow);
 
         dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         dialog.setCanceledOnTouchOutside(true);
@@ -1314,6 +1362,53 @@ public class ReaderActivity extends Activity {
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));
             dialog.getWindow().setLayout(targetW, targetH);
+        }
+    }
+
+    private void launchImportFontPicker() {
+        try {
+            Intent intent;
+            if (android.os.Build.VERSION.SDK_INT >= 19) {
+                intent = new Intent("android.intent.action.OPEN_DOCUMENT");
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("*/*");
+            } else {
+                intent = new Intent(Intent.ACTION_GET_CONTENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("*/*");
+            }
+            startActivityForResult(Intent.createChooser(intent, "Выберите файл шрифта (.ttf / .otf)"), REQUEST_IMPORT_FONT);
+        } catch (android.content.ActivityNotFoundException e) {
+            try {
+                Intent fallback = new Intent(Intent.ACTION_GET_CONTENT);
+                fallback.addCategory(Intent.CATEGORY_OPENABLE);
+                fallback.setType("*/*");
+                startActivityForResult(fallback, REQUEST_IMPORT_FONT);
+            } catch (Throwable t) {
+                EinkNotice.show(this, "Шрифты",
+                        "Не найден системный проводник файлов. Вы можете скопировать файлы .ttf / .otf в папку /Fonts или /Books/Fonts на устройстве.");
+            }
+        } catch (Throwable t) {
+            EinkNotice.show(this, "Шрифты", "Не удалось открыть выбор файла шрифта: " + t.getMessage());
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_IMPORT_FONT && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            String importedId = FontHelper.importFontFromUri(this, data.getData());
+            if (importedId != null && !importedId.isEmpty()) {
+                typographyConfig.setFontFamily(importedId);
+                appSettings.setFontFamily(importedId);
+                updateFontFamilyButtonText();
+                repaginateCurrentChapter();
+                EinkNotice.show(this, "Шрифт добавлен",
+                        "Шрифт «" + FontHelper.getFontDisplayName(importedId) + "» импортирован и применён.");
+            } else {
+                EinkNotice.show(this, "Ошибка импорта",
+                        "Не удалось прочитать файл шрифта. Убедитесь, что выбран корректный файл .ttf или .otf.");
+            }
         }
     }
 
@@ -1739,6 +1834,34 @@ public class ReaderActivity extends Activity {
         return "Пусто";
     }
 
+    private void updateTextAlignButtonText() {
+        if (btnToggleTextAlign == null || typographyConfig == null) return;
+        String mode = typographyConfig.getTextAlignMode();
+        if (com.onyx.yandexbooks.core.storage.AppSettings.TEXT_ALIGN_LEFT.equalsIgnoreCase(mode)) {
+            btnToggleTextAlign.setText("По левому");
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.TEXT_ALIGN_BOOK.equalsIgnoreCase(mode)) {
+            btnToggleTextAlign.setText("Как в книге");
+        } else {
+            btnToggleTextAlign.setText("По ширине");
+        }
+    }
+
+    private void cycleTextAlignMode() {
+        String cur = typographyConfig.getTextAlignMode();
+        String next;
+        if (com.onyx.yandexbooks.core.storage.AppSettings.TEXT_ALIGN_JUSTIFY.equalsIgnoreCase(cur)) {
+            next = com.onyx.yandexbooks.core.storage.AppSettings.TEXT_ALIGN_LEFT;
+        } else if (com.onyx.yandexbooks.core.storage.AppSettings.TEXT_ALIGN_LEFT.equalsIgnoreCase(cur)) {
+            next = com.onyx.yandexbooks.core.storage.AppSettings.TEXT_ALIGN_BOOK;
+        } else {
+            next = com.onyx.yandexbooks.core.storage.AppSettings.TEXT_ALIGN_JUSTIFY;
+        }
+        typographyConfig.setTextAlignMode(next);
+        appSettings.setTextAlignMode(next);
+        updateTextAlignButtonText();
+        repaginateCurrentChapter();
+    }
+
     private void updateContrastButtonText() {
         if (btnToggleContrast == null) return;
         btnToggleContrast.setText(typographyConfig.isBoldText() ? "Жирный" : "Обычный");
@@ -1868,6 +1991,7 @@ public class ReaderActivity extends Activity {
         dst.setFooterBottomOffsetDp(src.getFooterBottomOffsetDp());
         dst.setFooterReservedHeightPx(src.getFooterReservedHeightPx());
         dst.setHyphenationEnabled(src.isHyphenationEnabled());
+        dst.setTextAlignMode(src.getTextAlignMode());
         dst.setJustifyEnabled(src.isJustifyEnabled());
         dst.setBoldText(src.isBoldText());
         dst.setNightMode(src.isNightMode());
@@ -2948,6 +3072,7 @@ public class ReaderActivity extends Activity {
                 + "|in=" + cfg.getParagraphIndentPx()
                 + "|bold=" + (cfg.isBoldText() ? 1 : 0)
                 + "|hyph=" + (cfg.isHyphenationEnabled() ? 1 : 0)
+                + "|align=" + cfg.getTextAlignMode()
                 + "|pl=" + cfg.getPaddingLeftPx()
                 + "|pr=" + cfg.getPaddingRightPx()
                 + "|pt=" + cfg.getPaddingTopPx()
@@ -2963,7 +3088,7 @@ public class ReaderActivity extends Activity {
         final long myTaskId = prepaginationTaskId.incrementAndGet();
         final List<Chapter> chaptersSnap = new ArrayList<>(chapters);
         final TypographyConfig cfgCopy = cloneTypographyConfig(typographyConfig);
-        final Paint basePaint = new Paint(readerCanvas.getTextPaint());
+        final Paint basePaint = readerCanvas.buildPaintForConfig(cfgCopy);
         final String bookId = bookUuid;
 
         prepaginationExecutor.execute(new Runnable() {
@@ -3010,6 +3135,7 @@ public class ReaderActivity extends Activity {
                                 chapterPageCounts[i] = exactCounts[i];
                                 chapterPageExact[i] = true;
                             }
+                            recalculateTotalBookPages();
                             updateMenuControls();
                             if (!currentPages.isEmpty() && currentPageIndex < currentPages.size() && readerCanvas != null) {
                                 String title = getActiveChapterTitle();
@@ -3598,11 +3724,12 @@ public class ReaderActivity extends Activity {
 
     private void loadBookQuotesCloudSyncAsync() {
         if (bookUuid == null || bookUuid.isEmpty() || apiClient == null || dbHelper == null) return;
+        dbHelper.purgeLegacyCloudQuotesIfNeeded(appSettings);
         apiClient.getBookQuotes(bookUuid, new YandexBooksApiClient.ApiCallback<List<Quote>>() {
             @Override
             public void onSuccess(List<Quote> remoteQuotes) {
-                if (remoteQuotes != null && !remoteQuotes.isEmpty()) {
-                    dbHelper.upsertCloudQuotes(bookUuid, remoteQuotes);
+                if (remoteQuotes != null) {
+                    dbHelper.replaceSyncedCloudQuotes(bookUuid, remoteQuotes);
                     invalidateChapterQuotesCache();
                     refreshCanvasChapterQuotes(true);
                 }
@@ -4032,6 +4159,9 @@ public class ReaderActivity extends Activity {
                     effectiveCharOffset = findParagraphOffset(cachedText, targetParagraph);
                 }
                 resolveTargetPagePosition(targetPage, effectiveCharOffset, anchorFraction, cachedText);
+                if (readerCanvas != null) {
+                    readerCanvas.setTypographyConfig(typographyConfig);
+                }
                 renderCurrentPage();
                 updateMenuControls();
                 isInitialLoading = false;
@@ -4046,10 +4176,8 @@ public class ReaderActivity extends Activity {
         final String chId = ch.getId();
         final String chTitle = ch.getTitle();
 
-        // Синхронизируем конфигурацию с холстом
-        readerCanvas.setTypographyConfig(typographyConfig);
-
-        final Paint paint = new Paint(readerCanvas.getTextPaint());
+        final TypographyConfig configCopy = cloneTypographyConfig(typographyConfig);
+        final Paint paint = readerCanvas.buildPaintForConfig(configCopy);
 
         int w = readerCanvas.getWidth();
         int h = readerCanvas.getHeight();
@@ -4061,8 +4189,6 @@ public class ReaderActivity extends Activity {
         final int screenHeight = h;
         lastPaginatedWidth = w;
         lastPaginatedHeight = h;
-
-        final TypographyConfig configCopy = cloneTypographyConfig(typographyConfig);
 
         final long taskId = paginationTaskId.incrementAndGet();
 
@@ -4130,6 +4256,9 @@ public class ReaderActivity extends Activity {
                                 resolveTargetPagePosition(targetPage, effectiveCharOffset, anchorFraction, rawText);
                             }
 
+                            if (readerCanvas != null) {
+                                readerCanvas.setTypographyConfig(typographyConfig);
+                            }
                             renderCurrentPage();
                             updateMenuControls();
                             isInitialLoading = false;
@@ -4221,14 +4350,14 @@ public class ReaderActivity extends Activity {
                                 if (text == null || text.trim().isEmpty()) {
                                     text = (chTitle != null && !chTitle.startsWith("ch_")) ? chTitle : "";
                                 }
-                                Paint paint = new Paint(readerCanvas.getTextPaint());
+                                TypographyConfig cfg = cloneTypographyConfig(typographyConfig);
+                                Paint paint = readerCanvas.buildPaintForConfig(cfg);
                                 int w = lastPaginatedWidth > 0 ? lastPaginatedWidth : readerCanvas.getWidth();
                                 int h = lastPaginatedHeight > 0 ? lastPaginatedHeight : readerCanvas.getHeight();
                                 if (w <= 0 || h <= 0) {
                                     w = getResources().getDisplayMetrics().widthPixels;
                                     h = getResources().getDisplayMetrics().heightPixels;
                                 }
-                                TypographyConfig cfg = cloneTypographyConfig(typographyConfig);
 
                                 List<TextPaginator.Page> pages = paginator.paginate(text, w, h, paint, cfg);
                                 if (pages != null && !pages.isEmpty()) {
@@ -4381,12 +4510,38 @@ public class ReaderActivity extends Activity {
         });
     }
 
+    private void scheduleDebouncedRepaginate() {
+        if (pendingRepagAnchorFraction < 0 && currentPages != null && !currentPages.isEmpty() && currentPageIndex < currentPages.size()) {
+            pendingRepagAnchorFraction = (double) currentPageIndex / (double) Math.max(1, currentPages.size());
+        }
+        if (pendingRepagRunnable != null) {
+            autoSaveHandler.removeCallbacks(pendingRepagRunnable);
+        }
+        pendingRepagRunnable = new Runnable() {
+            @Override
+            public void run() {
+                double anchor = pendingRepagAnchorFraction;
+                pendingRepagAnchorFraction = -1.0;
+                repaginateCurrentChapterInternal(anchor, true);
+            }
+        };
+        autoSaveHandler.postDelayed(pendingRepagRunnable, 160L);
+    }
+
     private void repaginateCurrentChapter() {
+        repaginateCurrentChapterInternal(-1.0, false);
+    }
+
+    private void repaginateCurrentChapterInternal(double anchorOverride, boolean debouncePrepag) {
         chapterPagesMemoryCache.clear();
         chapterTextMemoryCache.clear();
+        double fraction = anchorOverride;
+        if (fraction < 0 && currentPages != null && !currentPages.isEmpty() && currentPageIndex < currentPages.size()) {
+            fraction = (double) currentPageIndex / (double) Math.max(1, currentPages.size());
+        }
         if (chapters != null && !chapters.isEmpty()) {
-            int[] dims = resolveReaderCanvasDims();
-            String sig = buildPrepagSignature(dims[0], dims[1], typographyConfig);
+            final int[] dims = resolveReaderCanvasDims();
+            final String sig = buildPrepagSignature(dims[0], dims[1], typographyConfig);
             if (!sig.equals(currentPrepagConfigSig)) {
                 currentPrepagConfigSig = sig;
                 int[] cachedCounts = (cacheManager != null && bookUuid != null)
@@ -4408,15 +4563,27 @@ public class ReaderActivity extends Activity {
                             chapterPageExact[i] = false;
                         }
                     }
-                    prepaginateBookInBackground(dims[0], dims[1], sig);
+                    if (pendingPrepagRunnable != null) {
+                        autoSaveHandler.removeCallbacks(pendingPrepagRunnable);
+                        pendingPrepagRunnable = null;
+                    }
+                    if (debouncePrepag) {
+                        pendingPrepagRunnable = new Runnable() {
+                            @Override
+                            public void run() {
+                                if (sig.equals(currentPrepagConfigSig)) {
+                                    prepaginateBookInBackground(dims[0], dims[1], sig);
+                                }
+                            }
+                        };
+                        autoSaveHandler.postDelayed(pendingPrepagRunnable, 650L);
+                    } else {
+                        prepaginateBookInBackground(dims[0], dims[1], sig);
+                    }
                 }
             }
         }
         if (chapters != null && currentChapterIndex >= 0 && currentChapterIndex < chapters.size()) {
-            double fraction = -1.0;
-            if (currentPages != null && !currentPages.isEmpty() && currentPageIndex < currentPages.size()) {
-                fraction = (double) currentPageIndex / (double) Math.max(1, currentPages.size());
-            }
             loadChapterWithFraction(currentChapterIndex, fraction);
         }
     }
@@ -4531,10 +4698,73 @@ public class ReaderActivity extends Activity {
                 loadChapter(currentChapterIndex, 0);
                 scheduleAutoSaveProgress();
             } else {
-                EinkNotice.show(this, "Чтение", "Конец книги.");
+                markBookCompletedAtEnd();
             }
         } catch (Throwable t) {
             Log.e(TAG, "Error in flipPageForward", t);
+        }
+    }
+
+    private void markBookCompletedAtEnd() {
+        try {
+            boolean alreadyDone = false;
+            String cardId = null;
+            String docUuid = null;
+            if (dbHelper != null && bookUuid != null) {
+                Book b = dbHelper.getBookByUuid(bookUuid);
+                if (b != null) {
+                    alreadyDone = "done".equalsIgnoreCase(b.getShelfType()) && b.getPercent() >= 99.5;
+                    cardId = b.getLibraryCardId();
+                    docUuid = b.getDocumentUuid();
+                }
+            }
+            if (!alreadyDone) {
+                long now = System.currentTimeMillis();
+                int parIndex = calculateCurrentParagraphIndex();
+                int spineIndex = chapterIndexToSpineIndex(currentChapterIndex);
+                String opfItemId = (chapters != null && currentChapterIndex >= 0 && currentChapterIndex < chapters.size())
+                        ? chapters.get(currentChapterIndex).getOpfItemId() : "";
+                int pageCharOffset = (currentPages != null && currentPageIndex >= 0 && currentPageIndex < currentPages.size())
+                        ? Math.max(0, currentPages.get(currentPageIndex).startCharOffset) : 0;
+                String cfi = (opfItemId != null && !opfItemId.isEmpty())
+                        ? YandexBooksApiClient.buildCanonicalCfi(spineIndex, opfItemId, parIndex, pageCharOffset)
+                        : YandexBooksApiClient.generateCfi(spineIndex, parIndex);
+
+                ReadingProgress progress = new ReadingProgress(
+                        bookUuid,
+                        100.0,
+                        spineIndex,
+                        parIndex,
+                        currentPageIndex,
+                        now
+                );
+                progress.setCfi(cfi);
+                if (cardId != null && !cardId.isEmpty()) progress.setLibraryCardId(cardId);
+                if (docUuid != null && !docUuid.isEmpty()) progress.setDocumentUuid(docUuid);
+
+                if (dbHelper != null) {
+                    dbHelper.saveProgress(progress);
+                    dbHelper.updateBookShelf(bookUuid, "done");
+                }
+                if (syncManager != null) {
+                    syncManager.saveAndSyncProgress(progress, true, null);
+                }
+                if (apiClient != null) {
+                    apiClient.updateBookShelfState(bookUuid, cardId, "done", new YandexBooksApiClient.ApiCallback<Boolean>() {
+                        @Override
+                        public void onSuccess(Boolean result) {}
+                        @Override
+                        public void onError(String errorMessage) {}
+                    });
+                }
+                updateMenuControls();
+                EinkNotice.show(this, "Книга завершена", "Достигнут конец книги: отмечено 100% и перенесено на полку «Прочитано».");
+            } else {
+                EinkNotice.show(this, "Чтение", "Конец книги.");
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "Error in markBookCompletedAtEnd", t);
+            EinkNotice.show(this, "Чтение", "Конец книги.");
         }
     }
 
@@ -4660,6 +4890,8 @@ public class ReaderActivity extends Activity {
     protected void onDestroy() {
         super.onDestroy();
         autoSaveHandler.removeCallbacks(autoSaveRunnable);
+        if (pendingRepagRunnable != null) autoSaveHandler.removeCallbacks(pendingRepagRunnable);
+        if (pendingPrepagRunnable != null) autoSaveHandler.removeCallbacks(pendingPrepagRunnable);
         paginationExecutor.shutdownNow();
         prepaginationExecutor.shutdownNow();
     }

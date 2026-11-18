@@ -199,12 +199,14 @@ public class TextPaginator {
         private final Paint workPaint;
         private final Typeface baseTypeface;
         private final float baseTextSize;
+        private final boolean baseFakeBold;
         private int currentStyle = -1;
         private float currentScale = -1f;
 
         StyleMeasurer(Paint templatePaint) {
-            this.workPaint = new Paint();
+            this.workPaint = new Paint(templatePaint);
             this.baseTextSize = templatePaint.getTextSize();
+            this.baseFakeBold = templatePaint.isFakeBoldText();
             this.workPaint.setTextSize(this.baseTextSize);
             Typeface tf = null;
             try {
@@ -220,6 +222,9 @@ public class TextPaginator {
             currentStyle = style;
             currentScale = fontScale;
             workPaint.setTextSize(baseTextSize * fontScale);
+            workPaint.setTextSkewX(0f);
+            workPaint.setFakeBoldText(baseFakeBold);
+
             boolean bold = (style & STYLE_BOLD) != 0;
             boolean italic = (style & STYLE_ITALIC) != 0;
             boolean mono = (style & STYLE_MONO) != 0;
@@ -232,7 +237,14 @@ public class TextPaginator {
                     if (bold) wantStyle |= Typeface.BOLD;
                     if (italic) wantStyle |= Typeface.ITALIC;
                     if (wantStyle != baseTypeface.getStyle()) {
-                        workPaint.setTypeface(Typeface.create(baseTypeface, wantStyle));
+                        Typeface derived = Typeface.create(baseTypeface, wantStyle);
+                        workPaint.setTypeface(derived);
+                        if (bold && !derived.isBold()) {
+                            workPaint.setFakeBoldText(true);
+                        }
+                        if (italic && !derived.isItalic()) {
+                            workPaint.setTextSkewX(-0.22f);
+                        }
                     } else {
                         workPaint.setTypeface(baseTypeface);
                     }
@@ -296,7 +308,7 @@ public class TextPaginator {
 
         fullText = fullText.replace("\uFFFC", "").replace("\uFFFD", "").replace("\uFEFF", "");
 
-        float availableWidth = Math.max(40f, screenWidth - config.getPaddingLeftPx() - config.getPaddingRightPx());
+        float availableWidth = Math.max(40f, screenWidth - config.getPaddingLeftPx() - config.getPaddingRightPx() - 2f);
         float availableHeight = Math.max(40f, screenHeight - config.getPaddingTopPx() - config.getHeaderReservedHeightPx() - config.getPaddingBottomPx() - config.getFooterReservedHeightPx());
 
         Paint.FontMetrics fm = paint.getFontMetrics();
@@ -475,8 +487,46 @@ public class TextPaginator {
                             lineWords.clear();
                             lineWords.add(splitRest);
                             currentLineWidth = measurer.measureWord(splitRest, fontScale);
+                        } else if (token.pieces.size() == 1 && token.pieces.get(0).text.length() > 1) {
+                            // Принудительный посимвольный перенос сверхдлинного слова/URL, не помещающегося в ширину строки
+                            WordPiece single = token.pieces.get(0);
+                            measurer.prepare(single.style, fontScale);
+                            String remText = single.text;
+                            while (!remText.isEmpty()) {
+                                float maxPartW = Math.max(12f, effectiveAvailableWidth - currentLineWidth);
+                                if (measurer.measureWidth(remText) <= maxPartW) {
+                                    WordToken tailTok = new WordToken();
+                                    tailTok.addPiece(remText, single.style, single.linkTarget, single.linkLabel);
+                                    lineWords.add(tailTok);
+                                    currentLineWidth += measurer.measureWidth(remText);
+                                    break;
+                                }
+                                int cut = remText.length() - 1;
+                                while (cut > 1 && measurer.measureWidth(remText.substring(0, cut)) > maxPartW) {
+                                    cut--;
+                                }
+                                WordToken chunkTok = new WordToken();
+                                chunkTok.addPiece(remText.substring(0, cut), single.style, single.linkTarget, single.linkLabel);
+                                float topGap = (isFirstLineOfParagraph && !currentLines.isEmpty()) ? extraTopPx : 0f;
+                                if (!currentLines.isEmpty() && usedHeight + topGap + thisLineHeight > availableHeight) {
+                                    pages.add(new Page(pageIndex++, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
+                                    currentLines.clear();
+                                    usedHeight = 0f;
+                                    pageStartCharOffset = globalCharOffset;
+                                    topGap = 0f;
+                                }
+                                lineWords.add(chunkTok);
+                                Line built = buildLine(lineWords, measurer, effectiveAvailableWidth, alignment, fontScale,
+                                        isFirstLineOfParagraph, false, isFirstLineOfParagraph ? firstLineIndent : 0f,
+                                        leftInsetPx, isQuote, topGap, 0f, paraCharCursor, paraEndOffset);
+                                currentLines.add(built);
+                                usedHeight += topGap + thisLineHeight;
+                                isFirstLineOfParagraph = false;
+                                lineWords.clear();
+                                currentLineWidth = 0f;
+                                remText = remText.substring(cut);
+                            }
                         } else {
-                            // Длинное непереносимое слово (например, URL) помещаем на строку как есть
                             lineWords.add(token);
                             currentLineWidth += wordWidth;
                         }
@@ -521,8 +571,16 @@ public class TextPaginator {
 
                         isFirstLineOfParagraph = false;
                         lineWords.clear();
-                        lineWords.add(remainderWord);
-                        currentLineWidth = measurer.measureWord(remainderWord, fontScale);
+                        float remW = measurer.measureWord(remainderWord, fontScale);
+                        if (remW <= effectiveAvailableWidth || remainderWord.pieces.size() != 1 || remainderWord.pieces.get(0).text.length() <= 1) {
+                            lineWords.add(remainderWord);
+                            currentLineWidth = remW;
+                        } else {
+                            // Переносимое слово шире всей строки (например, при 36sp без переносов) — дробим его на следующем шаге в ветке lineWords.isEmpty()
+                            currentLineWidth = 0f;
+                            words.set(w, remainderWord);
+                            w--;
+                        }
                     }
                 }
             }
@@ -560,10 +618,19 @@ public class TextPaginator {
     private int resolveAlignment(EpubFormatting.ParsedBlockHeader header, TypographyConfig config) {
         if (header.align == 'C') return ALIGN_CENTER;
         if (header.align == 'R') return ALIGN_RIGHT;
-        if (header.align == 'L') return ALIGN_LEFT;
         if (header.role >= '1' && header.role <= '6') return ALIGN_CENTER;
         if (header.role == 'E') return ALIGN_RIGHT;
-        if (header.role == 'N') return ALIGN_LEFT;
+
+        String mode = config != null ? config.getTextAlignMode() : "justify";
+        if ("left".equalsIgnoreCase(mode)) {
+            return ALIGN_LEFT;
+        }
+        if ("book".equalsIgnoreCase(mode)) {
+            if (header.align == 'L') return ALIGN_LEFT;
+            if (header.role == 'N') return ALIGN_LEFT;
+            return config.isJustifyEnabled() ? ALIGN_JUSTIFY : ALIGN_LEFT;
+        }
+        // Режим "justify" (по умолчанию): выравниваем основной текст по ширине, игнорируя принудительный text-align:left издателя
         return config.isJustifyEnabled() ? ALIGN_JUSTIFY : ALIGN_LEFT;
     }
 
@@ -629,7 +696,7 @@ public class TextPaginator {
             float actualWidth = measurer.measureLineRuns(runs, fontScale);
             float delta = targetWidth - actualWidth;
             int spaceCount = lineWords.size() - 1;
-            if (delta > 0f && delta < targetWidth * 0.45f && spaceCount > 0) {
+            if (delta > 0f && delta < targetWidth * 0.55f && spaceCount > 0) {
                 wordSpacing = delta / spaceCount;
             }
         }

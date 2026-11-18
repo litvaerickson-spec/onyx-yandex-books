@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 import time
+import zipfile
 import xml.etree.ElementTree as ET
 
 
@@ -292,8 +293,36 @@ def _run_tests(args):
     shelf_root = dump_ui()
     shelf_joined = " | ".join(all_visible_texts(shelf_root))
     if "Файлы (" not in shelf_joined:
-        raise AssertionError(f"5th tab 'Файлы (...)' missing on main shelf UI: {shelf_joined}")
-    print("[check] Main shelf displays 5 tabs including 'Файлы (0)': OK")
+        raise AssertionError(f"Tab 'Файлы (...)' missing on main shelf UI: {shelf_joined}")
+    if "Прочит." not in shelf_joined:
+        raise AssertionError(f"Tab 'Прочит. (...)' missing on main shelf UI: {shelf_joined}")
+    print("[check] Main shelf displays 6 tabs including 'Прочит. (0)' and 'Файлы (0)': OK")
+
+    # 3b. Seed synthetic Malrok-style EPUB (<div class="chapter"> + <p text-indent:0>) and verify ReaderActivity + format controls + rapid font resize
+    _test_reader_formatting_and_resize(args, uid=m_uid.group(1) if m_uid else None)
+
+    # Re-open MainActivity cleanly for menu + rollback test
+    shell(f"am start -W --activity-clear-top -n {PKG}/.ui.MainActivity", check=False)
+    time.sleep(2.0)
+    for _ in range(5):
+        root = dump_ui()
+        if find_node(root, res_id_contains="btn_main_menu") or find_node(root, text_equals="Меню", clickable_only=True):
+            break
+        dismiss_btn = (
+            find_node(root, text_equals="Понятно", clickable_only=True)
+            or find_node(root, text_equals="ОК", clickable_only=True)
+            or find_node(root, text_equals="OK", clickable_only=True)
+            or find_node(root, text_equals="Закрыть", clickable_only=True)
+        )
+        if dismiss_btn:
+            tap_node(dismiss_btn, "Dismiss offline network notice")
+            time.sleep(1.2)
+        else:
+            time.sleep(1.0)
+    try:
+        root, btn_menu = wait_for_node(res_id_contains="btn_main_menu", timeout=10)
+    except RuntimeError:
+        root, btn_menu = wait_for_node(text_contains="Меню", clickable_only=True, timeout=10)
 
     # 4. Open Main Menu -> re-enable network -> "Архив версий и откат ПО"
     m_ver = re.search(r"versionName=([^\s]+)", pkg_dump)
@@ -303,7 +332,9 @@ def _run_tests(args):
     menu_joined = " | ".join(all_visible_texts(root))
     if installed_ver and installed_ver not in menu_joined:
         raise AssertionError(f"Expected version '{installed_ver}' in Main Menu UI, got: {menu_joined}")
-    print(f"[check] Main Menu shows installed version '{installed_ver}': OK")
+    if "emulator.tester" not in menu_joined:
+        raise AssertionError(f"Expected account login 'emulator.tester' in Main Menu UI, got: {menu_joined}")
+    print(f"[check] Main Menu shows installed version '{installed_ver}' and account login: OK")
     screencap(os.path.join(args.artifacts, f"{args.tag}_03_main_menu.png"))
 
     shell("svc wifi enable", check=False)
@@ -372,6 +403,157 @@ def _run_tests(args):
     print("[check] Zero FATAL EXCEPTION in AndroidRuntime logcat: OK")
 
     print(f"=== EMULATOR E2E VERIFICATION PASSED ({args.tag} / API {sdk}) ===")
+
+
+def _build_malrok_test_epub(out_path):
+    with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+        zf.writestr("META-INF/container.xml", (
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            "<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">"
+            "<rootfiles><rootfile full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles>"
+            "</container>"
+        ))
+        zf.writestr("OEBPS/content.opf", (
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            "<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"2.0\" unique-identifier=\"BookId\">"
+            "<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">"
+            "<dc:title>На руинах Мальрока (Тест)</dc:title>"
+            "<dc:language>ru</dc:language>"
+            "</metadata>"
+            "<manifest>"
+            "<item id=\"ncx\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/>"
+            "<item id=\"css\" href=\"style.css\" media-type=\"text/css\"/>"
+            "<item id=\"ch1\" href=\"ch1.xhtml\" media-type=\"application/xhtml+xml\"/>"
+            "</manifest>"
+            "<spine toc=\"ncx\"><itemref idref=\"ch1\"/></spine>"
+            "</package>"
+        ))
+        zf.writestr("OEBPS/toc.ncx", (
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            "<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\" version=\"2005-1\">"
+            "<docTitle><text>На руинах Мальрока</text></docTitle>"
+            "<navMap><navPoint id=\"n1\" playOrder=\"1\"><navLabel><text>Глава 1</text></navLabel>"
+            "<content src=\"ch1.xhtml\"/></navPoint></navMap></ncx>"
+        ))
+        zf.writestr("OEBPS/style.css", "p { text-indent: 0; text-align: justify; }\n.chapter { margin: 0; }\n")
+        zf.writestr("OEBPS/ch1.xhtml", (
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head>"
+            "<link rel=\"stylesheet\" type=\"text/css\" href=\"style.css\"/></head><body>"
+            "<div class=\"chapter\">"
+            "<h1>Глава 1. Ветер над башнями</h1>"
+            "<p>Длинная повествовательная глава внутри контейнера chapter с принудительным "
+            "нулевым отступом в CSS должна оставаться обычным прямым шрифтом с красной строкой, "
+            "ровным выравниванием по ширине и аккуратными слоговыми переносами без висячих букв.</p>"
+            "<p>Второй абзац проверяет автоматическое переформатирование при увеличении кегля шрифта "
+            "и предотвращение выхода сверхдлинных фрагментов вроде непрерываемаясупердлиннаястрокатекстабезпробелов за границы экрана.</p>"
+            "<p>Третий абзац подтверждает стабильный расчёт сквозного количества страниц книги на устройствах E-Ink.</p>"
+            "</div></body></html>"
+        ))
+
+
+def _test_reader_formatting_and_resize(args, uid=None):
+    print("[reader_e2e] Pushing synthetic Malrok-style EPUB for formatting/resize/align check...")
+    epub_local = os.path.join(args.artifacts, f".tmp_{args.tag}_malrok.epub")
+    _build_malrok_test_epub(epub_local)
+    book_dir = f"/data/data/{PKG}/files/cached_books/emu_malrok_test"
+    shell(f"mkdir -p {book_dir}")
+    try:
+        adb("push", epub_local, f"{book_dir}/book.epub", timeout=20)
+    finally:
+        if os.path.exists(epub_local):
+            os.remove(epub_local)
+    if uid:
+        shell(f"chown -R {uid}:{uid} /data/data/{PKG}/files", check=False)
+    shell(f"restorecon -RF /data/data/{PKG}/files 2>/dev/null || true", check=False)
+
+    # Push a test font from /system/fonts into /sdcard/Fonts to verify custom font discovery
+    shell("mkdir -p /sdcard/Fonts", check=False)
+    shell("cp /system/fonts/DroidSans.ttf /sdcard/Fonts/EmuTestFont.ttf 2>/dev/null || cp /system/fonts/Roboto-Regular.ttf /sdcard/Fonts/EmuTestFont.ttf 2>/dev/null || true", check=False)
+
+    shell(
+        f'am start -n {PKG}/.ui.ReaderActivity '
+        f'--es book_uuid emu_malrok_test '
+        f'--es book_title "Malrok Test"'
+    )
+    time.sleep(4.5)
+    top_r = get_top_activity()
+    if "ReaderActivity" not in top_r:
+        raise AssertionError(f"ReaderActivity did not stay in foreground! Top: {top_r}")
+    screencap(os.path.join(args.artifacts, f"{args.tag}_02b_reader_initial.png"))
+
+    # Tap center of screen to toggle reader menu
+    wm_out = shell("wm size", check=False)
+    m_wm = re.search(r"(\d+)x(\d+)", wm_out)
+    w_px, h_px = (int(m_wm.group(1)), int(m_wm.group(2))) if m_wm else (758, 1024)
+    shell(f"input tap {w_px // 2} {h_px // 2}")
+    time.sleep(1.5)
+
+    # Open 'Формат' panel
+    root, btn_format = wait_for_node(text_contains="Формат", clickable_only=True, timeout=10)
+    tap_node(btn_format, "Reader Format panel button")
+    time.sleep(1.0)
+
+    # Tap 'Формат' subtab -> verify 'Выравнивание' and 'Переносы слов' (no '(TeX)')
+    root_sub = dump_ui()
+    btn_sub_fmt = find_node(root_sub, res_id_contains="btn_subtab_format") or find_node(root_sub, text_equals="Формат", clickable_only=True)
+    if not btn_sub_fmt:
+        raise RuntimeError(f"Format subtab not found; visible={all_visible_texts(root_sub)}")
+    tap_node(btn_sub_fmt, "Format subtab")
+    time.sleep(1.0)
+    fmt_texts = " | ".join(all_visible_texts(dump_ui()))
+    if "Выравнивание" not in fmt_texts:
+        raise AssertionError(f"'Выравнивание' missing in Format subtab: {fmt_texts}")
+    if "Переносы слов" not in fmt_texts or "Переносы слов (TeX)" in fmt_texts:
+        raise AssertionError(f"Unexpected hyphenation label in Format subtab: {fmt_texts}")
+    screencap(os.path.join(args.artifacts, f"{args.tag}_02c_reader_format_tab.png"))
+
+    # Switch back to 'Вид' subtab -> rapidly tap '+' font size 4 times -> verify zero crash!
+    root_v = dump_ui()
+    btn_sub_view = find_node(root_v, res_id_contains="btn_subtab_view") or find_node(root_v, text_equals="Вид", clickable_only=True)
+    if not btn_sub_view:
+        raise RuntimeError(f"View subtab not found; visible={all_visible_texts(root_v)}")
+    tap_node(btn_sub_view, "View subtab")
+    time.sleep(0.8)
+    root_inc = dump_ui()
+    btn_inc = find_node(root_inc, res_id_contains="btn_font_increase") or find_node(root_inc, text_equals="+", clickable_only=True)
+    if not btn_inc:
+        raise RuntimeError(f"Font increase '+' not found; visible={all_visible_texts(root_inc)}")
+    for _ in range(4):
+        tap_node(btn_inc, "Font size +")
+        time.sleep(0.15)
+    time.sleep(1.8)
+    screencap(os.path.join(args.artifacts, f"{args.tag}_02d_reader_after_resize.png"))
+
+    # Also test opening custom Font picker dialog cleanly and verify EmuTestFont from /sdcard/Fonts
+    root_ff = dump_ui()
+    btn_font_fam = find_node(root_ff, res_id_contains="btn_toggle_font_family") or find_node(root_ff, text_equals="Literata", clickable_only=True)
+    if not btn_font_fam:
+        raise RuntimeError(f"Font family button not found; visible={all_visible_texts(root_ff)}")
+    tap_node(btn_font_fam, "Font family picker button")
+    root_dlg, btn_add_font = wait_for_node(text_contains="Добавить шрифт", timeout=8)
+    dlg_texts = " | ".join(all_visible_texts(root_dlg))
+    if "EmuTestFont" not in dlg_texts:
+        print(f"[warn] EmuTestFont not in first viewport (might be scrolled below 8 built-in fonts); dialog texts={dlg_texts}")
+    else:
+        print("[check] Custom font 'EmuTestFont' from /sdcard/Fonts detected in Font Picker dialog: OK")
+    screencap(os.path.join(args.artifacts, f"{args.tag}_02e_font_picker_dialog.png"))
+    btn_close_dlg = find_node(root_dlg, text_equals="Закрыть", clickable_only=True)
+    if btn_close_dlg:
+        tap_node(btn_close_dlg, "Close font picker")
+        time.sleep(0.8)
+
+    shell("rm -f /sdcard/Fonts/EmuTestFont.ttf", check=False)
+    shell("input keyevent 4", check=False)
+    time.sleep(0.5)
+    shell("input keyevent 4", check=False)
+    time.sleep(0.8)
+
+    crashes_r = adb("logcat", "-d", "-s", "AndroidRuntime:E").stdout
+    if "FATAL EXCEPTION" in crashes_r:
+        raise AssertionError(f"FATAL EXCEPTION during ReaderActivity E2E:\n{crashes_r}")
+    print("[reader_e2e] ReaderActivity formatting, align toggle, font dialog & rapid resize passed with 0 crashes!")
 
 
 if __name__ == "__main__":

@@ -628,7 +628,40 @@
                         android:includeFontPadding="false" />
                 </LinearLayout>
 
-                <!-- Переносы слов TeX -->
+                <!-- Выравнивание текста -->
+                <LinearLayout
+                    android:id="@+id/row_toggle_text_align"
+                    android:layout_width="match_parent"
+                    android:layout_height="42dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Выравнивание"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/eink_black" />
+
+                    <Button
+                        android:id="@+id/btn_toggle_text_align"
+                        android:layout_width="140dp"
+                        android:layout_height="36dp"
+                        android:minHeight="36dp"
+                        android:minWidth="36dp"
+                        android:text="По ширине"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/btn_eink_text_color"
+                        android:background="@drawable/btn_eink"
+                        android:includeFontPadding="false" />
+                </LinearLayout>
+
+                <!-- Переносы слов -->
                 <LinearLayout
                     android:id="@+id/row_toggle_hyphenation"
                     android:layout_width="match_parent"
@@ -643,7 +676,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="Переносы слов (TeX)"
+                        android:text="Переносы слов"
                         android:textSize="12sp"
                         android:textStyle="bold"
                         android:textColor="@color/eink_black" />

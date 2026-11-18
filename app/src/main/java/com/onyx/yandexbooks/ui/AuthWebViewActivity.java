@@ -39,7 +39,7 @@ public class AuthWebViewActivity extends Activity {
 
     private static final String TAG = "AuthWebView";
     private static final String BOOKMATE_CLIENT_ID = "4483e97bab6e486a9822973109a14d05";
-    private static final String AUTH_URL = "https://oauth.yandex.ru/authorize?response_type=token&client_id=" + BOOKMATE_CLIENT_ID + "&lang=ru";
+    private static final String AUTH_URL = "https://oauth.yandex.ru/authorize?response_type=token&client_id=" + BOOKMATE_CLIENT_ID + "&lang=ru&force_confirm=yes";
     private static final Pattern TOKEN_PATTERN = Pattern.compile("y0_[A-Za-z0-9_-]{15,}");
 
     private EinkWebView webView;
@@ -97,7 +97,35 @@ public class AuthWebViewActivity extends Activity {
         });
 
         setupWebView();
+        clearWebViewSessionCookies();
         webView.loadUrl(AUTH_URL);
+    }
+
+    @SuppressWarnings("deprecation")
+    private void clearWebViewSessionCookies() {
+        try {
+            android.webkit.CookieSyncManager.createInstance(this);
+            android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+            if (cm != null) {
+                cm.removeSessionCookie();
+                cm.removeAllCookie();
+                try {
+                    java.lang.reflect.Method flush = cm.getClass().getMethod("flush");
+                    flush.invoke(cm);
+                } catch (Throwable ignored) {}
+            }
+            android.webkit.CookieSyncManager.getInstance().sync();
+        } catch (Throwable ignored) {}
+        try {
+            android.webkit.WebStorage.getInstance().deleteAllData();
+        } catch (Throwable ignored) {}
+        try {
+            if (webView != null) {
+                webView.clearCache(true);
+                webView.clearHistory();
+                webView.clearFormData();
+            }
+        } catch (Throwable ignored) {}
     }
 
     @Override
