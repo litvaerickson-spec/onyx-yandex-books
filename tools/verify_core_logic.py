@@ -2285,7 +2285,7 @@ def test_v1510_reverse_landscape_and_bidirectional_cloud_sync():
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert "1.5." in v_str or v_str in ("1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"), f"VERSION должен быть 1.5.x или 1.6.x, получено: {v_str}"
+    assert "1.5." in v_str or v_str in ("1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"), f"VERSION должен быть 1.5.x или 1.6.x, получено: {v_str}"
 
     gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(gradle_file, "r", encoding="utf-8") as f:
@@ -2376,7 +2376,7 @@ def test_v1511_beta_ui_scaling_and_offline_reading_cloud_sync():
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str.startswith("1.5.") or v_str in ("1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"), f"VERSION должен быть >= 1.5.11-beta, получено: {v_str}"
+    assert v_str.startswith("1.5.") or v_str in ("1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"), f"VERSION должен быть >= 1.5.11-beta, получено: {v_str}"
 
     manifest_path = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(manifest_path, "r", encoding="utf-8") as f:
@@ -2449,7 +2449,7 @@ def test_v1512_beta_eink_notice_high_contrast_and_persistent_alerts():
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str.startswith("1.5.") or v_str in ("1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"), f"VERSION должен быть >= 1.5.12-beta, получено: {v_str}"
+    assert v_str.startswith("1.5.") or v_str in ("1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"), f"VERSION должен быть >= 1.5.12-beta, получено: {v_str}"
 
     gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(gradle_file, "r", encoding="utf-8") as f:
@@ -2532,7 +2532,7 @@ def test_v1513_beta_reading_shelf_promotion_and_library_card_uuid_sync():
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str.startswith("1.5.") or v_str in ("1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"), f"VERSION должен быть >= 1.5.13-beta, получено: {v_str}"
+    assert v_str.startswith("1.5.") or v_str in ("1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"), f"VERSION должен быть >= 1.5.13-beta, получено: {v_str}"
 
     gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(gradle_file, "r", encoding="utf-8") as f:
@@ -2594,7 +2594,7 @@ def test_v1514_beta_deep_sync_race_and_reset_integrity():
     version_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(version_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str.startswith("1.5.") or v_str in ("1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"), f"VERSION должен быть >= 1.5.14-beta, получено: {v_str}"
+    assert v_str.startswith("1.5.") or v_str in ("1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"), f"VERSION должен быть >= 1.5.14-beta, получено: {v_str}"
 
     gradle_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(gradle_file, "r", encoding="utf-8") as f:
@@ -2729,7 +2729,7 @@ def test_v1515_beta_graphql_cfi_bidirectional_sync():
 
     assert "loadBooks(currentShelf)" in main_code, \
         "MainActivity.onResume обязан фоново перезапрашивать полку с сервера!"
-    assert any(v in main_code for v in ["v1.5.15-beta", "v1.5.16-beta", "v1.5.17-beta", "v1.5.18-beta", "v1.5.19-beta", "v1.5.20-beta", "v1.6.0", "v1.6.1-beta", "v1.6.2-beta", "v1.6.3-beta", "v1.6.4-beta", "v1.6.5-beta", "v1.6.6-beta", "v1.6.7-beta", "v1.7.0-beta", "v2.0.0", "v2.0.1-beta", "getCurrentVersionName(this)"]), \
+    assert any(v in main_code for v in ["v1.5.15-beta", "v1.5.16-beta", "v1.5.17-beta", "v1.5.18-beta", "v1.5.19-beta", "v1.5.20-beta", "v1.6.0", "v1.6.1-beta", "v1.6.2-beta", "v1.6.3-beta", "v1.6.4-beta", "v1.6.5-beta", "v1.6.6-beta", "v1.6.7-beta", "v1.7.0-beta", "v2.0.0", "v2.0.1-beta", "v2.0.2-beta", "getCurrentVersionName(this)"]), \
         "Интерфейс MainActivity должен отображать актуальную версию!"
     print(" - MainActivity: актуализация каталога при возврате и лейбл версии: OK")
 
@@ -2737,7 +2737,7 @@ def test_v1515_beta_graphql_cfi_bidirectional_sync():
     v_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(v_file, "r", encoding="utf-8") as f:
         v_str = f.read().strip()
-    assert v_str in ("1.5.15-beta", "1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"), f"VERSION должен быть >= 1.5.15-beta, получено: {v_str}"
+    assert v_str in ("1.5.15-beta", "1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"), f"VERSION должен быть >= 1.5.15-beta, получено: {v_str}"
 
     g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(g_file, "r", encoding="utf-8") as f:
@@ -2792,24 +2792,24 @@ def test_v1516_beta_onyx_sdk_hardware_regal_and_conflict_resolution():
     v_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(v_file, "r", encoding="utf-8") as f:
         ver = f.read().strip()
-    assert ver in ("1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"), f"VERSION ожидал >= 1.5.16-beta, получено: {ver}"
+    assert ver in ("1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"), f"VERSION ожидал >= 1.5.16-beta, получено: {ver}"
 
     g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(g_file, "r", encoding="utf-8") as f:
         g_code = f.read()
-    assert any(f'versionName "{v}"' in g_code for v in ["1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"])
-    assert any(f'versionCode {c}' in g_code for c in [49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64])
+    assert any(f'versionName "{v}"' in g_code for v in ["1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"])
+    assert any(f'versionCode {c}' in g_code for c in [49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65])
 
     m_file = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(m_file, "r", encoding="utf-8") as f:
         m_code = f.read()
-    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"])
-    assert any(f'android:versionCode="{c}"' in m_code for c in ["49", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64"])
+    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.16-beta", "1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"])
+    assert any(f'android:versionCode="{c}"' in m_code for c in ["49", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64", "65"])
 
     main_file = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java")
     with open(main_file, "r", encoding="utf-8") as f:
         main_code = f.read()
-    assert any(v in main_code for v in ["v1.5.16-beta", "v1.5.17-beta", "v1.5.18-beta", "v1.5.19-beta", "v1.5.20-beta", "v1.6.0", "v1.6.1-beta", "v1.6.2-beta", "v1.6.3-beta", "v1.6.4-beta", "v1.6.5-beta", "v1.6.6-beta", "v1.6.7-beta", "v1.7.0-beta", "v2.0.0", "v2.0.1-beta", "getCurrentVersionName(this)"])
+    assert any(v in main_code for v in ["v1.5.16-beta", "v1.5.17-beta", "v1.5.18-beta", "v1.5.19-beta", "v1.5.20-beta", "v1.6.0", "v1.6.1-beta", "v1.6.2-beta", "v1.6.3-beta", "v1.6.4-beta", "v1.6.5-beta", "v1.6.6-beta", "v1.6.7-beta", "v1.7.0-beta", "v2.0.0", "v2.0.1-beta", "v2.0.2-beta", "getCurrentVersionName(this)"])
     print(" - Версионирование (versionCode>=49, AndroidManifest, build.gradle, VERSION, MainActivity): OK")
 
     print("✅ Тест v1.5.16-beta Onyx SDK интеграция, Regal mode и диалоги конфликтов успешно пройден!\n")
@@ -2868,21 +2868,21 @@ def test_v1517_beta_hardware_buttons_dispatch_key_event():
     v_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(v_file, "r", encoding="utf-8") as f:
         ver = f.read().strip()
-    assert ver in ("1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"), f"VERSION ожидал >= 1.5.17-beta, получено: {ver}"
+    assert ver in ("1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"), f"VERSION ожидал >= 1.5.17-beta, получено: {ver}"
 
     g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(g_file, "r", encoding="utf-8") as f:
         g_code = f.read()
-    assert any(f'versionName "{v}"' in g_code for v in ["1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"])
-    assert any(f'versionCode {c}' in g_code for c in [50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64])
+    assert any(f'versionName "{v}"' in g_code for v in ["1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"])
+    assert any(f'versionCode {c}' in g_code for c in [50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65])
 
     m_file = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(m_file, "r", encoding="utf-8") as f:
         m_code = f.read()
-    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"])
-    assert any(f'android:versionCode="{c}"' in m_code for c in ["50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64"])
+    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.17-beta", "1.5.18-beta", "1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"])
+    assert any(f'android:versionCode="{c}"' in m_code for c in ["50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64", "65"])
 
-    assert any(v in main_code for v in ["v1.5.17-beta", "v1.5.18-beta", "v1.5.19-beta", "v1.5.20-beta", "v1.6.0", "v1.6.1-beta", "v1.6.2-beta", "v1.6.3-beta", "v1.6.4-beta", "v1.6.5-beta", "v1.6.6-beta", "v1.6.7-beta", "v1.7.0-beta", "v2.0.0", "v2.0.1-beta", "getCurrentVersionName(this)"])
+    assert any(v in main_code for v in ["v1.5.17-beta", "v1.5.18-beta", "v1.5.19-beta", "v1.5.20-beta", "v1.6.0", "v1.6.1-beta", "v1.6.2-beta", "v1.6.3-beta", "v1.6.4-beta", "v1.6.5-beta", "v1.6.6-beta", "v1.6.7-beta", "v1.7.0-beta", "v2.0.0", "v2.0.1-beta", "v2.0.2-beta", "getCurrentVersionName(this)"])
     print(" - Версионирование v1.5.17-beta+ (versionCode>=50, AndroidManifest, build.gradle, VERSION, MainActivity): OK")
 
     print("✅ Тест v1.5.17-beta Работоспособность боковых кнопок и перехват dispatchKeyEvent успешно пройден!\n")
@@ -2950,24 +2950,24 @@ def test_v1518_beta_touch_target_ergonomics_and_darwin7_fix():
     v_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(v_file, "r", encoding="utf-8") as f:
         ver = f.read().strip()
-    assert ver in ["1.5.18-beta", "1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"], f"VERSION ожидал >= 1.5.18-beta, получено: {ver}"
+    assert ver in ["1.5.18-beta", "1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"], f"VERSION ожидал >= 1.5.18-beta, получено: {ver}"
 
     g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(g_file, "r", encoding="utf-8") as f:
         g_code = f.read()
-    assert any(v in g_code for v in ['versionName "1.5.18-beta"', 'versionName "1.5.19-beta"', 'versionName "1.5.20-beta"', 'versionName "1.6.0"', 'versionName "1.6.1-beta"', 'versionName "1.6.2-beta"', 'versionName "1.6.3-beta"', 'versionName "1.6.4-beta"', 'versionName "1.6.5-beta"', 'versionName "1.6.6-beta"', 'versionName "1.6.7-beta"', 'versionName "1.7.0-beta"', 'versionName "2.0.0"', 'versionName "2.0.1-beta"'])
-    assert any(c in g_code for c in ['versionCode 51', 'versionCode 52', 'versionCode 53', 'versionCode 54', 'versionCode 55', 'versionCode 56', 'versionCode 57', 'versionCode 58', 'versionCode 59', 'versionCode 60', 'versionCode 61', 'versionCode 62', 'versionCode 63', 'versionCode 64'])
+    assert any(v in g_code for v in ['versionName "1.5.18-beta"', 'versionName "1.5.19-beta"', 'versionName "1.5.20-beta"', 'versionName "1.6.0"', 'versionName "1.6.1-beta"', 'versionName "1.6.2-beta"', 'versionName "1.6.3-beta"', 'versionName "1.6.4-beta"', 'versionName "1.6.5-beta"', 'versionName "1.6.6-beta"', 'versionName "1.6.7-beta"', 'versionName "1.7.0-beta"', 'versionName "2.0.0"', 'versionName "2.0.1-beta"', 'versionName "2.0.2-beta"'])
+    assert any(c in g_code for c in ['versionCode 51', 'versionCode 52', 'versionCode 53', 'versionCode 54', 'versionCode 55', 'versionCode 56', 'versionCode 57', 'versionCode 58', 'versionCode 59', 'versionCode 60', 'versionCode 61', 'versionCode 62', 'versionCode 63', 'versionCode 64', 'versionCode 65'])
 
     m_file = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(m_file, "r", encoding="utf-8") as f:
         m_code = f.read()
-    assert any(v in m_code for v in ['android:versionName="1.5.18-beta"', 'android:versionName="1.5.19-beta"', 'android:versionName="1.5.20-beta"', 'android:versionName="1.6.0"', 'android:versionName="1.6.1-beta"', 'android:versionName="1.6.2-beta"', 'android:versionName="1.6.3-beta"', 'android:versionName="1.6.4-beta"', 'android:versionName="1.6.5-beta"', 'android:versionName="1.6.6-beta"', 'android:versionName="1.6.7-beta"', 'android:versionName="1.7.0-beta"', 'android:versionName="2.0.0"', 'android:versionName="2.0.1-beta"'])
-    assert any(c in m_code for c in ['android:versionCode="51"', 'android:versionCode="52"', 'android:versionCode="53"', 'android:versionCode="54"', 'android:versionCode="55"', 'android:versionCode="56"', 'android:versionCode="57"', 'android:versionCode="58"', 'android:versionCode="59"', 'android:versionCode="60"', 'android:versionCode="61"', 'android:versionCode="62"', 'android:versionCode="63"', 'android:versionCode="64"'])
+    assert any(v in m_code for v in ['android:versionName="1.5.18-beta"', 'android:versionName="1.5.19-beta"', 'android:versionName="1.5.20-beta"', 'android:versionName="1.6.0"', 'android:versionName="1.6.1-beta"', 'android:versionName="1.6.2-beta"', 'android:versionName="1.6.3-beta"', 'android:versionName="1.6.4-beta"', 'android:versionName="1.6.5-beta"', 'android:versionName="1.6.6-beta"', 'android:versionName="1.6.7-beta"', 'android:versionName="1.7.0-beta"', 'android:versionName="2.0.0"', 'android:versionName="2.0.1-beta"', 'android:versionName="2.0.2-beta"'])
+    assert any(c in m_code for c in ['android:versionCode="51"', 'android:versionCode="52"', 'android:versionCode="53"', 'android:versionCode="54"', 'android:versionCode="55"', 'android:versionCode="56"', 'android:versionCode="57"', 'android:versionCode="58"', 'android:versionCode="59"', 'android:versionCode="60"', 'android:versionCode="61"', 'android:versionCode="62"', 'android:versionCode="63"', 'android:versionCode="64"', 'android:versionCode="65"'])
 
     main_file = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java")
     with open(main_file, "r", encoding="utf-8") as f:
         main_code = f.read()
-    assert any(v in main_code for v in ["v1.5.18-beta", "v1.5.19-beta", "v1.5.20-beta", "v1.6.0", "v1.6.1-beta", "v1.6.2-beta", "v1.6.3-beta", "v1.6.4-beta", "v1.6.5-beta", "v1.6.6-beta", "v1.6.7-beta", "v1.7.0-beta", "v2.0.0", "v2.0.1-beta", "getCurrentVersionName(this)"])
+    assert any(v in main_code for v in ["v1.5.18-beta", "v1.5.19-beta", "v1.5.20-beta", "v1.6.0", "v1.6.1-beta", "v1.6.2-beta", "v1.6.3-beta", "v1.6.4-beta", "v1.6.5-beta", "v1.6.6-beta", "v1.6.7-beta", "v1.7.0-beta", "v2.0.0", "v2.0.1-beta", "v2.0.2-beta", "getCurrentVersionName(this)"])
     print(" - Версионирование v1.5.18-beta (versionCode=51, AndroidManifest, build.gradle, VERSION, MainActivity): OK")
 
     print("✅ Тест v1.5.18-beta Эргономика тачскринов Darwin 7 и Full-Row клики успешно пройден!\n")
@@ -3017,9 +3017,9 @@ def test_v1519_beta_ota_update_reliability():
         v_json_content = f.read()
     import json
     v_data = json.loads(v_json_content)
-    assert v_data.get("versionName") in ("1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta")
-    assert v_data.get("versionCode") in (52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64)
-    assert v_data.get("tagName") in ("v1.5.19-beta", "v1.5.20-beta", "v1.6.0", "v1.6.1-beta", "v1.6.2-beta", "v1.6.3-beta", "v1.6.4-beta", "v1.6.5-beta", "v1.6.6-beta", "v1.6.7-beta", "v1.7.0-beta", "v2.0.0", "v2.0.1-beta", "getCurrentVersionName(this)")
+    assert v_data.get("versionName") in ("1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta")
+    assert v_data.get("versionCode") in (52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65)
+    assert v_data.get("tagName") in ("v1.5.19-beta", "v1.5.20-beta", "v1.6.0", "v1.6.1-beta", "v1.6.2-beta", "v1.6.3-beta", "v1.6.4-beta", "v1.6.5-beta", "v1.6.6-beta", "v1.6.7-beta", "v1.7.0-beta", "v2.0.0", "v2.0.1-beta", "v2.0.2-beta", "getCurrentVersionName(this)")
     assert "yandex-books-lite-" in v_data.get("apkUrl", "")
     print(" - version.json: валидный манифест для CDN raw.githubusercontent.com: OK")
 
@@ -3027,17 +3027,17 @@ def test_v1519_beta_ota_update_reliability():
     v_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(v_file, "r", encoding="utf-8") as f:
         ver = f.read().strip()
-    assert ver in ("1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"), f"VERSION ожидал >= 1.5.19-beta, получено: {ver}"
+    assert ver in ("1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"), f"VERSION ожидал >= 1.5.19-beta, получено: {ver}"
 
     g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(g_file, "r", encoding="utf-8") as f:
         g_code = f.read()
-    assert any(f'versionName "{v}"' in g_code for v in ["1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"])
-    assert any(f'versionCode {c}' in g_code for c in [52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64])
+    assert any(f'versionName "{v}"' in g_code for v in ["1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"])
+    assert any(f'versionCode {c}' in g_code for c in [52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65])
 
-    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"])
-    assert any(f'android:versionCode="{c}"' in m_code for c in ["52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64"])
-    assert any(v in main_code for v in ["v1.5.19-beta", "v1.5.20-beta", "v1.6.0", "v1.6.1-beta", "v1.6.2-beta", "v1.6.3-beta", "v1.6.4-beta", "v1.6.5-beta", "v1.6.6-beta", "v1.6.7-beta", "v1.7.0-beta", "v2.0.0", "v2.0.1-beta", "getCurrentVersionName(this)"])
+    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.19-beta", "1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"])
+    assert any(f'android:versionCode="{c}"' in m_code for c in ["52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64", "65"])
+    assert any(v in main_code for v in ["v1.5.19-beta", "v1.5.20-beta", "v1.6.0", "v1.6.1-beta", "v1.6.2-beta", "v1.6.3-beta", "v1.6.4-beta", "v1.6.5-beta", "v1.6.6-beta", "v1.6.7-beta", "v1.7.0-beta", "v2.0.0", "v2.0.1-beta", "v2.0.2-beta", "getCurrentVersionName(this)"])
     print(" - Версионирование v1.5.19-beta+ (versionCode>=52, AndroidManifest, build.gradle, VERSION, MainActivity): OK")
 
     print("✅ Тест v1.5.19-beta Бесперебойная доставка OTA обновлений успешно пройден!\n")
@@ -3161,9 +3161,9 @@ def test_v1520_beta_page_flip_crash_prevention_and_schema_auto_heal():
         v_json_content = f.read()
     import json
     v_data = json.loads(v_json_content)
-    assert v_data.get("versionName") in ("1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta")
-    assert v_data.get("versionCode") in (53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64)
-    assert v_data.get("tagName") in ("v1.5.20-beta", "v1.6.0", "v1.6.1-beta", "v1.6.2-beta", "v1.6.3-beta", "v1.6.4-beta", "v1.6.5-beta", "v1.6.6-beta", "v1.6.7-beta", "v1.7.0-beta", "v2.0.0", "v2.0.1-beta", "getCurrentVersionName(this)")
+    assert v_data.get("versionName") in ("1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta")
+    assert v_data.get("versionCode") in (53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65)
+    assert v_data.get("tagName") in ("v1.5.20-beta", "v1.6.0", "v1.6.1-beta", "v1.6.2-beta", "v1.6.3-beta", "v1.6.4-beta", "v1.6.5-beta", "v1.6.6-beta", "v1.6.7-beta", "v1.7.0-beta", "v2.0.0", "v2.0.1-beta", "v2.0.2-beta", "getCurrentVersionName(this)")
     assert "yandex-books-lite-" in v_data.get("apkUrl", "")
     assert v_data.get("apkSize", 0) > 3000000
     print(" - version.json: валидный манифест v1.5.20-beta+: OK")
@@ -3172,24 +3172,24 @@ def test_v1520_beta_page_flip_crash_prevention_and_schema_auto_heal():
     v_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(v_file, "r", encoding="utf-8") as f:
         ver = f.read().strip()
-    assert ver in ("1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"), f"VERSION ожидал >= 1.5.20-beta, получено: {ver}"
+    assert ver in ("1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"), f"VERSION ожидал >= 1.5.20-beta, получено: {ver}"
 
     g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(g_file, "r", encoding="utf-8") as f:
         g_code = f.read()
-    assert any(f'versionName "{v}"' in g_code for v in ["1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"])
-    assert any(f'versionCode {c}' in g_code for c in [53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64])
+    assert any(f'versionName "{v}"' in g_code for v in ["1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"])
+    assert any(f'versionCode {c}' in g_code for c in [53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65])
 
     m_file = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(m_file, "r", encoding="utf-8") as f:
         m_code = f.read()
-    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"])
-    assert any(f'android:versionCode="{c}"' in m_code for c in ["53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64"])
+    assert any(f'android:versionName="{v}"' in m_code for v in ["1.5.20-beta", "1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"])
+    assert any(f'android:versionCode="{c}"' in m_code for c in ["53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64", "65"])
 
     main_file = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java")
     with open(main_file, "r", encoding="utf-8") as f:
         main_code = f.read()
-    assert any(v in main_code for v in ["v1.5.20-beta", "v1.6.0", "v1.6.1-beta", "v1.6.2-beta", "v1.6.3-beta", "v1.6.4-beta", "v1.6.5-beta", "v1.6.6-beta", "v1.6.7-beta", "v1.7.0-beta", "v2.0.0", "v2.0.1-beta", "getCurrentVersionName(this)"])
+    assert any(v in main_code for v in ["v1.5.20-beta", "v1.6.0", "v1.6.1-beta", "v1.6.2-beta", "v1.6.3-beta", "v1.6.4-beta", "v1.6.5-beta", "v1.6.6-beta", "v1.6.7-beta", "v1.7.0-beta", "v2.0.0", "v2.0.1-beta", "v2.0.2-beta", "getCurrentVersionName(this)"])
     print(" - Версионирование v1.5.20-beta/v1.6.0 (AndroidManifest, build.gradle, VERSION, MainActivity): OK")
 
     print("✅ Тест v1.5.20-beta Устранение краша при листании страниц и авто-миграция SQLite схемы успешно пройден!\n")
@@ -3202,19 +3202,19 @@ def test_v160_stable_release_and_evolution_summary():
     v_file = os.path.join(PROJECT_DIR, "VERSION")
     with open(v_file, "r", encoding="utf-8") as f:
         ver = f.read().strip()
-    assert ver in ("1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"), f"VERSION ожидал 1.6.0+, получено: {ver}"
+    assert ver in ("1.6.0", "1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"), f"VERSION ожидал 1.6.0+, получено: {ver}"
 
     g_file = os.path.join(PROJECT_DIR, "app/build.gradle")
     with open(g_file, "r", encoding="utf-8") as f:
         g_code = f.read()
     assert f'versionName "{ver}"' in g_code
-    assert any(f'versionCode {c}' in g_code for c in (54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64))
+    assert any(f'versionCode {c}' in g_code for c in (54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65))
 
     m_file = os.path.join(PROJECT_DIR, "app/src/main/AndroidManifest.xml")
     with open(m_file, "r", encoding="utf-8") as f:
         m_code = f.read()
     assert f'android:versionName="{ver}"' in m_code
-    assert any(f'android:versionCode="{c}"' in m_code for c in (54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64))
+    assert any(f'android:versionCode="{c}"' in m_code for c in (54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65))
 
     main_file = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java")
     with open(main_file, "r", encoding="utf-8") as f:
@@ -3243,7 +3243,7 @@ def test_v160_stable_release_and_evolution_summary():
     with open(v_json_file, "r", encoding="utf-8") as f:
         v_data = json.loads(f.read())
     assert v_data.get("versionName") == ver
-    assert v_data.get("versionCode") in (54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64)
+    assert v_data.get("versionCode") in (54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65)
     assert v_data.get("tagName") == f"v{ver}"
     assert v_data.get("apkSize") == apk_size
     assert v_data.get("sha256") == actual_hash
@@ -3302,11 +3302,11 @@ def test_v161_beta_rollback_android14_omnibus_and_ergonomics():
             return fh.read()
     jb = "app/src/main/java/com/onyx/yandexbooks/"
     ver = rd("VERSION").strip()
-    assert ver in ("1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"), f"Ожидался 1.6.1-beta+, получено: {ver}"
+    assert ver in ("1.6.1-beta", "1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"), f"Ожидался 1.6.1-beta+, получено: {ver}"
     m = rd("app/src/main/AndroidManifest.xml")
     assert 'android:targetSdkVersion="28"' in m and 'android:minSdkVersion="17"' in m
     assert f'android:versionName="{ver}"' in m
-    assert any(f'android:versionCode="{c}"' in m for c in range(55, 65))
+    assert any(f'android:versionCode="{c}"' in m for c in range(55, 66))
     assert 'com.onyx.yandexbooks.fileprovider' in m and 'LocalFileProvider' in m
     assert "--v3-signing-enabled true" in rd("build_apk.sh")
     lfp = rd(jb + "core/update/LocalFileProvider.java")
@@ -3339,7 +3339,7 @@ def test_v161_beta_rollback_android14_omnibus_and_ergonomics():
         h = hashlib.sha256(fh.read()).hexdigest()
     assert f"{h}  yandex-books-lite-v{ver}.apk" in rd("SHA256SUMS")
     vj = json.loads(rd("version.json"))
-    assert vj["versionName"] == ver and vj["versionCode"] in (55, 56, 57, 58, 59, 60, 61, 62, 63, 64)
+    assert vj["versionName"] == ver and vj["versionCode"] in (55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65)
     print("✅ Тест v1.6.1-beta+ успешно пройден!\n")
 
 
@@ -3351,11 +3351,11 @@ def test_v162_beta_appearance_footer_markdown_and_rollback():
             return fh.read()
     jb = "app/src/main/java/com/onyx/yandexbooks/"
     ver = rd("VERSION").strip()
-    assert ver in ("1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"), f"Ожидался 1.6.2-beta+, получено: {ver}"
+    assert ver in ("1.6.2-beta", "1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"), f"Ожидался 1.6.2-beta+, получено: {ver}"
     m = rd("app/src/main/AndroidManifest.xml")
-    assert f'android:versionName="{ver}"' in m and any(f'android:versionCode="{c}"' in m for c in (56, 57, 58, 59, 60, 61, 62, 63, 64))
+    assert f'android:versionName="{ver}"' in m and any(f'android:versionCode="{c}"' in m for c in (56, 57, 58, 59, 60, 61, 62, 63, 64, 65))
     g = rd("app/build.gradle")
-    assert f'versionName "{ver}"' in g and any(f'versionCode {c}' in g for c in (56, 57, 58, 59, 60, 61, 62, 63, 64))
+    assert f'versionName "{ver}"' in g and any(f'versionCode {c}' in g for c in (56, 57, 58, 59, 60, 61, 62, 63, 64, 65))
 
     st = rd(jb + "core/storage/AppSettings.java")
     for k in ("KEY_PANEL_SIZE_MODE", "KEY_CARD_DENSITY_MODE", "KEY_FOOTER_OFFSET_DP", "DEFAULT_FOOTER_OFFSET_DP = 16"):
@@ -3407,7 +3407,7 @@ def test_v162_beta_appearance_footer_markdown_and_rollback():
         h = hashlib.sha256(fh.read()).hexdigest()
     assert f"{h}  yandex-books-lite-v{ver}.apk" in rd("SHA256SUMS")
     vj = json.loads(rd("version.json"))
-    assert vj["versionName"] == ver and vj["versionCode"] in (56, 57, 58, 59, 60, 61, 62, 63, 64) and vj["sha256"] == h
+    assert vj["versionName"] == ver and vj["versionCode"] in (56, 57, 58, 59, 60, 61, 62, 63, 64, 65) and vj["sha256"] == h
     if "-beta" in ver:
         assert "не рекомендуем пока обновляться" in vj["changelog"]
     else:
@@ -3425,11 +3425,11 @@ def test_v163_beta_downloads_ui_and_full_settings_backup():
 
     jb = "app/src/main/java/com/onyx/yandexbooks/"
     ver = rd("VERSION").strip()
-    assert ver in ("1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"), f"Ожидался 1.6.3-beta+, получено: {ver}"
+    assert ver in ("1.6.3-beta", "1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"), f"Ожидался 1.6.3-beta+, получено: {ver}"
     m = rd("app/src/main/AndroidManifest.xml")
-    assert f'android:versionName="{ver}"' in m and any(f'android:versionCode="{c}"' in m for c in (57, 58, 59, 60, 61, 62, 63, 64))
+    assert f'android:versionName="{ver}"' in m and any(f'android:versionCode="{c}"' in m for c in (57, 58, 59, 60, 61, 62, 63, 64, 65))
     g = rd("app/build.gradle")
-    assert f'versionName "{ver}"' in g and any(f'versionCode {c}' in g for c in (57, 58, 59, 60, 61, 62, 63, 64))
+    assert f'versionName "{ver}"' in g and any(f'versionCode {c}' in g for c in (57, 58, 59, 60, 61, 62, 63, 64, 65))
     mn = rd(jb + "ui/MainActivity.java")
     assert (f"v{ver} [BETA]" if "-beta" in ver else f"v{ver}") in mn or "getCurrentVersionName(this)" in mn
 
@@ -3489,7 +3489,7 @@ def test_v163_beta_downloads_ui_and_full_settings_backup():
     assert f"{h}  yandex-books-lite-v{ver}.apk" in rd("SHA256SUMS")
     vj = json.loads(rd("version.json"))
     assert vj["versionName"] == ver
-    assert vj["versionCode"] in (57, 58, 59, 60, 61, 62, 63, 64)
+    assert vj["versionCode"] in (57, 58, 59, 60, 61, 62, 63, 64, 65)
     assert vj["tagName"] == f"v{ver}"
     assert vj["apkSize"] == apk_size
     assert vj["sha256"] == h
@@ -3507,11 +3507,11 @@ def test_v164_beta_clean_notifications_and_legacy_ota_compat():
 
     jb = "app/src/main/java/com/onyx/yandexbooks/"
     ver = rd("VERSION").strip()
-    assert ver in ("1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"), f"Ожидался 1.6.4-beta+, получено: {ver}"
+    assert ver in ("1.6.4-beta", "1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"), f"Ожидался 1.6.4-beta+, получено: {ver}"
     m = rd("app/src/main/AndroidManifest.xml")
-    assert f'android:versionName="{ver}"' in m and any(f'android:versionCode="{c}"' in m for c in (58, 59, 60, 61, 62, 63, 64))
+    assert f'android:versionName="{ver}"' in m and any(f'android:versionCode="{c}"' in m for c in (58, 59, 60, 61, 62, 63, 64, 65))
     g = rd("app/build.gradle")
-    assert f'versionName "{ver}"' in g and any(f'versionCode {c}' in g for c in (58, 59, 60, 61, 62, 63, 64))
+    assert f'versionName "{ver}"' in g and any(f'versionCode {c}' in g for c in (58, 59, 60, 61, 62, 63, 64, 65))
     assert (f"v{ver} [BETA]" if "-beta" in ver else f"v{ver}") in rd(jb + "ui/MainActivity.java") or "getCurrentVersionName(this)" in rd(jb + "ui/MainActivity.java")
 
     # 1. EinkNotice форматирует все сообщения через formatNotificationMessage
@@ -3551,7 +3551,7 @@ def test_v164_beta_clean_notifications_and_legacy_ota_compat():
         h = hashlib.sha256(fh.read()).hexdigest()
     assert f"{h}  yandex-books-lite-v{ver}.apk" in rd("SHA256SUMS")
     vj = json.loads(rd("version.json"))
-    assert vj["versionName"] == ver and vj["versionCode"] in (58, 59, 60, 61, 62, 63, 64) and vj["tagName"] == f"v{ver}"
+    assert vj["versionName"] == ver and vj["versionCode"] in (58, 59, 60, 61, 62, 63, 64, 65) and vj["tagName"] == f"v{ver}"
     assert vj["apkSize"] == apk_size and vj["sha256"] == h
     assert "⚠️" not in vj["changelog"] and "###" not in vj["changelog"] and "> " not in vj["changelog"]
     print("✅ Тест v1.6.4-beta+ успешно пройден!\n")
@@ -3567,12 +3567,12 @@ def test_v165_beta_download_manager_visibility_and_permission():
 
     jb = "app/src/main/java/com/onyx/yandexbooks/"
     ver = rd("VERSION").strip()
-    assert ver in ("1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"), f"Ожидался 1.6.5-beta+, получено: {ver}"
+    assert ver in ("1.6.5-beta", "1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"), f"Ожидался 1.6.5-beta+, получено: {ver}"
     m = rd("app/src/main/AndroidManifest.xml")
-    assert f'android:versionName="{ver}"' in m and any(f'android:versionCode="{c}"' in m for c in (59, 60, 61, 62, 63, 64))
+    assert f'android:versionName="{ver}"' in m and any(f'android:versionCode="{c}"' in m for c in (59, 60, 61, 62, 63, 64, 65))
     assert 'android.permission.DOWNLOAD_WITHOUT_NOTIFICATION' in m, "Манифест должен объявлять DOWNLOAD_WITHOUT_NOTIFICATION для Android < 10!"
     g = rd("app/build.gradle")
-    assert f'versionName "{ver}"' in g and any(f'versionCode {c}' in g for c in (59, 60, 61, 62, 63, 64))
+    assert f'versionName "{ver}"' in g and any(f'versionCode {c}' in g for c in (59, 60, 61, 62, 63, 64, 65))
     assert (f"v{ver} [BETA]" if "-beta" in ver else f"v{ver}") in rd(jb + "ui/MainActivity.java") or "getCurrentVersionName(this)" in rd(jb + "ui/MainActivity.java")
 
     upd = rd(jb + "core/update/AppUpdateManager.java")
@@ -3595,7 +3595,7 @@ def test_v165_beta_download_manager_visibility_and_permission():
         h = hashlib.sha256(fh.read()).hexdigest()
     assert f"{h}  yandex-books-lite-v{ver}.apk" in rd("SHA256SUMS")
     vj = json.loads(rd("version.json"))
-    assert vj["versionName"] == ver and vj["versionCode"] in (59, 60, 61, 62, 63, 64) and vj["tagName"] == f"v{ver}"
+    assert vj["versionName"] == ver and vj["versionCode"] in (59, 60, 61, 62, 63, 64, 65) and vj["tagName"] == f"v{ver}"
     assert vj["apkSize"] == apk_size and vj["sha256"] == h
     assert f"v{ver}" in rd("RELEASE_NOTES.md") and f"v{ver}" in rd("CHANGELOG.md")
     print("✅ Тест v1.6.5-beta+ успешно пройден!\n")
@@ -3610,11 +3610,11 @@ def test_v166_beta_multidevice_abi_and_android9_downloads_fix():
             return fh.read()
 
     ver = rd("VERSION").strip()
-    assert ver in ("1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"), f"Ожидался 1.6.6-beta+, получено: {ver}"
+    assert ver in ("1.6.6-beta", "1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"), f"Ожидался 1.6.6-beta+, получено: {ver}"
     m = rd("app/src/main/AndroidManifest.xml")
-    assert f'android:versionName="{ver}"' in m and any(f'android:versionCode="{c}"' in m for c in (60, 61, 62, 63, 64))
+    assert f'android:versionName="{ver}"' in m and any(f'android:versionCode="{c}"' in m for c in (60, 61, 62, 63, 64, 65))
     g = rd("app/build.gradle")
-    assert f'versionName "{ver}"' in g and any(f'versionCode {c}' in g for c in (60, 61, 62, 63, 64))
+    assert f'versionName "{ver}"' in g and any(f'versionCode {c}' in g for c in (60, 61, 62, 63, 64, 65))
     for abi in ("armeabi-v7a", "arm64-v8a", "x86", "x86_64"):
         assert abi in g, f"abiFilters должен включать {abi} для 64-битных устройств/эмуляторов!"
     assert (f"v{ver} [BETA]" if "-beta" in ver else f"v{ver}") in rd("app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java") or "getCurrentVersionName(this)" in rd("app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java")
@@ -3643,7 +3643,7 @@ def test_v166_beta_multidevice_abi_and_android9_downloads_fix():
         h = hashlib.sha256(fh.read()).hexdigest()
     assert f"{h}  yandex-books-lite-v{ver}.apk" in rd("SHA256SUMS")
     vj = json.loads(rd("version.json"))
-    assert vj["versionName"] == ver and vj["versionCode"] in (60, 61, 62, 63, 64) and vj["tagName"] == f"v{ver}"
+    assert vj["versionName"] == ver and vj["versionCode"] in (60, 61, 62, 63, 64, 65) and vj["tagName"] == f"v{ver}"
     assert vj["apkSize"] == apk_size and vj["sha256"] == h
     assert f"v{ver}" in rd("RELEASE_NOTES.md") and f"v{ver}" in rd("CHANGELOG.md")
     print("✅ Тест v1.6.6-beta+ успешно пройден!\n")
@@ -3659,11 +3659,11 @@ def test_v167_beta_dither_footnotes_edge_brightness_and_optional_audio():
 
     jb = "app/src/main/java/com/onyx/yandexbooks/"
     ver = rd("VERSION").strip()
-    assert ver in ("1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta"), f"Ожидался 1.6.7-beta+, получено: {ver}"
+    assert ver in ("1.6.7-beta", "1.7.0-beta", "2.0.0", "2.0.1-beta", "2.0.2-beta"), f"Ожидался 1.6.7-beta+, получено: {ver}"
     m = rd("app/src/main/AndroidManifest.xml")
-    assert f'android:versionName="{ver}"' in m and any(f'android:versionCode="{c}"' in m for c in (61, 62, 63, 64))
+    assert f'android:versionName="{ver}"' in m and any(f'android:versionCode="{c}"' in m for c in (61, 62, 63, 64, 65))
     g = rd("app/build.gradle")
-    assert f'versionName "{ver}"' in g and any(f'versionCode {c}' in g for c in (61, 62, 63, 64))
+    assert f'versionName "{ver}"' in g and any(f'versionCode {c}' in g for c in (61, 62, 63, 64, 65))
     mn = rd(jb + "ui/MainActivity.java")
     assert (f"v{ver} [BETA]" if "-beta" in ver else f"v{ver}") in mn or "getCurrentVersionName(this)" in mn
 
@@ -3741,7 +3741,7 @@ def test_v167_beta_dither_footnotes_edge_brightness_and_optional_audio():
         h = hashlib.sha256(fh.read()).hexdigest()
     assert f"{h}  yandex-books-lite-v{ver}.apk" in rd("SHA256SUMS")
     vj = json.loads(vj_raw)
-    assert vj["versionName"] == ver and vj["versionCode"] in (61, 62, 63, 64) and vj["tagName"] == f"v{ver}"
+    assert vj["versionName"] == ver and vj["versionCode"] in (61, 62, 63, 64, 65) and vj["tagName"] == f"v{ver}"
     assert vj["apkSize"] == apk_size and vj["sha256"] == h
     print("✅ Тест v1.6.7-beta+ успешно пройден!\n")
 
@@ -3756,8 +3756,8 @@ def test_v170_beta_hybrid_formatting_links_and_stable_footer():
 
     jb = "app/src/main/java/com/onyx/yandexbooks/"
     ver = rd("VERSION").strip()
-    assert ver in ("2.0.0", "2.0.1-beta"), f"Ожидался 2.0.x, получено: {ver}"
-    expected_vc = "63" if ver == "2.0.0" else "64"
+    assert ver in ("2.0.0", "2.0.1-beta", "2.0.2-beta"), f"Ожидался 2.0.x, получено: {ver}"
+    expected_vc = "63" if ver == "2.0.0" else ("64" if ver == "2.0.1-beta" else "65")
     m = rd("app/src/main/AndroidManifest.xml")
     assert f'android:versionName="{ver}"' in m and f'android:versionCode="{expected_vc}"' in m
     g = rd("app/build.gradle")
@@ -4002,6 +4002,82 @@ def test_v201_beta_bugfixes_comprehensive():
     print("✅ Тест 57 (Все 14 багфиксов v2.0.1-beta + 0 запрещённых слов) успешно пройден!\n")
 
 
+
+def test_v202_beta_catalog_popups_perf():
+    print("--- [ТЕСТ 58] v2.0.2-beta: Каталог (фоллбэк/популярное), Читаемость окон, Apple Books зум, Скорость открытия EPUB ---")
+    import json, os, hashlib
+    jb = "app/src/main/java/com/onyx/yandexbooks/"
+    rd = lambda p: open(os.path.join(PROJECT_DIR, p), "r", encoding="utf-8").read()
+
+    ver = rd("VERSION").strip()
+    assert ver == "2.0.2-beta", f"Ожидался 2.0.2-beta, получено: {ver}"
+    m = rd("app/src/main/AndroidManifest.xml")
+    assert 'android:versionName="2.0.2-beta"' in m and 'android:versionCode="65"' in m
+    g = rd("app/build.gradle")
+    assert 'versionName "2.0.2-beta"' in g and 'versionCode 65' in g
+
+    # 1. Артефакт APK, version.json, SHA256SUMS, CHECKSUMS.md
+    apk = os.path.join(PROJECT_DIR, f"yandex-books-lite-v{ver}.apk")
+    assert os.path.exists(apk), f"APK {apk} отсутствует"
+    apk_size = os.path.getsize(apk)
+    with open(apk, "rb") as fh:
+        h = hashlib.sha256(fh.read()).hexdigest()
+    assert f"{h}  yandex-books-lite-v{ver}.apk" in rd("SHA256SUMS")
+    vj = json.loads(rd("version.json"))
+    assert vj["versionName"] == "2.0.2-beta" and vj["versionCode"] == 65
+    assert vj["tagName"] == "v2.0.2-beta" and vj["apkSize"] == apk_size and vj["sha256"] == h
+    assert "v2.0.2-beta" in rd("RELEASE_NOTES.md") and "v2.0.2-beta" in rd("CHANGELOG.md") and "v2.0.2-beta" in rd("CHECKSUMS.md")
+
+    # 2. Каталог: YandexBooksApiClient, MainActivity, activity_main.xml
+    api = rd(jb + "core/api/YandexBooksApiClient.java")
+    ma = rd(jb + "ui/MainActivity.java")
+    mx = rd("app/src/main/res/layout/activity_main.xml")
+    assert "AUTO_POPULAR_SHELF_UUID = \"__popular__\"" in api
+    assert "DEFAULT_CATALOG_SHELF_UUID = \"ySg3hPn4\"" in api
+    assert "/api/v5/popular_searches/ru" in api
+    for dead_uuid in ("uQfUIsur", "DyY40A8l", "MsYy9bE8", "Mb1nPGHx", "nwavRdj8", "j2wlhX4Z"):
+        assert dead_uuid not in api, f"Устаревший 404 UUID {dead_uuid} не должен присутствовать в YandexBooksApiClient"
+    assert "isNetworkAvailable()" in ma and "Категория: Популярное" in mx
+
+    # 3. Читаемость всплывающих окон: EinkNotice, ReaderActivity
+    en = rd(jb + "core/ui/EinkNotice.java")
+    ra = rd(jb + "ui/ReaderActivity.java")
+    assert "15.5f" in en and "16.5f" in en and "14.5f" in en
+    assert "11 * density" in en and "10 * density" in en
+    assert "Color.BLACK" in ra and "««" not in ra
+    assert "showTextSelectionActionDialog" in ra and "showQuoteNoteDialog" in ra
+    assert "showReadable" in en
+
+    # 4. Apple Books мгновенный зум шрифта: TextPaginator, ReaderActivity
+    tp = rd(jb + "core/typography/TextPaginator.java")
+    assert "paginateSinglePageFromOffset" in tp
+    assert "derivedCache" in tp and "cachedSpaceWidth" in tp
+    assert "renderInstantViewportPreview" in ra
+    assert "paginateSinglePageFromOffset" in ra
+    assert "scheduleDebouncedRepaginate" in ra
+    assert "Thread.MIN_PRIORITY" in ra
+
+    # 5. Ускорение открытия книг: EpubParser, CacheManager, ReaderActivity
+    ep = rd(jb + "core/epub/EpubParser.java")
+    cm = rd(jb + "core/storage/CacheManager.java")
+    assert "estimateAnchorCharOffsetFast" in ep
+    assert "new String(buf, 0, offset" in cm and "fis.read(buf" in cm
+    assert "isChapterCacheValid" in cm
+    assert "1200" in ra
+
+    # 6. Строгая проверка на 0 запрещённых слов ("читалк*")
+    for root_dir in ("app/src",):
+        for dirpath, _, filenames in os.walk(os.path.join(PROJECT_DIR, root_dir)):
+            for fn in filenames:
+                if fn.endswith((".java", ".xml")):
+                    content = open(os.path.join(dirpath, fn), "r", encoding="utf-8", errors="ignore").read().lower()
+                    assert "читалк" not in content, f"Найдено запрещённое слово в {os.path.join(dirpath, fn)}"
+    for doc_rel in ("RELEASE_NOTES.md", "CHANGELOG.md", "version.json", "CHECKSUMS.md"):
+        assert "читалк" not in rd(doc_rel).lower(), f"Найдено запрещённое слово в {doc_rel}"
+
+    print("✅ Тест 58 (v2.0.2-beta: Каталог, Читаемость окон, Apple Books зум, Скорость открытия EPUB + 0 запрещённых слов) успешно пройден!\n")
+
+
 if __name__ == "__main__":
     print("==================================================")
     print("🚀 Запуск тотальной верификации ядра Яндекс Книги")
@@ -4064,6 +4140,7 @@ if __name__ == "__main__":
     test_v170_beta_hybrid_formatting_links_and_stable_footer()
     test_v170_beta_extended_modules()
     test_v201_beta_bugfixes_comprehensive()
+    test_v202_beta_catalog_popups_perf()
     print("==================================================")
-    print("🎉 ВСЕ 57 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
+    print("🎉 ВСЕ 58 ТЕСТОВ УСПЕШНО ПРОЙДЕНЫ! АЛГОРИТМЫ И КОМАНДЫ ВЕРИФИЦИРОВАНЫ.")
     print("==================================================")
