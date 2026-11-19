@@ -8,6 +8,7 @@ import com.onyx.yandexbooks.core.epub.EpubFormatting;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -170,9 +171,12 @@ public class TextPaginator {
     private static final class WordToken {
         final List<WordPiece> pieces = new ArrayList<>();
         final StringBuilder plain = new StringBuilder();
+        float cachedWidth = -1f;
+        float cachedScale = -1f;
 
         void addPiece(String txt, int style, String linkTarget, String linkLabel) {
             if (txt == null || txt.isEmpty()) return;
+            cachedWidth = -1f;
             if (!pieces.isEmpty()) {
                 WordPiece prev = pieces.get(pieces.size() - 1);
                 boolean sameLink = (prev.linkTarget == null ? linkTarget == null : prev.linkTarget.equals(linkTarget));
@@ -200,8 +204,10 @@ public class TextPaginator {
         private final Typeface baseTypeface;
         private final float baseTextSize;
         private final boolean baseFakeBold;
+        private final Typeface[] derivedCache = new Typeface[8];
         private int currentStyle = -1;
         private float currentScale = -1f;
+        private float cachedSpaceWidth = -1f;
 
         StyleMeasurer(Paint templatePaint) {
             this.workPaint = new Paint(templatePaint);
@@ -215,12 +221,40 @@ public class TextPaginator {
             this.baseTypeface = tf;
         }
 
+        private Typeface getCachedTypeface(boolean bold, boolean italic, boolean mono) {
+            int slot = (mono ? 4 : 0) | (italic ? 2 : 0) | (bold ? 1 : 0);
+            Typeface cached = derivedCache[slot];
+            if (cached != null) {
+                return cached;
+            }
+            Typeface resolved;
+            if (mono) {
+                int tfStyle = (bold && italic) ? Typeface.BOLD_ITALIC : (bold ? Typeface.BOLD : (italic ? Typeface.ITALIC : Typeface.NORMAL));
+                resolved = Typeface.create(Typeface.MONOSPACE, tfStyle);
+            } else if (baseTypeface != null) {
+                int wantStyle = baseTypeface.getStyle();
+                if (bold) wantStyle |= Typeface.BOLD;
+                if (italic) wantStyle |= Typeface.ITALIC;
+                if (wantStyle != baseTypeface.getStyle()) {
+                    resolved = Typeface.create(baseTypeface, wantStyle);
+                } else {
+                    resolved = baseTypeface;
+                }
+            } else {
+                int tfStyle = (bold && italic) ? Typeface.BOLD_ITALIC : (bold ? Typeface.BOLD : (italic ? Typeface.ITALIC : Typeface.NORMAL));
+                resolved = Typeface.defaultFromStyle(tfStyle);
+            }
+            derivedCache[slot] = resolved;
+            return resolved;
+        }
+
         void prepare(int style, float fontScale) {
             if (style == currentStyle && Math.abs(fontScale - currentScale) < 0.001f) {
                 return;
             }
             currentStyle = style;
             currentScale = fontScale;
+            cachedSpaceWidth = -1f;
             workPaint.setTextSize(baseTextSize * fontScale);
             workPaint.setTextSkewX(0f);
             workPaint.setFakeBoldText(baseFakeBold);
@@ -229,28 +263,15 @@ public class TextPaginator {
             boolean italic = (style & STYLE_ITALIC) != 0;
             boolean mono = (style & STYLE_MONO) != 0;
             try {
-                if (mono) {
-                    int tfStyle = (bold && italic) ? Typeface.BOLD_ITALIC : (bold ? Typeface.BOLD : (italic ? Typeface.ITALIC : Typeface.NORMAL));
-                    workPaint.setTypeface(Typeface.create(Typeface.MONOSPACE, tfStyle));
-                } else if (baseTypeface != null) {
-                    int wantStyle = baseTypeface.getStyle();
-                    if (bold) wantStyle |= Typeface.BOLD;
-                    if (italic) wantStyle |= Typeface.ITALIC;
-                    if (wantStyle != baseTypeface.getStyle()) {
-                        Typeface derived = Typeface.create(baseTypeface, wantStyle);
-                        workPaint.setTypeface(derived);
-                        if (bold && !derived.isBold()) {
-                            workPaint.setFakeBoldText(true);
-                        }
-                        if (italic && !derived.isItalic()) {
-                            workPaint.setTextSkewX(-0.22f);
-                        }
-                    } else {
-                        workPaint.setTypeface(baseTypeface);
+                Typeface derived = getCachedTypeface(bold, italic, mono);
+                workPaint.setTypeface(derived);
+                if (!mono && baseTypeface != null && derived != null) {
+                    if (bold && !derived.isBold()) {
+                        workPaint.setFakeBoldText(true);
                     }
-                } else {
-                    int tfStyle = (bold && italic) ? Typeface.BOLD_ITALIC : (bold ? Typeface.BOLD : (italic ? Typeface.ITALIC : Typeface.NORMAL));
-                    workPaint.setTypeface(Typeface.defaultFromStyle(tfStyle));
+                    if (italic && !derived.isItalic()) {
+                        workPaint.setTextSkewX(-0.22f);
+                    }
                 }
             } catch (Throwable ignored) {}
         }
@@ -261,16 +282,24 @@ public class TextPaginator {
         }
 
         float measureWord(WordToken token, float fontScale) {
+            if (token.cachedWidth >= 0f && Math.abs(token.cachedScale - fontScale) < 0.001f) {
+                return token.cachedWidth;
+            }
             float w = 0f;
             for (int i = 0; i < token.pieces.size(); i++) {
                 w += measurePiece(token.pieces.get(i), fontScale);
             }
+            token.cachedWidth = w;
+            token.cachedScale = fontScale;
             return w;
         }
 
         float measureSpace(int baseStyle, float fontScale) {
             prepare(baseStyle, fontScale);
-            return workPaint.measureText(" ");
+            if (cachedSpaceWidth < 0f) {
+                cachedSpaceWidth = workPaint.measureText(" ");
+            }
+            return cachedSpaceWidth;
         }
 
         float measureLineRuns(List<LineRun> runs, float fontScale) {
@@ -300,13 +329,87 @@ public class TextPaginator {
      * форматирования книги (заголовки, выравнивание, стили, цитаты, ссылки, разрывы).
      */
     public List<Page> paginate(String fullText, int screenWidth, int screenHeight, Paint paint, TypographyConfig config) {
+        return paginateInternal(fullText, screenWidth, screenHeight, paint, config, 0, -1, null, 0L);
+    }
+
+    /**
+     * Отменяемая полная пагинация главы (для фонового пересчёта страниц всей книги без блокировок).
+     */
+    public List<Page> paginateCancellable(String fullText, int screenWidth, int screenHeight, Paint paint, TypographyConfig config,
+                                          AtomicLong taskIdRef, long expectedTaskId) {
+        return paginateInternal(fullText, screenWidth, screenHeight, paint, config, 0, -1, taskIdRef, expectedTaskId);
+    }
+
+    /**
+     * Мгновенная вёрстка ТОЛЬКО ОДНОЙ видимой страницы начиная с позиции anchorCharOffset (концепция Apple Books).
+     * Позволяет перерисовать экран за 5–15 мс сразу после нажатия +/- или открытия большой главы,
+     * не дожидаясь пагинации остальных страниц главы и книги.
+     */
+    public Page paginateSinglePageFromOffset(String fullText, int anchorCharOffset, int screenWidth, int screenHeight, Paint paint, TypographyConfig config) {
+        if (fullText == null || fullText.isEmpty()) {
+            return new Page(0, new ArrayList<Line>(), 0, 0);
+        }
+        int len = fullText.length();
+        int safeAnchor = Math.max(0, Math.min(anchorCharOffset, Math.max(0, len - 1)));
+
+        // Ищем начало абзаца, содержащего anchorCharOffset
+        int paraStart = fullText.lastIndexOf('\n', Math.max(0, safeAnchor - 1));
+        paraStart = (paraStart >= 0) ? (paraStart + 1) : 0;
+
+        // Берём локальное окно ~10 000 символов (заведомо больше 1 экрана даже при минимальном шрифте 12sp)
+        int windowEnd = Math.min(len, paraStart + 10000);
+        if (windowEnd < len) {
+            int nextNl = fullText.indexOf('\n', windowEnd);
+            if (nextNl > windowEnd && nextNl - windowEnd < 2000) {
+                windowEnd = nextNl;
+            }
+        }
+        String slice = fullText.substring(paraStart, windowEnd);
+        int localSkipInFirstPara = Math.max(0, safeAnchor - paraStart);
+
+        // Если якорь попадает внутрь длинного абзаца, аккуратно выравниваем начало показа по слову
+        if (localSkipInFirstPara > 0) {
+            int firstNl = slice.indexOf('\n');
+            int firstParaEnd = (firstNl >= 0) ? firstNl : slice.length();
+            if (localSkipInFirstPara < firstParaEnd) {
+                String firstPara = slice.substring(0, firstParaEnd);
+                EpubFormatting.ParsedBlockHeader hdr = EpubFormatting.parseBlockHeader(firstPara);
+                int headerPrefixLen = (hdr.bodyText != null) ? (firstPara.length() - hdr.bodyText.length()) : 0;
+                int bodySkip = Math.max(0, localSkipInFirstPara - headerPrefixLen);
+                if (hdr.bodyText != null && bodySkip > 0 && bodySkip < hdr.bodyText.length() - 16) {
+                    // Сдвигаемся к границе слова, чтобы не обрывать слово посередине
+                    int sp = hdr.bodyText.lastIndexOf(' ', bodySkip);
+                    if (sp > 0 && sp < hdr.bodyText.length() - 8) {
+                        String trimmedBody = hdr.bodyText.substring(sp + 1).trim();
+                        if (!trimmedBody.isEmpty()) {
+                            // Помечаем продолжение абзаца без красной строки ('N'-подобный нулевой отступ не нужен, просто отключаем отступ через заголовок или оставляем роль)
+                            String prefix = firstPara.substring(0, headerPrefixLen);
+                            slice = prefix + trimmedBody + (firstNl >= 0 ? slice.substring(firstNl) : "");
+                            paraStart = safeAnchor;
+                        }
+                    }
+                }
+            }
+        }
+
+        List<Page> one = paginateInternal(slice, screenWidth, screenHeight, paint, config, paraStart, 1, null, 0L);
+        if (one != null && !one.isEmpty()) {
+            return one.get(0);
+        }
+        return new Page(0, new ArrayList<Line>(), safeAnchor, safeAnchor);
+    }
+
+    private List<Page> paginateInternal(String fullText, int screenWidth, int screenHeight, Paint paint, TypographyConfig config,
+                                        int baseCharOffset, int maxPages, AtomicLong taskIdRef, long expectedTaskId) {
         List<Page> pages = new ArrayList<>();
         if (fullText == null || fullText.isEmpty()) {
-            pages.add(new Page(0, new ArrayList<Line>(), 0, 0));
+            pages.add(new Page(0, new ArrayList<Line>(), baseCharOffset, baseCharOffset));
             return pages;
         }
 
-        fullText = fullText.replace("\uFFFC", "").replace("\uFFFD", "").replace("\uFEFF", "");
+        if (fullText.indexOf('\uFFFC') >= 0 || fullText.indexOf('\uFFFD') >= 0 || fullText.indexOf('\uFEFF') >= 0) {
+            fullText = fullText.replace("\uFFFC", "").replace("\uFFFD", "").replace("\uFEFF", "");
+        }
 
         float availableWidth = Math.max(40f, screenWidth - config.getPaddingLeftPx() - config.getPaddingRightPx() - 2f);
         float availableHeight = Math.max(40f, screenHeight - config.getPaddingTopPx() - config.getHeaderReservedHeightPx() - config.getPaddingBottomPx() - config.getFooterReservedHeightPx());
@@ -319,17 +422,24 @@ public class TextPaginator {
         List<Line> currentLines = new ArrayList<>();
         float usedHeight = 0f;
         int pageIndex = 0;
-        int globalCharOffset = 0;
-        int pageStartCharOffset = 0;
+        int globalCharOffset = baseCharOffset;
+        int pageStartCharOffset = baseCharOffset;
         boolean lastWasEmptyLine = false;
 
         for (int pIdx = 0; pIdx < paragraphs.length; pIdx++) {
+            if (maxPages > 0 && pages.size() >= maxPages) {
+                return pages;
+            }
+            if (taskIdRef != null && (pIdx & 7) == 0 && taskIdRef.get() != expectedTaskId) {
+                return null;
+            }
             String rawParagraph = paragraphs[pIdx];
             String trimmedRaw = rawParagraph.trim();
 
             if (EpubFormatting.PAGE_BREAK_TOKEN.equals(trimmedRaw)) {
                 if (!currentLines.isEmpty()) {
                     pages.add(new Page(pageIndex++, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
+                    if (maxPages > 0 && pages.size() >= maxPages) return pages;
                     currentLines.clear();
                     usedHeight = 0f;
                     pageStartCharOffset = globalCharOffset + rawParagraph.length() + 1;
@@ -347,6 +457,7 @@ public class TextPaginator {
                 float emptyH = baseLineHeight * 0.65f;
                 if (usedHeight + emptyH > availableHeight) {
                     pages.add(new Page(pageIndex++, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
+                    if (maxPages > 0 && pages.size() >= maxPages) return pages;
                     currentLines.clear();
                     usedHeight = 0f;
                     pageStartCharOffset = globalCharOffset;
@@ -367,6 +478,7 @@ public class TextPaginator {
             if (EpubFormatting.PAGE_BREAK_TOKEN.equals(bodyTrimmed) || bodyTrimmed.isEmpty()) {
                 if (EpubFormatting.PAGE_BREAK_TOKEN.equals(bodyTrimmed) && !currentLines.isEmpty()) {
                     pages.add(new Page(pageIndex++, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
+                    if (maxPages > 0 && pages.size() >= maxPages) return pages;
                     currentLines.clear();
                     usedHeight = 0f;
                     pageStartCharOffset = globalCharOffset + rawParagraph.length() + 1;
@@ -379,6 +491,7 @@ public class TextPaginator {
             if (bodyTrimmed.startsWith("[IMG:") && bodyTrimmed.endsWith("]")) {
                 if (!currentLines.isEmpty()) {
                     pages.add(new Page(pageIndex++, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
+                    if (maxPages > 0 && pages.size() >= maxPages) return pages;
                     currentLines.clear();
                     usedHeight = 0f;
                     pageStartCharOffset = globalCharOffset;
@@ -425,6 +538,7 @@ public class TextPaginator {
                 float minRequiredForHeading = extraTopPx + thisLineHeight + extraBottomPx + baseLineHeight * 1.15f;
                 if (usedHeight + minRequiredForHeading > availableHeight) {
                     pages.add(new Page(pageIndex++, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
+                    if (maxPages > 0 && pages.size() >= maxPages) return pages;
                     currentLines.clear();
                     usedHeight = 0f;
                     pageStartCharOffset = globalCharOffset;
@@ -472,6 +586,7 @@ public class TextPaginator {
                             float topGap = (isFirstLineOfParagraph && !currentLines.isEmpty()) ? extraTopPx : 0f;
                             if (!currentLines.isEmpty() && usedHeight + topGap + thisLineHeight > availableHeight) {
                                 pages.add(new Page(pageIndex++, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
+                                if (maxPages > 0 && pages.size() >= maxPages) return pages;
                                 currentLines.clear();
                                 usedHeight = 0f;
                                 pageStartCharOffset = globalCharOffset;
@@ -510,6 +625,7 @@ public class TextPaginator {
                                 float topGap = (isFirstLineOfParagraph && !currentLines.isEmpty()) ? extraTopPx : 0f;
                                 if (!currentLines.isEmpty() && usedHeight + topGap + thisLineHeight > availableHeight) {
                                     pages.add(new Page(pageIndex++, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
+                                    if (maxPages > 0 && pages.size() >= maxPages) return pages;
                                     currentLines.clear();
                                     usedHeight = 0f;
                                     pageStartCharOffset = globalCharOffset;
@@ -557,6 +673,9 @@ public class TextPaginator {
                         float topGap = (isFirstLineOfParagraph && !currentLines.isEmpty()) ? extraTopPx : 0f;
                         if (!currentLines.isEmpty() && usedHeight + topGap + thisLineHeight > availableHeight) {
                             pages.add(new Page(pageIndex++, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
+                            if (maxPages > 0 && pages.size() >= maxPages) {
+                                return pages;
+                            }
                             currentLines.clear();
                             usedHeight = 0f;
                             pageStartCharOffset = globalCharOffset;
@@ -589,6 +708,7 @@ public class TextPaginator {
                 float topGap = (isFirstLineOfParagraph && !currentLines.isEmpty()) ? extraTopPx : 0f;
                 if (!currentLines.isEmpty() && usedHeight + topGap + thisLineHeight > availableHeight) {
                     pages.add(new Page(pageIndex++, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
+                    if (maxPages > 0 && pages.size() >= maxPages) return pages;
                     currentLines.clear();
                     usedHeight = 0f;
                     pageStartCharOffset = globalCharOffset;
@@ -690,32 +810,45 @@ public class TextPaginator {
         }
 
         String linePlain = plainSb.toString();
+        int nWords = lineWords.size();
+        float[] wordWidths = new float[nWords];
+        float[] spaceWidths = new float[nWords];
+        float totalActualWidth = 0f;
+        int lastStyle = STYLE_NORMAL;
+        for (int i = 0; i < nWords; i++) {
+            WordToken wt = lineWords.get(i);
+            if (i > 0) {
+                float spW = measurer.measureSpace(lastStyle, fontScale);
+                spaceWidths[i] = spW;
+                totalActualWidth += spW;
+            }
+            float wordW = measurer.measureWord(wt, fontScale);
+            wordWidths[i] = wordW;
+            totalActualWidth += wordW;
+            if (!wt.pieces.isEmpty()) {
+                lastStyle = wt.pieces.get(wt.pieces.size() - 1).style;
+            }
+        }
+
         float wordSpacing = 0f;
-        if (alignment == ALIGN_JUSTIFY && !isLastLineOfParagraph && lineWords.size() > 1) {
+        if (alignment == ALIGN_JUSTIFY && !isLastLineOfParagraph && nWords > 1) {
             float targetWidth = effectiveAvailableWidth - indentPx;
-            float actualWidth = measurer.measureLineRuns(runs, fontScale);
-            float delta = targetWidth - actualWidth;
-            int spaceCount = lineWords.size() - 1;
+            float delta = targetWidth - totalActualWidth;
+            int spaceCount = nWords - 1;
             if (delta > 0f && delta < targetWidth * 0.55f && spaceCount > 0) {
                 wordSpacing = delta / spaceCount;
             }
         }
 
-        List<WordBox> wordBoxes = new ArrayList<>(lineWords.size());
+        List<WordBox> wordBoxes = new ArrayList<>(nWords);
         float xCursor = 0f;
-        int lastStyle = STYLE_NORMAL;
-        for (int i = 0; i < lineWords.size(); i++) {
+        for (int i = 0; i < nWords; i++) {
             WordToken wt = lineWords.get(i);
             if (i > 0) {
-                float spW = measurer.measureSpace(lastStyle, fontScale);
-                xCursor += spW + wordSpacing;
+                xCursor += spaceWidths[i] + wordSpacing;
             }
             float wStart = xCursor;
-            float wordW = measurer.measureWord(wt, fontScale);
-            float wEnd = wStart + wordW;
-            if (!wt.pieces.isEmpty()) {
-                lastStyle = wt.pieces.get(wt.pieces.size() - 1).style;
-            }
+            float wEnd = wStart + wordWidths[i];
             String wordText = wt.getPlainText();
             int cStart = Math.min(paraEndOffset, paraCharCursor[0]);
             int cEnd = Math.min(paraEndOffset, cStart + wordText.length());

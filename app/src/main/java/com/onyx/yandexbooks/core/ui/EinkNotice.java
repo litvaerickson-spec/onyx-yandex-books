@@ -83,7 +83,14 @@ public final class EinkNotice {
      * Показать уведомление с заданным заголовком и кнопкой «ОК».
      */
     public static void show(Context context, String title, String message) {
-        show(context, title, message, "ОК", null);
+        show(context, title, message, "ОК", null, 15.5f);
+    }
+
+    /**
+     * Показать уведомление (например, сноску или ссылку) с настраиваемым крупным размером текста для E-Ink.
+     */
+    public static void showReadable(Context context, String title, String message, float messageTextSizeSp) {
+        show(context, title, message, "Закрыть", null, Math.max(15.5f, Math.min(24f, messageTextSizeSp)));
     }
 
     /**
@@ -143,14 +150,14 @@ public final class EinkNotice {
             final LinearLayout root = new LinearLayout(activity);
             root.setOrientation(LinearLayout.VERTICAL);
             root.setBackgroundResource(R.drawable.dialog_notice_bg);
-            int padH = (int) (16 * density);
-            int padV = (int) (14 * density);
+            int padH = (int) (11 * density);
+            int padV = (int) (10 * density);
             root.setPadding(padH, padV, padH, padV);
 
             String displayTitle = (title != null && !title.trim().isEmpty()) ? title.trim() : "Подтверждение";
             TextView titleView = new TextView(activity);
             titleView.setText(displayTitle);
-            titleView.setTextSize(15);
+            titleView.setTextSize(16.5f);
             titleView.setTypeface(null, Typeface.BOLD);
             titleView.setTextColor(Color.BLACK);
             titleView.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
@@ -159,10 +166,10 @@ public final class EinkNotice {
             View divider = new View(activity);
             divider.setBackgroundColor(Color.BLACK);
             LinearLayout.LayoutParams divLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(2, 2 * density));
-            divLp.setMargins(0, (int) (6 * density), 0, (int) (8 * density));
+            divLp.setMargins(0, (int) (5 * density), 0, (int) (7 * density));
             root.addView(divider, divLp);
 
-            final int maxScrollH = (int) (dm.heightPixels * 0.55);
+            final int maxScrollH = (int) (dm.heightPixels * 0.62);
             EinkScrollView scrollView = new MaxHeightScrollView(activity, maxScrollH);
             scrollView.setFadingEdgeLength(0);
             scrollView.setOverScrollMode(View.OVER_SCROLL_NEVER);
@@ -170,21 +177,21 @@ public final class EinkNotice {
 
             TextView messageView = new TextView(activity);
             messageView.setText(formatNotificationMessage(message));
-            messageView.setTextSize(13.5f);
+            messageView.setTextSize(15.5f);
             messageView.setTypeface(null, Typeface.NORMAL);
             messageView.setTextColor(Color.BLACK);
-            messageView.setLineSpacing(3f, 1.25f);
+            messageView.setLineSpacing(2f, 1.22f);
             scrollView.addView(messageView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             LinearLayout btnRow = new LinearLayout(activity);
             btnRow.setOrientation(LinearLayout.HORIZONTAL);
             LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (40 * density));
-            rowLp.setMargins(0, (int) (12 * density), 0, 0);
+            rowLp.setMargins(0, (int) (10 * density), 0, 0);
             btnRow.setLayoutParams(rowLp);
 
             Button btnCancel = new Button(activity);
             btnCancel.setText((cancelText != null && !cancelText.trim().isEmpty()) ? cancelText.trim() : "Отмена");
-            btnCancel.setTextSize(12.5f);
+            btnCancel.setTextSize(14f);
             btnCancel.setTypeface(null, Typeface.BOLD);
             btnCancel.setTextColor(Color.BLACK);
             btnCancel.setBackgroundResource(R.drawable.btn_eink);
@@ -205,7 +212,7 @@ public final class EinkNotice {
 
             Button btnConfirm = new Button(activity);
             btnConfirm.setText((confirmText != null && !confirmText.trim().isEmpty()) ? confirmText.trim() : "ОК");
-            btnConfirm.setTextSize(12.5f);
+            btnConfirm.setTextSize(14f);
             btnConfirm.setTypeface(null, Typeface.BOLD);
             btnConfirm.setTextColor(Color.BLACK);
             btnConfirm.setBackgroundResource(R.drawable.btn_eink_primary);
@@ -228,7 +235,7 @@ public final class EinkNotice {
             btnRow.addView(btnConfirm);
             root.addView(btnRow);
 
-            final int targetW = Math.min((int) (dm.widthPixels * 0.90), (int) (440 * density));
+            final int targetW = Math.min((int) (dm.widthPixels * 0.94), (int) (540 * density));
             dialog.setContentView(root, new ViewGroup.LayoutParams(targetW, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             // Аппаратные клавиши (Back = Cancel, Enter/Dpad Center = Confirm)
@@ -289,6 +296,10 @@ public final class EinkNotice {
      * Показать уведомление с настраиваемым заголовком, текстом, надписью на кнопке и колбэком.
      */
     public static void show(final Context context, final String title, final String message, final String buttonText, final Runnable onDismiss) {
+        show(context, title, message, buttonText, onDismiss, 15.5f);
+    }
+
+    public static void show(final Context context, final String title, final String message, final String buttonText, final Runnable onDismiss, final float messageTextSizeSp) {
         if (context == null || message == null || message.trim().isEmpty()) {
             return;
         }
@@ -297,7 +308,7 @@ public final class EinkNotice {
             sMainHandler.post(new Runnable() {
                 @Override
                 public void run() {
-                    show(context, title, message, buttonText, onDismiss);
+                    show(context, title, message, buttonText, onDismiss, messageTextSizeSp);
                 }
             });
             return;
@@ -331,19 +342,19 @@ public final class EinkNotice {
             DisplayMetrics dm = activity.getResources().getDisplayMetrics();
             float density = dm.density;
 
-            // Корневой контейнер с чисто белым фоном и четкой 2.5dp черной рамкой
+            // Корневой контейнер с чисто белым фоном и четкой 2.5dp черной рамкой, компактные поля
             final LinearLayout root = new LinearLayout(activity);
             root.setOrientation(LinearLayout.VERTICAL);
             root.setBackgroundResource(R.drawable.dialog_notice_bg);
-            int padH = (int) (16 * density);
-            int padV = (int) (14 * density);
+            int padH = (int) (11 * density);
+            int padV = (int) (10 * density);
             root.setPadding(padH, padV, padH, padV);
 
             // Заголовок
             String displayTitle = (title != null && !title.trim().isEmpty()) ? title.trim() : "Уведомление";
             TextView titleView = new TextView(activity);
             titleView.setText(displayTitle);
-            titleView.setTextSize(15);
+            titleView.setTextSize(16.5f);
             titleView.setTypeface(null, Typeface.BOLD);
             titleView.setTextColor(Color.BLACK);
             titleView.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
@@ -353,11 +364,11 @@ public final class EinkNotice {
             View divider = new View(activity);
             divider.setBackgroundColor(Color.BLACK);
             LinearLayout.LayoutParams divLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(2, 2 * density));
-            divLp.setMargins(0, (int) (6 * density), 0, (int) (8 * density));
+            divLp.setMargins(0, (int) (5 * density), 0, (int) (7 * density));
             root.addView(divider, divLp);
 
-            // Текст сообщения (в EinkScrollView с ограничением по высоте до 55% экрана)
-            final int maxScrollH = (int) (dm.heightPixels * 0.55);
+            // Текст сообщения (в EinkScrollView с ограничением по высоте до 62% экрана)
+            final int maxScrollH = (int) (dm.heightPixels * 0.62);
             EinkScrollView scrollView = new MaxHeightScrollView(activity, maxScrollH);
             scrollView.setFadingEdgeLength(0);
             scrollView.setOverScrollMode(View.OVER_SCROLL_NEVER);
@@ -366,10 +377,10 @@ public final class EinkNotice {
 
             TextView messageView = new TextView(activity);
             messageView.setText(formatNotificationMessage(message));
-            messageView.setTextSize(13.5f);
+            messageView.setTextSize(Math.max(14.5f, messageTextSizeSp));
             messageView.setTypeface(null, Typeface.NORMAL);
             messageView.setTextColor(Color.BLACK);
-            messageView.setLineSpacing(3f, 1.25f);
+            messageView.setLineSpacing(2f, 1.24f);
             scrollView.addView(messageView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             root.addView(scrollView);
 
@@ -377,7 +388,7 @@ public final class EinkNotice {
             String btnText = (buttonText != null && !buttonText.trim().isEmpty()) ? buttonText.trim() : "ОК";
             Button btnOk = new Button(activity);
             btnOk.setText(btnText);
-            btnOk.setTextSize(13);
+            btnOk.setTextSize(14.5f);
             btnOk.setTypeface(null, Typeface.BOLD);
             btnOk.setTextColor(Color.BLACK);
             btnOk.setBackgroundResource(R.drawable.btn_eink_primary);
@@ -385,7 +396,7 @@ public final class EinkNotice {
             btnOk.setPadding(0, 0, 0, 0);
 
             LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (40 * density));
-            btnLp.setMargins(0, (int) (12 * density), 0, 0);
+            btnLp.setMargins(0, (int) (10 * density), 0, 0);
             btnOk.setLayoutParams(btnLp);
 
             btnOk.setOnClickListener(new View.OnClickListener() {
@@ -396,7 +407,7 @@ public final class EinkNotice {
             });
             root.addView(btnOk);
 
-            final int targetW = Math.min((int) (dm.widthPixels * 0.90), (int) (440 * density));
+            final int targetW = Math.min((int) (dm.widthPixels * 0.94), (int) (540 * density));
             dialog.setContentView(root, new ViewGroup.LayoutParams(targetW, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             // Аппаратные клавиши (Back, Enter, Dpad Center)

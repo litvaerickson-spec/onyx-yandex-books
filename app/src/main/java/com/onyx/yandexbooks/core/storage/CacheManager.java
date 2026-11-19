@@ -523,9 +523,26 @@ public class CacheManager {
      */
     public boolean isChapterCacheValid(String bookUuid, List<Chapter> chapters) {
         if (chapters == null || chapters.isEmpty()) return false;
+        int n = chapters.size();
+        // Быстрая выборка для больших книг с актуальным флагом формата (5 stat-вызовов вместо сотен на UI-потоке)
+        if (n > 8 && isFormattedCacheCurrent(bookUuid)) {
+            int[] sampleIdx = new int[]{0, n / 4, n / 2, (3 * n) / 4, n - 1};
+            int validSamples = 0;
+            long sampleBytes = 0;
+            for (int idx : sampleIdx) {
+                long len = getChapterLength(bookUuid, chapters.get(idx).getId());
+                if (len > 50) {
+                    validSamples++;
+                    sampleBytes += len;
+                }
+            }
+            if (validSamples >= 2 && sampleBytes >= 500) {
+                return true;
+            }
+        }
         long totalBytes = 0;
         int nonZeroChapters = 0;
-        for (int i = 0; i < chapters.size(); i++) {
+        for (int i = 0; i < n; i++) {
             Chapter ch = chapters.get(i);
             long len = getChapterLength(bookUuid, ch.getId());
             if (len > 50) {
@@ -533,7 +550,7 @@ public class CacheManager {
                 totalBytes += len;
             }
         }
-        if (chapters.size() > 3 && (nonZeroChapters < chapters.size() / 3 || totalBytes < 5000)) {
+        if (n > 3 && (nonZeroChapters < n / 3 || totalBytes < 5000)) {
             return false;
         }
         return true;
@@ -582,24 +599,31 @@ public class CacheManager {
             return "";
         }
 
-        StringBuilder sb = new StringBuilder();
         FileInputStream fis = null;
-        BufferedReader reader = null;
         try {
+            long fileLen = file.length();
+            if (fileLen <= 0) return "";
             fis = new FileInputStream(file);
-            reader = new BufferedReader(new InputStreamReader(fis, "UTF-8"));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line).append("\n");
+            if (fileLen <= 4 * 1024 * 1024) {
+                byte[] buf = new byte[(int) fileLen];
+                int offset = 0;
+                int read;
+                while (offset < buf.length && (read = fis.read(buf, offset, buf.length - offset)) > 0) {
+                    offset += read;
+                }
+                return new String(buf, 0, offset, "UTF-8");
             }
-            return sb.toString();
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            byte[] chunk = new byte[16384];
+            int nRead;
+            while ((nRead = fis.read(chunk)) > 0) {
+                baos.write(chunk, 0, nRead);
+            }
+            return new String(baos.toByteArray(), "UTF-8");
         } catch (Exception e) {
             Log.e(TAG, "Error reading chapter " + chapterId, e);
             return "";
         } finally {
-            if (reader != null) {
-                try { reader.close(); } catch (Throwable ignored) {}
-            }
             if (fis != null) {
                 try { fis.close(); } catch (Throwable ignored) {}
             }

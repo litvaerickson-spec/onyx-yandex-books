@@ -75,8 +75,8 @@ public class MainActivity extends Activity {
     private LinearLayout catalogBarContainer;
     private View catalogBarDivider;
     private Button btnCatalogCategory, btnCatalogReload;
-    private String selectedCatalogShelfUuid = "uQfUIsur";
-    private String selectedCatalogShelfTitle = "Новинки";
+    private String selectedCatalogShelfUuid = YandexBooksApiClient.AUTO_POPULAR_SHELF_UUID;
+    private String selectedCatalogShelfTitle = "Популярное";
     private List<YandexBooksApiClient.CatalogCategory> cachedCatalogCategories = new ArrayList<>();
     private LinearLayout searchBarContainer;
     private View searchBarDivider;
@@ -1779,7 +1779,7 @@ public class MainActivity extends Activity {
         if (isFinishing()) return;
         final List<YandexBooksApiClient.CatalogCategory> list = (cachedCatalogCategories != null && !cachedCatalogCategories.isEmpty())
                 ? cachedCatalogCategories
-                : java.util.Collections.singletonList(new YandexBooksApiClient.CatalogCategory("uQfUIsur", "Новинки"));
+                : java.util.Collections.singletonList(new YandexBooksApiClient.CatalogCategory(YandexBooksApiClient.AUTO_POPULAR_SHELF_UUID, "Популярное"));
 
         String[] titles = new String[list.size()];
         for (int i = 0; i < list.size(); i++) {
@@ -1865,12 +1865,31 @@ public class MainActivity extends Activity {
                 loadingTextView.setVisibility(View.GONE);
                 updateEmptyState();
                 updateShelfFooter();
-                showNoInternetDialog(new Runnable() {
-                    @Override
-                    public void run() {
-                        loadCatalog();
-                    }
-                });
+                if (!isNetworkAvailable()) {
+                    showNoInternetDialog(new Runnable() {
+                        @Override
+                        public void run() {
+                            loadCatalog();
+                        }
+                    });
+                } else {
+                    String details = (errorMessage != null && !errorMessage.trim().isEmpty())
+                            ? ("\n\n" + errorMessage.trim()) : "";
+                    EinkNotice.showConfirm(
+                            MainActivity.this,
+                            "Каталог временно недоступен",
+                            "Не удалось загрузить подборку «" + selectedCatalogShelfTitle + "»." + details,
+                            "Повторить",
+                            "Закрыть",
+                            new Runnable() {
+                                @Override
+                                public void run() {
+                                    loadCatalog();
+                                }
+                            },
+                            null
+                    );
+                }
             }
         });
     }

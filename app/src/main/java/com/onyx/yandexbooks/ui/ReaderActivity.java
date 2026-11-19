@@ -139,6 +139,7 @@ public class ReaderActivity extends Activity {
 
     private static final int REQUEST_IMPORT_FONT = 7001;
     private double pendingRepagAnchorFraction = -1.0;
+    private int pendingRepagAnchorCharOffset = -1;
     private Runnable pendingRepagRunnable = null;
     private Runnable pendingPrepagRunnable = null;
     private Button btnToggleEinkContrast; // Контраст E-Ink
@@ -189,9 +190,9 @@ public class ReaderActivity extends Activity {
     private TextView readerLoadingText;
 
     // Внутрипамятный кэш страниц и оглавления для мгновенного перелистывания (0 мс)
-    private final Map<Integer, List<TextPaginator.Page>> chapterPagesMemoryCache = new HashMap<>();
-    private final Map<Integer, String> chapterTextMemoryCache = new HashMap<>();
-    private List<EpubParser.TocNode> cachedTocTree = null;
+    private final Map<Integer, List<TextPaginator.Page>> chapterPagesMemoryCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<Integer, String> chapterTextMemoryCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private volatile List<EpubParser.TocNode> cachedTocTree = null;
 
     private TypographyConfig typographyConfig;
     private TextPaginator paginator;
@@ -447,7 +448,7 @@ public class ReaderActivity extends Activity {
         readerCanvas.setOnFootnoteTapListener(new ReaderCanvasView.OnFootnoteTapListener() {
             @Override
             public void onFootnoteTap(String marker, String noteText) {
-                EinkNotice.show(ReaderActivity.this, "Сноска " + marker, noteText);
+                EinkNotice.showReadable(ReaderActivity.this, "Сноска " + marker, noteText, getReadablePopupTextSizeSp());
             }
         });
 
@@ -3047,9 +3048,27 @@ public class ReaderActivity extends Activity {
             for (int i = 0; i < chapters.size(); i++) {
                 chapterPageExact[i] = false;
             }
-            prepaginateBookInBackground(dims[0], dims[1], sig);
+            // Откладываем фоновый пересчёт всей книги, чтобы он не отбирал CPU/Flash I/O у открытия первой видимой страницы
+            scheduleDelayedPrepagination(dims[0], dims[1], sig, 1200L);
         }
         recalculateTotalBookPages();
+    }
+
+    private void scheduleDelayedPrepagination(final int screenW, final int screenH, final String sig, long delayMs) {
+        prepaginationTaskId.incrementAndGet();
+        if (pendingPrepagRunnable != null) {
+            autoSaveHandler.removeCallbacks(pendingPrepagRunnable);
+            pendingPrepagRunnable = null;
+        }
+        pendingPrepagRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (!isFinishing() && sig != null && sig.equals(currentPrepagConfigSig)) {
+                    prepaginateBookInBackground(screenW, screenH, sig);
+                }
+            }
+        };
+        autoSaveHandler.postDelayed(pendingPrepagRunnable, delayMs);
     }
 
     private int[] resolveReaderCanvasDims() {
@@ -3094,7 +3113,11 @@ public class ReaderActivity extends Activity {
         prepaginationExecutor.execute(new Runnable() {
             @Override
             public void run() {
+                int oldPriority = Thread.currentThread().getPriority();
                 try {
+                    try {
+                        Thread.currentThread().setPriority(Thread.MIN_PRIORITY);
+                    } catch (Throwable ignored) {}
                     int n = chaptersSnap.size();
                     final int[] exactCounts = new int[n];
                     TextPaginator bgPaginator = new TextPaginator();
@@ -3102,9 +3125,17 @@ public class ReaderActivity extends Activity {
                         if (myTaskId != prepaginationTaskId.get()) {
                             return;
                         }
+                        if (chapterPageExact != null && i < chapterPageExact.length && chapterPageExact[i]
+                                && chapterPageCounts != null && i < chapterPageCounts.length && chapterPageCounts[i] > 0) {
+                            exactCounts[i] = chapterPageCounts[i];
+                            continue;
+                        }
                         Chapter ch = chaptersSnap.get(i);
                         String chId = ch.getId();
-                        String text = cacheManager.loadChapter(bookId, chId);
+                        String text = chapterTextMemoryCache.get(i);
+                        if (text == null) {
+                            text = cacheManager.loadChapter(bookId, chId);
+                        }
                         if (text == null) {
                             text = cacheManager.loadChapter(bookId, String.valueOf(i));
                         }
@@ -3112,8 +3143,13 @@ public class ReaderActivity extends Activity {
                             String t = ch.getTitle();
                             text = (t != null && !t.startsWith("ch_") && !t.startsWith("ch-")) ? t : "";
                         }
-                        List<TextPaginator.Page> pList = bgPaginator.paginate(text, screenW, screenH, basePaint, cfgCopy);
-                        exactCounts[i] = (pList != null && !pList.isEmpty()) ? pList.size() : 1;
+                        List<TextPaginator.Page> pList = bgPaginator.paginateCancellable(
+                                text, screenW, screenH, basePaint, cfgCopy, prepaginationTaskId, myTaskId);
+                        if (pList == null || myTaskId != prepaginationTaskId.get()) {
+                            return;
+                        }
+                        exactCounts[i] = !pList.isEmpty() ? pList.size() : 1;
+                        Thread.yield();
                     }
                     if (myTaskId != prepaginationTaskId.get()) {
                         return;
@@ -3155,7 +3191,12 @@ public class ReaderActivity extends Activity {
                             }
                         }
                     });
-                } catch (Throwable ignored) {}
+                } catch (Throwable ignored) {
+                } finally {
+                    try {
+                        Thread.currentThread().setPriority(oldPriority);
+                    } catch (Throwable ignored) {}
+                }
             }
         });
     }
@@ -3240,7 +3281,7 @@ public class ReaderActivity extends Activity {
                     @Override
                     public void run() {
                         if (!isFinishing()) {
-                            EinkNotice.show(ReaderActivity.this, dialogTitle, dialogBody);
+                            EinkNotice.showReadable(ReaderActivity.this, dialogTitle, dialogBody, getReadablePopupTextSizeSp());
                         }
                     }
                 });
@@ -3293,13 +3334,22 @@ public class ReaderActivity extends Activity {
         }
 
         if (isCacheValid) {
-            // Главы уже в базе данных и валидны: открываем МГНОВЕННО (< 50 мс) без повторного тяжелого парсинга EPUB!
+            // Главы уже в базе данных и валидны: открываем мгновенно без блокировки UI-потока
             chapters = localChapters;
-            cachedTocTree = cacheManager.loadTocTree(bookUuid);
-            if (readerCanvas != null) {
+            if (readerCanvas != null && typographyConfig.isUseEpubFonts()) {
                 readerCanvas.setEpubFontPaths(cacheManager.loadBookEpubFonts(bookUuid));
             }
             resolveInitialPositionAndOpen();
+            // Загружаем дерево оглавления в фоне (название текущей главы уже доступно из chapters)
+            prepaginationExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        final List<EpubParser.TocNode> tree = cacheManager.loadTocTree(bookUuid);
+                        cachedTocTree = tree;
+                    } catch (Throwable ignored) {}
+                }
+            });
         } else {
             // Главы еще не извлечены или повреждены предыдущей версией: запускаем парсинг
             showLoadingOverlay("Подготовка книги к чтению...");
@@ -3742,6 +3792,21 @@ public class ReaderActivity extends Activity {
         });
     }
 
+    private float getReadablePopupTextSizeSp() {
+        int bookSp = (typographyConfig != null) ? typographyConfig.getFontSizeSp() : 18;
+        return Math.max(16.0f, Math.min(21.0f, bookSp * 0.90f));
+    }
+
+    private static String formatQuotedPreview(String raw) {
+        if (raw == null) return "";
+        String t = raw.trim();
+        if (t.isEmpty()) return "";
+        if ((t.startsWith("«") && t.endsWith("»")) || (t.startsWith("\"") && t.endsWith("\""))) {
+            return t;
+        }
+        return "«" + t + "»";
+    }
+
     private void showTextSelectionActionDialog(final String selectedText, final int startOffset, final int endOffset) {
         if (isFinishing() || selectedText == null || selectedText.trim().isEmpty()) {
             if (readerCanvas != null) readerCanvas.clearSelection();
@@ -3755,40 +3820,66 @@ public class ReaderActivity extends Activity {
             dialog.getWindow().setWindowAnimations(0);
         }
 
-        float density = getResources().getDisplayMetrics().density;
-        LinearLayout root = new LinearLayout(this);
+        final DisplayMetrics dm = getResources().getDisplayMetrics();
+        final float density = dm.density;
+        final LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundResource(R.drawable.dialog_notice_bg);
-        int pad = (int) (14 * density);
-        root.setPadding(pad, pad, pad, pad);
+        int padH = (int) (10 * density);
+        int padV = (int) (10 * density);
+        root.setPadding(padH, padV, padH, padV);
 
         TextView titleView = new TextView(this);
         titleView.setText("Выделенный фрагмент");
-        titleView.setTextSize(14);
+        titleView.setTextSize(16.5f);
         titleView.setTypeface(null, Typeface.BOLD);
         titleView.setTextColor(Color.BLACK);
-        titleView.setGravity(Gravity.CENTER);
-        titleView.setPadding(0, 0, 0, (int) (6 * density));
+        titleView.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         root.addView(titleView);
 
+        View divider = new View(this);
+        divider.setBackgroundColor(Color.BLACK);
+        LinearLayout.LayoutParams divLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) Math.max(2, 2 * density));
+        divLp.setMargins(0, (int) (5 * density), 0, (int) (7 * density));
+        root.addView(divider, divLp);
+
+        // Высококонтрастный превью-блок с вертикальной полосой и крупным чисто-чёрным шрифтом
+        LinearLayout previewBox = new LinearLayout(this);
+        previewBox.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        pbLp.setMargins(0, 0, 0, (int) (8 * density));
+        previewBox.setLayoutParams(pbLp);
+
+        View quoteBar = new View(this);
+        quoteBar.setBackgroundColor(Color.BLACK);
+        LinearLayout.LayoutParams qbLp = new LinearLayout.LayoutParams((int) Math.max(3, 3 * density), ViewGroup.LayoutParams.MATCH_PARENT);
+        qbLp.setMargins(0, (int) (2 * density), (int) (8 * density), (int) (2 * density));
+        previewBox.addView(quoteBar, qbLp);
+
         TextView previewView = new TextView(this);
-        previewView.setText("«" + selectedText.trim() + "»");
-        previewView.setTextSize(12);
-        previewView.setTextColor(Color.DKGRAY);
-        previewView.setMaxLines(4);
+        previewView.setText(formatQuotedPreview(selectedText));
+        previewView.setTextSize(Math.max(15.5f, Math.min(20.0f, getReadablePopupTextSizeSp())));
+        previewView.setTypeface(null, Typeface.NORMAL);
+        previewView.setTextColor(Color.BLACK);
+        previewView.setLineSpacing(2f, 1.22f);
+        previewView.setMaxLines(6);
         previewView.setEllipsize(TextUtils.TruncateAt.END);
-        previewView.setPadding(0, 0, 0, (int) (10 * density));
-        root.addView(previewView);
+        previewBox.addView(previewView, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+        root.addView(previewBox);
+
+        int btnHeight = (int) (40 * density);
+        int btnGap = (int) (5 * density);
 
         Button btnSaveQuote = new Button(this);
         btnSaveQuote.setText("Сохранить цитату");
-        btnSaveQuote.setTextSize(13);
+        btnSaveQuote.setTextSize(14.5f);
         btnSaveQuote.setTypeface(null, Typeface.BOLD);
         btnSaveQuote.setTextColor(Color.BLACK);
         btnSaveQuote.setBackgroundResource(R.drawable.btn_eink_primary);
-        LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (36 * density));
-        bLp.setMargins(0, 0, 0, (int) (6 * density));
-        btnSaveQuote.setLayoutParams(bLp);
+        btnSaveQuote.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams bLp1 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, btnHeight);
+        bLp1.setMargins(0, 0, 0, btnGap);
+        btnSaveQuote.setLayoutParams(bLp1);
         btnSaveQuote.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -3800,10 +3891,14 @@ public class ReaderActivity extends Activity {
 
         Button btnAddNote = new Button(this);
         btnAddNote.setText("Сохранить с заметкой");
-        btnAddNote.setTextSize(13);
+        btnAddNote.setTextSize(14.5f);
+        btnAddNote.setTypeface(null, Typeface.BOLD);
         btnAddNote.setTextColor(Color.BLACK);
         btnAddNote.setBackgroundResource(R.drawable.btn_eink);
-        btnAddNote.setLayoutParams(bLp);
+        btnAddNote.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams bLp2 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, btnHeight);
+        bLp2.setMargins(0, 0, 0, btnGap);
+        btnAddNote.setLayoutParams(bLp2);
         btnAddNote.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -3815,10 +3910,14 @@ public class ReaderActivity extends Activity {
 
         Button btnCopy = new Button(this);
         btnCopy.setText("Копировать текст");
-        btnCopy.setTextSize(13);
+        btnCopy.setTextSize(14.5f);
+        btnCopy.setTypeface(null, Typeface.BOLD);
         btnCopy.setTextColor(Color.BLACK);
         btnCopy.setBackgroundResource(R.drawable.btn_eink);
-        btnCopy.setLayoutParams(bLp);
+        btnCopy.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams bLp3 = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, btnHeight);
+        bLp3.setMargins(0, 0, 0, btnGap);
+        btnCopy.setLayoutParams(bLp3);
         btnCopy.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -3837,10 +3936,12 @@ public class ReaderActivity extends Activity {
 
         Button btnCancel = new Button(this);
         btnCancel.setText("Отмена");
-        btnCancel.setTextSize(13);
+        btnCancel.setTextSize(14.5f);
+        btnCancel.setTypeface(null, Typeface.BOLD);
         btnCancel.setTextColor(Color.BLACK);
         btnCancel.setBackgroundResource(R.drawable.btn_eink);
-        btnCancel.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (36 * density)));
+        btnCancel.setPadding(0, 0, 0, 0);
+        btnCancel.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, btnHeight));
         btnCancel.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -3856,13 +3957,20 @@ public class ReaderActivity extends Activity {
                 if (readerCanvas != null) readerCanvas.clearSelection();
             }
         });
+        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface d) {
+                EpdController.requestFullRefresh(ReaderActivity.this, null);
+            }
+        });
 
-        DisplayMetrics dm = getResources().getDisplayMetrics();
-        dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        final int targetW = Math.min((int) (dm.widthPixels * 0.94), (int) (540 * density));
+        dialog.setContentView(root, new ViewGroup.LayoutParams(targetW, ViewGroup.LayoutParams.WRAP_CONTENT));
         dialog.show();
         if (dialog.getWindow() != null) {
-            dialog.getWindow().setLayout(Math.min((int) (dm.widthPixels * 0.86), (int) (460 * density)), ViewGroup.LayoutParams.WRAP_CONTENT);
+            dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
         }
+        EpdController.requestFullRefresh(ReaderActivity.this, root);
     }
 
     private void showQuoteNoteDialog(final String selectedText, final int startOffset, final int endOffset) {
@@ -3873,24 +3981,25 @@ public class ReaderActivity extends Activity {
             dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
             dialog.getWindow().setWindowAnimations(0);
         }
-        float density = getResources().getDisplayMetrics().density;
-        LinearLayout root = new LinearLayout(this);
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        float density = dm.density;
+        final LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundResource(R.drawable.dialog_notice_bg);
-        int pad = (int) (14 * density);
+        int pad = (int) (10 * density);
         root.setPadding(pad, pad, pad, pad);
 
         TextView titleView = new TextView(this);
         titleView.setText("Заметка к цитате");
-        titleView.setTextSize(14);
+        titleView.setTextSize(16.5f);
         titleView.setTypeface(null, Typeface.BOLD);
         titleView.setTextColor(Color.BLACK);
-        titleView.setPadding(0, 0, 0, (int) (8 * density));
+        titleView.setPadding(0, 0, 0, (int) (6 * density));
         root.addView(titleView);
 
         final EditText input = new EditText(this);
         input.setHint("Введите комментарий...");
-        input.setTextSize(13);
+        input.setTextSize(15.5f);
         input.setTextColor(Color.BLACK);
         input.setMinLines(2);
         input.setMaxLines(5);
@@ -3904,11 +4013,12 @@ public class ReaderActivity extends Activity {
 
         Button btnSave = new Button(this);
         btnSave.setText("Сохранить");
-        btnSave.setTextSize(13);
+        btnSave.setTextSize(14.5f);
         btnSave.setTypeface(null, Typeface.BOLD);
         btnSave.setTextColor(Color.BLACK);
         btnSave.setBackgroundResource(R.drawable.btn_eink_primary);
-        LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(0, (int) (36 * density), 1.0f);
+        btnSave.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(0, (int) (40 * density), 1.0f);
         bLp.setMargins(0, 0, (int) (4 * density), 0);
         btnSave.setLayoutParams(bLp);
         btnSave.setOnClickListener(new View.OnClickListener() {
@@ -3922,10 +4032,12 @@ public class ReaderActivity extends Activity {
 
         Button btnCancel = new Button(this);
         btnCancel.setText("Отмена");
-        btnCancel.setTextSize(13);
+        btnCancel.setTextSize(14.5f);
+        btnCancel.setTypeface(null, Typeface.BOLD);
         btnCancel.setTextColor(Color.BLACK);
         btnCancel.setBackgroundResource(R.drawable.btn_eink);
-        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0, (int) (36 * density), 1.0f);
+        btnCancel.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0, (int) (40 * density), 1.0f);
         cLp.setMargins((int) (4 * density), 0, 0, 0);
         btnCancel.setLayoutParams(cLp);
         btnCancel.setOnClickListener(new View.OnClickListener() {
@@ -3944,13 +4056,20 @@ public class ReaderActivity extends Activity {
                 if (readerCanvas != null) readerCanvas.clearSelection();
             }
         });
+        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface d) {
+                EpdController.requestFullRefresh(ReaderActivity.this, null);
+            }
+        });
 
-        DisplayMetrics dm = getResources().getDisplayMetrics();
-        dialog.setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        int targetW = Math.min((int) (dm.widthPixels * 0.94), (int) (540 * density));
+        dialog.setContentView(root, new ViewGroup.LayoutParams(targetW, ViewGroup.LayoutParams.WRAP_CONTENT));
         dialog.show();
         if (dialog.getWindow() != null) {
-            dialog.getWindow().setLayout(Math.min((int) (dm.widthPixels * 0.88), (int) (480 * density)), ViewGroup.LayoutParams.WRAP_CONTENT);
+            dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
         }
+        EpdController.requestFullRefresh(ReaderActivity.this, root);
     }
 
     private void saveSelectedQuote(String selectedText, String note, int startOffset, int endOffset) {
@@ -4196,8 +4315,11 @@ public class ReaderActivity extends Activity {
             @Override
             public void run() {
                 try {
-                    // 1. ЧТЕНИЕ ТЕКСТА ГЛАВЫ В ФОНОВОМ ПОТОКЕ (НЕ НА UI!)
-                    String text = cacheManager.loadChapter(bookUuid, chId);
+                    // 1. ЧТЕНИЕ ТЕКСТА ГЛАВЫ ИЗ RAM-КЭША ИЛИ ДИСКА В ФОНОВОМ ПОТОКЕ
+                    String text = chapterTextMemoryCache.get(index);
+                    if (text == null) {
+                        text = cacheManager.loadChapter(bookUuid, chId);
+                    }
                     if (text == null) {
                         text = cacheManager.loadChapter(bookUuid, String.valueOf(index));
                     }
@@ -4210,20 +4332,67 @@ public class ReaderActivity extends Activity {
                         text = title;
                     }
 
-                    // 2. ПАГИНАЦИЯ В ФОНОВОМ ПОТОКЕ
-                    final List<TextPaginator.Page> pages = paginator.paginate(
-                            text,
+                    final String rawText = text;
+                    chapterTextMemoryCache.put(index, rawText);
+
+                    // 1.5 APPLE-ПОДХОД: для больших глав (> 12 КБ) сначала мгновенно показываем 1 видимую страницу (~10 мс),
+                    // пока полная пагинация всей главы дорабатывает в фоне!
+                    if (rawText.length() > 12000 && (currentPages == null || currentPages.isEmpty())) {
+                        int quickOffset = -1;
+                        if (targetCharOffset >= 0) {
+                            quickOffset = targetCharOffset;
+                        } else if (targetParagraph > 0) {
+                            quickOffset = findParagraphOffset(rawText, targetParagraph);
+                        } else if (anchorFraction >= 0.0 && anchorFraction <= 1.0) {
+                            quickOffset = (int) Math.round(rawText.length() * anchorFraction);
+                        } else if (targetPage == 0) {
+                            quickOffset = 0;
+                        }
+                        if (quickOffset >= 0 && taskId == paginationTaskId.get()) {
+                            final TextPaginator.Page firstScreenPage = paginator.paginateSinglePageFromOffset(
+                                    rawText, quickOffset, screenWidth, screenHeight, paint, configCopy);
+                            if (firstScreenPage != null && taskId == paginationTaskId.get()) {
+                                runOnUiThread(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        if (taskId != paginationTaskId.get() || readerCanvas == null) return;
+                                        hideLoadingOverlay();
+                                        readerCanvas.setTypographyConfig(typographyConfig);
+                                        String title = getActiveChapterTitle();
+                                        double percent = calculateCurrentGlobalPercent();
+                                        int totalCh = chapters != null ? chapters.size() : 1;
+                                        readerCanvas.setPage(
+                                                firstScreenPage,
+                                                globalPageIndex,
+                                                totalBookPages,
+                                                title,
+                                                currentChapterIndex,
+                                                totalCh,
+                                                percent,
+                                                1,
+                                                1
+                                        );
+                                    }
+                                });
+                            }
+                        }
+                    }
+
+                    // 2. ПОЛНАЯ ОТМЕНЯЕМАЯ ПАГИНАЦИЯ ГЛАВЫ В ФОНОВОМ ПОТОКЕ
+                    final List<TextPaginator.Page> pages = paginator.paginateCancellable(
+                            rawText,
                             screenWidth,
                             screenHeight,
                             paint,
-                            configCopy
+                            configCopy,
+                            paginationTaskId,
+                            taskId
                     );
 
-                    if (taskId != paginationTaskId.get()) {
+                    if (pages == null || taskId != paginationTaskId.get()) {
                         return;
                     }
 
-                    final String rawText = text;
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -4510,31 +4679,90 @@ public class ReaderActivity extends Activity {
         });
     }
 
+    /**
+     * Концепция Apple Books: мгновенная визуализация текущей видимой страницы (~5–15 мс)
+     * сразу в момент изменения шрифта/настроек, с последующим фоновым пересчётом всей главы и счётчика страниц книги.
+     */
+    private void renderInstantViewportPreview(int anchorCharOffset) {
+        if (readerCanvas == null || paginator == null || chapters == null || chapters.isEmpty()) return;
+        String cachedText = chapterTextMemoryCache.get(currentChapterIndex);
+        if (cachedText == null || cachedText.isEmpty()) return;
+        try {
+            int[] dims = resolveReaderCanvasDims();
+            TypographyConfig cfgSnap = cloneTypographyConfig(typographyConfig);
+            Paint previewPaint = readerCanvas.buildPaintForConfig(cfgSnap);
+            TextPaginator.Page previewPage = paginator.paginateSinglePageFromOffset(
+                    cachedText, Math.max(0, anchorCharOffset), dims[0], dims[1], previewPaint, cfgSnap);
+            if (previewPage != null) {
+                readerCanvas.setTypographyConfig(typographyConfig);
+                String title = getActiveChapterTitle();
+                double percent = calculateCurrentGlobalPercent();
+                int totalCh = chapters.size();
+                int chTotal = (currentPages != null && !currentPages.isEmpty()) ? currentPages.size() : 1;
+                readerCanvas.setPage(
+                        previewPage,
+                        globalPageIndex,
+                        totalBookPages,
+                        title,
+                        currentChapterIndex,
+                        totalCh,
+                        percent,
+                        Math.min(currentPageIndex + 1, chTotal),
+                        chTotal
+                );
+            }
+        } catch (Throwable ignored) {}
+    }
+
     private void scheduleDebouncedRepaginate() {
-        if (pendingRepagAnchorFraction < 0 && currentPages != null && !currentPages.isEmpty() && currentPageIndex < currentPages.size()) {
+        // 1. Немедленно останавливаем фоновый пересчёт всей книги, чтобы не мешал мгновенной отрисовке
+        prepaginationTaskId.incrementAndGet();
+        if (pendingPrepagRunnable != null) {
+            autoSaveHandler.removeCallbacks(pendingPrepagRunnable);
+            pendingPrepagRunnable = null;
+        }
+
+        // 2. Фиксируем точную позицию чтения (символьное смещение) до серии нажатий +/-
+        if (pendingRepagAnchorCharOffset < 0 && currentPages != null && !currentPages.isEmpty() && currentPageIndex < currentPages.size()) {
+            pendingRepagAnchorCharOffset = Math.max(0, currentPages.get(currentPageIndex).startCharOffset);
             pendingRepagAnchorFraction = (double) currentPageIndex / (double) Math.max(1, currentPages.size());
         }
+
+        // 3. МГНОВЕННО визуализируем видимую страницу с новым размером шрифта (0 мс задержки!)
+        renderInstantViewportPreview(Math.max(0, pendingRepagAnchorCharOffset));
+
+        // 4. Откладываем полный пересчёт текущей главы и всей книги до паузы после нажатий пользователя
         if (pendingRepagRunnable != null) {
             autoSaveHandler.removeCallbacks(pendingRepagRunnable);
         }
         pendingRepagRunnable = new Runnable() {
             @Override
             public void run() {
-                double anchor = pendingRepagAnchorFraction;
+                double anchorFrac = pendingRepagAnchorFraction;
+                int anchorChar = pendingRepagAnchorCharOffset;
                 pendingRepagAnchorFraction = -1.0;
-                repaginateCurrentChapterInternal(anchor, true);
+                pendingRepagAnchorCharOffset = -1;
+                repaginateCurrentChapterInternal(anchorFrac, anchorChar, true);
             }
         };
-        autoSaveHandler.postDelayed(pendingRepagRunnable, 160L);
+        autoSaveHandler.postDelayed(pendingRepagRunnable, 260L);
     }
 
     private void repaginateCurrentChapter() {
-        repaginateCurrentChapterInternal(-1.0, false);
+        int anchorChar = -1;
+        if (currentPages != null && !currentPages.isEmpty() && currentPageIndex < currentPages.size()) {
+            anchorChar = Math.max(0, currentPages.get(currentPageIndex).startCharOffset);
+        }
+        // Мгновенный отклик видимой страницы и для других настроек (выравнивание, отступ, межстрочный, шрифт)
+        if (anchorChar >= 0) {
+            renderInstantViewportPreview(anchorChar);
+        }
+        repaginateCurrentChapterInternal(-1.0, anchorChar, true);
     }
 
-    private void repaginateCurrentChapterInternal(double anchorOverride, boolean debouncePrepag) {
+    private void repaginateCurrentChapterInternal(double anchorOverride, int anchorCharOverride, boolean debouncePrepag) {
+        // Очищаем только свёрстанные страницы, сохраняя сырой текст главы в RAM (0 мс чтения диска!)
         chapterPagesMemoryCache.clear();
-        chapterTextMemoryCache.clear();
         double fraction = anchorOverride;
         if (fraction < 0 && currentPages != null && !currentPages.isEmpty() && currentPageIndex < currentPages.size()) {
             fraction = (double) currentPageIndex / (double) Math.max(1, currentPages.size());
@@ -4563,28 +4791,16 @@ public class ReaderActivity extends Activity {
                             chapterPageExact[i] = false;
                         }
                     }
-                    if (pendingPrepagRunnable != null) {
-                        autoSaveHandler.removeCallbacks(pendingPrepagRunnable);
-                        pendingPrepagRunnable = null;
-                    }
-                    if (debouncePrepag) {
-                        pendingPrepagRunnable = new Runnable() {
-                            @Override
-                            public void run() {
-                                if (sig.equals(currentPrepagConfigSig)) {
-                                    prepaginateBookInBackground(dims[0], dims[1], sig);
-                                }
-                            }
-                        };
-                        autoSaveHandler.postDelayed(pendingPrepagRunnable, 650L);
-                    } else {
-                        prepaginateBookInBackground(dims[0], dims[1], sig);
-                    }
+                    scheduleDelayedPrepagination(dims[0], dims[1], sig, debouncePrepag ? 1000L : 500L);
                 }
             }
         }
         if (chapters != null && currentChapterIndex >= 0 && currentChapterIndex < chapters.size()) {
-            loadChapterWithFraction(currentChapterIndex, fraction);
+            if (anchorCharOverride >= 0) {
+                loadChapterInternal(currentChapterIndex, fraction, -1, anchorCharOverride, -1);
+            } else {
+                loadChapterWithFraction(currentChapterIndex, fraction);
+            }
         }
     }
 

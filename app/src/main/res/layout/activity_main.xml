@@ -240,7 +240,7 @@
             android:layout_height="28dp"
             android:minHeight="0dp"
             android:layout_weight="1"
-            android:text="Категория: Новинки ▼"
+            android:text="Категория: Популярное ▼"
             android:textSize="11sp"
             android:textStyle="bold"
             android:singleLine="true"

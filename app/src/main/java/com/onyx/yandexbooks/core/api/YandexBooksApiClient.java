@@ -2343,8 +2343,12 @@ public class YandexBooksApiClient {
         }
     }
 
+    public static final String DEFAULT_CATALOG_SHELF_UUID = "ySg3hPn4";
+    public static final String AUTO_POPULAR_SHELF_UUID = "__popular__";
+
     /**
      * Возвращает список категорий и тематических подборок каталога Яндекс Книг.
+     * Все встроенные полки проверены на живом API v5 (HTTP 200), приоритет отдан живым подборкам из /popular_searches/ru.
      */
     public void getCatalogCategories(final ApiCallback<List<CatalogCategory>> callback) {
         new Thread(new Runnable() {
@@ -2353,19 +2357,10 @@ public class YandexBooksApiClient {
                 List<CatalogCategory> categories = new ArrayList<>();
                 java.util.Set<String> seenUuids = new java.util.HashSet<>();
 
-                // 1. Встроенные актуальные рубрики Яндекс Книг (проверены по витрине books.yandex.ru)
-                addCategoryUnique(categories, seenUuids, "uQfUIsur", "Новинки");
-                addCategoryUnique(categories, seenUuids, "DyY40A8l", "Суперхиты");
-                addCategoryUnique(categories, seenUuids, "MsYy9bE8", "Российская фантастика");
-                addCategoryUnique(categories, seenUuids, "XLLytQg2", "Славянское фэнтези");
-                addCategoryUnique(categories, seenUuids, "Mb1nPGHx", "Лучшие современные детективы");
-                addCategoryUnique(categories, seenUuids, "oRidVXsN", "Лучшие триллеры XXI века");
-                addCategoryUnique(categories, seenUuids, "JUzuIVzn", "Нобелевская премия");
-                addCategoryUnique(categories, seenUuids, "nwavRdj8", "Саморазвитие");
-                addCategoryUnique(categories, seenUuids, "j2wlhX4Z", "Затягивает с первой главы");
-                addCategoryUnique(categories, seenUuids, "ySg3hPn4", "Только в Яндекс Книгах");
+                // 1. Первая рубрика — актуальные рекомендации с витрины /api/v5/popular_searches/ru
+                addCategoryUnique(categories, seenUuids, AUTO_POPULAR_SHELF_UUID, "Популярное");
 
-                // 2. Дополняем динамическими подборками из /api/v5/popular_searches/ru
+                // 2. Динамические редакционные подборки напрямую из /api/v5/popular_searches/ru
                 Response popResp = null;
                 try {
                     Request req = createAuthRequestBuilder(BASE_URL + "/popular_searches/ru").get().build();
@@ -2380,7 +2375,7 @@ public class YandexBooksApiClient {
                                     JSONObject item = res.optJSONObject(i);
                                     if (item == null) continue;
                                     String url = item.optString("url", "");
-                                    String title = item.optString("title", "").trim();
+                                    String title = item.optString("title", "").replace('\u00A0', ' ').trim();
                                     if (url.contains("/bookshelves/") && !title.isEmpty()) {
                                         String[] parts = url.split("/bookshelves/");
                                         if (parts.length > 1) {
@@ -2398,31 +2393,14 @@ public class YandexBooksApiClient {
                     if (popResp != null) try { popResp.close(); } catch (Exception ignored) {}
                 }
 
-                // 3. Дополняем пользовательскими/тематическими полками из /api/v5/bookshelves
-                Response shelvesResp = null;
-                try {
-                    Request req = createAuthRequestBuilder(BASE_URL + "/bookshelves?per_page=20&page=1").get().build();
-                    shelvesResp = httpClient.newCall(req).execute();
-                    if (shelvesResp.isSuccessful() && shelvesResp.body() != null) {
-                        JSONObject json = new JSONObject(shelvesResp.body().string());
-                        JSONArray arr = json.optJSONArray("bookshelves");
-                        if (arr != null) {
-                            for (int i = 0; i < arr.length(); i++) {
-                                JSONObject sh = arr.optJSONObject(i);
-                                if (sh == null) continue;
-                                String u = sh.optString("uuid", "").trim();
-                                String t = sh.optString("title", "").replace("\n", " ").trim();
-                                int count = sh.optInt("books_count", 0);
-                                if (!u.isEmpty() && !t.isEmpty() && count > 0) {
-                                    addCategoryUnique(categories, seenUuids, u, t);
-                                }
-                            }
-                        }
-                    }
-                } catch (Exception ignored) {
-                } finally {
-                    if (shelvesResp != null) try { shelvesResp.close(); } catch (Exception ignored) {}
-                }
+                // 3. Гарантированно рабочие редакционные полки API v5 (проверены живыми запросами HTTP 200)
+                addCategoryUnique(categories, seenUuids, "ySg3hPn4", "Только в Яндекс Книгах");
+                addCategoryUnique(categories, seenUuids, "ACX4QPxo", "Главные новинки");
+                addCategoryUnique(categories, seenUuids, "L6asjavK", "Подборка редакции");
+                addCategoryUnique(categories, seenUuids, "oRidVXsN", "Лучшие триллеры XXI века");
+                addCategoryUnique(categories, seenUuids, "JUzuIVzn", "Нобелевская премия");
+                addCategoryUnique(categories, seenUuids, "XLLytQg2", "Славянское фэнтези");
+                addCategoryUnique(categories, seenUuids, "byugcjMZ", "Новинки Яндекс Книг");
 
                 postSuccess(callback, categories);
             }
@@ -2437,11 +2415,11 @@ public class YandexBooksApiClient {
     }
 
     public void getCatalogBooksByShelf(String shelfUuid, final ApiCallback<List<Book>> callback) {
-        if (shelfUuid == null || shelfUuid.trim().isEmpty()) {
+        if (shelfUuid == null || shelfUuid.trim().isEmpty() || AUTO_POPULAR_SHELF_UUID.equals(shelfUuid.trim())) {
             getRecommendations(callback);
             return;
         }
-        loadBookshelfByUuid(shelfUuid.trim(), callback);
+        loadBookshelfByUuid(shelfUuid.trim(), true, callback);
     }
 
     /**
@@ -2454,14 +2432,14 @@ public class YandexBooksApiClient {
         httpClient.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-                loadBookshelfByUuid("uQfUIsur", callback);
+                loadBookshelfByUuid(DEFAULT_CATALOG_SHELF_UUID, false, callback);
             }
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
                 if (!response.isSuccessful()) {
                     response.close();
-                    loadBookshelfByUuid("uQfUIsur", callback);
+                    loadBookshelfByUuid(DEFAULT_CATALOG_SHELF_UUID, false, callback);
                     return;
                 }
 
@@ -2469,7 +2447,7 @@ public class YandexBooksApiClient {
                     String body = response.body().string();
                     JSONObject json = new JSONObject(body);
                     JSONObject pop = json.optJSONObject("popular_searches");
-                    String shelfUuid = "uQfUIsur";
+                    String shelfUuid = DEFAULT_CATALOG_SHELF_UUID;
                     if (pop != null) {
                         JSONArray res = pop.optJSONArray("resources");
                         if (res != null && res.length() > 0) {
@@ -2479,29 +2457,33 @@ public class YandexBooksApiClient {
                                 if (url.contains("/bookshelves/")) {
                                     String[] parts = url.split("/bookshelves/");
                                     if (parts.length > 1 && !parts[1].trim().isEmpty()) {
-                                        shelfUuid = parts[1].trim();
-                                        break;
+                                        String cand = parts[1].trim();
+                                        if (cand.contains("?")) cand = cand.substring(0, cand.indexOf('?'));
+                                        if (!cand.isEmpty()) {
+                                            shelfUuid = cand;
+                                            break;
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                    loadBookshelfByUuid(shelfUuid, callback);
+                    loadBookshelfByUuid(shelfUuid, true, callback);
                 } catch (Exception e) {
-                    loadBookshelfByUuid("uQfUIsur", callback);
+                    loadBookshelfByUuid(DEFAULT_CATALOG_SHELF_UUID, false, callback);
                 }
             }
         });
     }
 
-    private void loadBookshelfByUuid(String shelfUuid, final ApiCallback<List<Book>> callback) {
+    private void loadBookshelfByUuid(final String shelfUuid, final boolean allowFallback, final ApiCallback<List<Book>> callback) {
         String endpoint = BASE_URL + "/bookshelves/" + shelfUuid + "/books?per_page=50";
         Request request = createAuthRequestBuilder(endpoint).get().build();
 
         httpClient.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-                postError(callback, "Ошибка загрузки каталога: " + e.getMessage());
+                postError(callback, "Ошибка сети: " + e.getMessage());
             }
 
             @Override
@@ -2509,6 +2491,10 @@ public class YandexBooksApiClient {
                 if (!response.isSuccessful()) {
                     int code = response.code();
                     response.close();
+                    if (allowFallback && !DEFAULT_CATALOG_SHELF_UUID.equals(shelfUuid)) {
+                        loadBookshelfByUuid(DEFAULT_CATALOG_SHELF_UUID, false, callback);
+                        return;
+                    }
                     postError(callback, "Ошибка загрузки каталога: HTTP " + code);
                     return;
                 }
@@ -2530,6 +2516,10 @@ public class YandexBooksApiClient {
                                 books.add(book);
                             }
                         }
+                    }
+                    if (books.isEmpty() && allowFallback && !DEFAULT_CATALOG_SHELF_UUID.equals(shelfUuid)) {
+                        loadBookshelfByUuid(DEFAULT_CATALOG_SHELF_UUID, false, callback);
+                        return;
                     }
                     postSuccess(callback, books);
                 } catch (Exception e) {

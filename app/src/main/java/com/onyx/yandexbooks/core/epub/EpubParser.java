@@ -412,15 +412,16 @@ public class EpubParser {
 
             node.spineIndex = matchedChapter;
 
-            // Расчет точного символьного смещения якоря charOffset
+            // Расчет символьного смещения якоря charOffset за один быстрый проход без O(N^2) перепарсинга HTML
             if (node.anchor != null && !node.anchor.isEmpty()) {
                 int spineFileIndex = findSpineIndex(spineHrefs, node.fileHref);
                 String rawHtml = (spineFileIndex >= 0) ? rawHtmlCache.get(spineFileIndex) : null;
                 if (rawHtml != null) {
                     int anchorTagStart = findAnchorOffset(rawHtml, node.anchor);
                     if (anchorTagStart > 0 && anchorTagStart < rawHtml.length()) {
-                        String leadingText = EpubFormatting.extractRichHtmlText(rawHtml.substring(0, anchorTagStart), node.fileHref, null);
-                        node.charOffset = leadingText.length();
+                        String chText = (matchedChapter >= 0 && matchedChapter < chapters.size())
+                                ? chapters.get(matchedChapter).textContent : null;
+                        node.charOffset = estimateAnchorCharOffsetFast(rawHtml, anchorTagStart, chText);
                     } else {
                         node.charOffset = 0;
                     }
@@ -527,6 +528,51 @@ public class EpubParser {
     }
 
     /**
+     * Быстрый расчёт символьного смещения якоря внутри уже распарсенного текста главы
+     * без повторного вызова EpubFormatting.extractRichHtmlText (устраняет O(N^2) задержку на крупных EPUB).
+     */
+    private static int estimateAnchorCharOffsetFast(String rawHtml, int anchorTagStart, String chapterText) {
+        if (rawHtml == null || anchorTagStart <= 0) return 0;
+        int len = rawHtml.length();
+        int bodyStart = rawHtml.indexOf("<body");
+        if (bodyStart < 0) bodyStart = rawHtml.indexOf("<BODY");
+        if (bodyStart >= 0) {
+            int gt = rawHtml.indexOf('>', bodyStart);
+            bodyStart = (gt > bodyStart) ? (gt + 1) : 0;
+        } else {
+            bodyStart = 0;
+        }
+        if (anchorTagStart <= bodyStart) return 0;
+
+        int visibleBefore = 0;
+        boolean inTag = false;
+        boolean prevSpace = true;
+        int limit = Math.min(anchorTagStart, len);
+        for (int i = bodyStart; i < limit; i++) {
+            char c = rawHtml.charAt(i);
+            if (c == '<') {
+                inTag = true;
+            } else if (c == '>') {
+                inTag = false;
+            } else if (!inTag) {
+                if (c <= ' ') {
+                    if (!prevSpace) {
+                        visibleBefore++;
+                        prevSpace = true;
+                    }
+                } else {
+                    visibleBefore++;
+                    prevSpace = false;
+                }
+            }
+        }
+        if (chapterText != null && !chapterText.isEmpty()) {
+            return Math.min(visibleBefore, Math.max(0, chapterText.length() - 1));
+        }
+        return visibleBefore;
+    }
+
+    /**
      * Поиск начала открывающего тега <...>, содержащего id="anchor" или name="anchor".
      * Гарантирует возврат индекса '<', исключая разрыв тега наполовину.
      */
@@ -538,7 +584,29 @@ public class EpubParser {
         }
         if (cleanAnchor.isEmpty()) return -1;
 
-        // 1. Поиск открывающего тега с id="anchor" или name="anchor"
+        // 0. Сверхбыстрый путь без компиляции регулярных выражений (99% реальных EPUB)
+        String[] fastNeedles = new String[]{
+                "id=\"" + cleanAnchor + "\"",
+                "id='" + cleanAnchor + "'",
+                "name=\"" + cleanAnchor + "\"",
+                "name='" + cleanAnchor + "'"
+        };
+        for (int k = 0; k < fastNeedles.length; k++) {
+            int idx = html.indexOf(fastNeedles[k]);
+            while (idx >= 0) {
+                boolean boundaryOk = (idx == 0) || !Character.isLetterOrDigit(html.charAt(idx - 1));
+                if (boundaryOk) {
+                    int tagStart = html.lastIndexOf('<', idx);
+                    int tagCloseBefore = html.lastIndexOf('>', idx);
+                    if (tagStart >= 0 && tagStart > tagCloseBefore) {
+                        return tagStart;
+                    }
+                }
+                idx = html.indexOf(fastNeedles[k], idx + 1);
+            }
+        }
+
+        // 1. Резервный поиск с пробелами вокруг '=' или другим регистром атрибута
         Pattern p = Pattern.compile("<[^>]+?\\b(?:id|name)\\s*=\\s*[\"']" + Pattern.quote(cleanAnchor) + "[\"'][^>]*>", Pattern.CASE_INSENSITIVE);
         Matcher m = p.matcher(html);
         if (m.find()) {
