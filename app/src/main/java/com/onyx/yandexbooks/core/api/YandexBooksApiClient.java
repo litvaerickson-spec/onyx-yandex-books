@@ -102,6 +102,7 @@ public class YandexBooksApiClient {
         builder.addHeader("App-Platform", "android");
         builder.addHeader("App-Language", "ru");
         builder.addHeader("App-Locale", "ru");
+        builder.addHeader("Accept-Language", "ru-RU,ru");
         builder.addHeader("Bookmate-Version", "20200305");
         builder.addHeader("Device-Os", "Android");
         builder.addHeader("App-User-Agent", "Samsung/Galaxy_A51 Android/12 Bookmate/3.7.3");
@@ -2345,12 +2346,34 @@ public class YandexBooksApiClient {
 
     public static final String DEFAULT_CATALOG_SHELF_UUID = "ySg3hPn4";
     public static final String AUTO_POPULAR_SHELF_UUID = "__popular__";
+    public static final String TOPIC_CATEGORY_PREFIX = "topic:";
+    private static final long CATALOG_CATEGORIES_CACHE_TTL_MS = 30L * 60L * 1000L;
+    private volatile List<CatalogCategory> cachedCatalogCategories;
+    private volatile long cachedCatalogCategoriesAtMs = 0L;
+
+    private static boolean isExcludedCatalogTopicSlug(String slug) {
+        if (slug == null) return false;
+        String s = slug.toLowerCase(Locale.US);
+        return s.contains("podkast") || s.contains("podcast")
+                || s.contains("audiospektakl") || s.contains("audiobook")
+                || s.contains("rasskazchik") || s.contains("yandexart")
+                || s.contains("sinhronizirovano") || s.contains("inoagent")
+                || "luch-ru".equals(s) || "kniga-kino-ru".equals(s)
+                || "predreliz-ru".equals(s) || "serial-ru".equals(s)
+                || "biblii-ru".equals(s) || "normativno-pravovye-akty-ru".equals(s);
+    }
 
     /**
-     * Возвращает список категорий и тематических подборок каталога Яндекс Книг.
-     * Все встроенные полки проверены на живом API v5 (HTTP 200), приоритет отдан живым подборкам из /popular_searches/ru.
+     * Возвращает полный актуальный список категорий, жанров и динамических подборок каталога Яндекс Книг:
+     * /popular_searches/ru + /topics/PNZcAxtW/bookshelves + все актуальные темы/поджанры из /api/v5/catalog.
      */
     public void getCatalogCategories(final ApiCallback<List<CatalogCategory>> callback) {
+        List<CatalogCategory> cached = cachedCatalogCategories;
+        if (cached != null && !cached.isEmpty()
+                && (System.currentTimeMillis() - cachedCatalogCategoriesAtMs) < CATALOG_CATEGORIES_CACHE_TTL_MS) {
+            postSuccess(callback, new ArrayList<>(cached));
+            return;
+        }
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -2393,7 +2416,80 @@ public class YandexBooksApiClient {
                     if (popResp != null) try { popResp.close(); } catch (Exception ignored) {}
                 }
 
-                // 3. Гарантированно рабочие редакционные полки API v5 (проверены живыми запросами HTTP 200)
+                // 3. Актуальные тематические полки каталога (/api/v5/topics/PNZcAxtW/bookshelves)
+                Response shelvesResp = null;
+                try {
+                    Request req = createAuthRequestBuilder(BASE_URL + "/topics/PNZcAxtW/bookshelves?per_page=30").get().build();
+                    shelvesResp = httpClient.newCall(req).execute();
+                    if (shelvesResp.isSuccessful() && shelvesResp.body() != null) {
+                        JSONObject json = new JSONObject(shelvesResp.body().string());
+                        JSONArray shelves = json.optJSONArray("bookshelves");
+                        if (shelves != null) {
+                            for (int i = 0; i < shelves.length(); i++) {
+                                JSONObject sh = shelves.optJSONObject(i);
+                                if (sh == null) continue;
+                                if (sh.optInt("books_count", 1) <= 0) continue;
+                                String u = sh.optString("uuid", "").trim();
+                                String t = sh.optString("title", "").replace('\u00A0', ' ').trim();
+                                addCategoryUnique(categories, seenUuids, u, t);
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {
+                } finally {
+                    if (shelvesResp != null) try { shelvesResp.close(); } catch (Exception ignored) {}
+                }
+
+                // 4. Все актуальные жанры, рубрики и поджанры напрямую с сервера (/api/v5/catalog)
+                Response catResp = null;
+                try {
+                    Request req = createAuthRequestBuilder(BASE_URL + "/catalog").get().build();
+                    catResp = httpClient.newCall(req).execute();
+                    if (catResp.isSuccessful() && catResp.body() != null) {
+                        JSONObject json = new JSONObject(catResp.body().string());
+                        JSONArray topics = json.optJSONArray("topics");
+                        if (topics != null) {
+                            java.util.Set<String> seenTopicTitles = new java.util.HashSet<>();
+                            for (int i = 0; i < topics.length(); i++) {
+                                JSONObject tObj = topics.optJSONObject(i);
+                                if (tObj == null) continue;
+                                String slug = tObj.optString("slug", "").trim();
+                                if (isExcludedCatalogTopicSlug(slug)) continue;
+                                String tUuid = tObj.optString("uuid", "").trim();
+                                String tTitle = tObj.optString("title", "").replace('\u00A0', ' ').trim();
+                                JSONArray subtopics = tObj.optJSONArray("subtopics");
+                                boolean hasSub = subtopics != null && subtopics.length() > 0;
+                                boolean hasLegacyBg = !tObj.isNull("background");
+                                if (hasLegacyBg && !hasSub) continue;
+                                if (!tUuid.isEmpty() && !tTitle.isEmpty()) {
+                                    String normTitle = tTitle.toLowerCase(Locale.US);
+                                    if (seenTopicTitles.add(normTitle)) {
+                                        addCategoryUnique(categories, seenUuids, TOPIC_CATEGORY_PREFIX + tUuid, tTitle);
+                                    }
+                                    if (hasSub) {
+                                        for (int j = 0; j < subtopics.length(); j++) {
+                                            JSONObject sub = subtopics.optJSONObject(j);
+                                            if (sub == null) continue;
+                                            String sSlug = sub.optString("slug", "").trim();
+                                            if (isExcludedCatalogTopicSlug(sSlug)) continue;
+                                            String sUuid = sub.optString("uuid", "").trim();
+                                            String sTitle = sub.optString("title", "").replace('\u00A0', ' ').trim();
+                                            if (!sUuid.isEmpty() && !sTitle.isEmpty()) {
+                                                addCategoryUnique(categories, seenUuids,
+                                                        TOPIC_CATEGORY_PREFIX + sUuid, "  — " + sTitle);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {
+                } finally {
+                    if (catResp != null) try { catResp.close(); } catch (Exception ignored) {}
+                }
+
+                // 5. Резервные проверенные полки API v5 на случай недоступности сети/части эндпоинтов
                 addCategoryUnique(categories, seenUuids, "ySg3hPn4", "Только в Яндекс Книгах");
                 addCategoryUnique(categories, seenUuids, "ACX4QPxo", "Главные новинки");
                 addCategoryUnique(categories, seenUuids, "L6asjavK", "Подборка редакции");
@@ -2402,6 +2498,10 @@ public class YandexBooksApiClient {
                 addCategoryUnique(categories, seenUuids, "XLLytQg2", "Славянское фэнтези");
                 addCategoryUnique(categories, seenUuids, "byugcjMZ", "Новинки Яндекс Книг");
 
+                if (categories.size() > 8) {
+                    cachedCatalogCategories = new ArrayList<>(categories);
+                    cachedCatalogCategoriesAtMs = System.currentTimeMillis();
+                }
                 postSuccess(callback, categories);
             }
         }).start();
@@ -2419,7 +2519,104 @@ public class YandexBooksApiClient {
             getRecommendations(callback);
             return;
         }
-        loadBookshelfByUuid(shelfUuid.trim(), true, callback);
+        String trimmed = shelfUuid.trim();
+        if (trimmed.startsWith(TOPIC_CATEGORY_PREFIX)) {
+            String topicUuid = trimmed.substring(TOPIC_CATEGORY_PREFIX.length()).trim();
+            if (topicUuid.isEmpty()) {
+                getRecommendations(callback);
+            } else {
+                loadTopicBooks(topicUuid, callback);
+            }
+            return;
+        }
+        loadBookshelfByUuid(trimmed, true, callback);
+    }
+
+    private void loadTopicBooks(final String topicUuid, final ApiCallback<List<Book>> callback) {
+        String endpoint = BASE_URL + "/topics/" + topicUuid + "/books?per_page=50";
+        Request request = createAuthRequestBuilder(endpoint).get().build();
+
+        httpClient.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                loadTopicFirstBookshelfFallback(topicUuid, callback);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                if (!response.isSuccessful()) {
+                    response.close();
+                    loadTopicFirstBookshelfFallback(topicUuid, callback);
+                    return;
+                }
+                try {
+                    String body = response.body().string();
+                    JSONObject json = new JSONObject(body);
+                    JSONArray booksArray = json.optJSONArray("books");
+                    List<Book> books = new ArrayList<>();
+                    if (booksArray != null) {
+                        for (int i = 0; i < booksArray.length(); i++) {
+                            JSONObject bObj = booksArray.getJSONObject(i);
+                            Book book = parseBookFromCard(bObj);
+                            if (book != null) {
+                                book.setPercent(0.0);
+                                book.setCurrentChapterIndex(0);
+                                book.setCurrentParagraphIndex(0);
+                                book.setShelfType("catalog");
+                                books.add(book);
+                            }
+                        }
+                    }
+                    if (books.isEmpty()) {
+                        loadTopicFirstBookshelfFallback(topicUuid, callback);
+                        return;
+                    }
+                    postSuccess(callback, books);
+                } catch (Exception e) {
+                    loadTopicFirstBookshelfFallback(topicUuid, callback);
+                }
+            }
+        });
+    }
+
+    private void loadTopicFirstBookshelfFallback(final String topicUuid, final ApiCallback<List<Book>> callback) {
+        String endpoint = BASE_URL + "/topics/" + topicUuid + "/bookshelves?per_page=10";
+        Request request = createAuthRequestBuilder(endpoint).get().build();
+
+        httpClient.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                loadBookshelfByUuid(DEFAULT_CATALOG_SHELF_UUID, false, callback);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                if (!response.isSuccessful()) {
+                    response.close();
+                    loadBookshelfByUuid(DEFAULT_CATALOG_SHELF_UUID, false, callback);
+                    return;
+                }
+                try {
+                    String body = response.body().string();
+                    JSONObject json = new JSONObject(body);
+                    JSONArray shelves = json.optJSONArray("bookshelves");
+                    if (shelves != null) {
+                        for (int i = 0; i < shelves.length(); i++) {
+                            JSONObject sh = shelves.optJSONObject(i);
+                            if (sh == null) continue;
+                            String shUuid = sh.optString("uuid", "").trim();
+                            if (!shUuid.isEmpty() && sh.optInt("books_count", 1) > 0) {
+                                loadBookshelfByUuid(shUuid, true, callback);
+                                return;
+                            }
+                        }
+                    }
+                    loadBookshelfByUuid(DEFAULT_CATALOG_SHELF_UUID, false, callback);
+                } catch (Exception e) {
+                    loadBookshelfByUuid(DEFAULT_CATALOG_SHELF_UUID, false, callback);
+                }
+            }
+        });
     }
 
     /**

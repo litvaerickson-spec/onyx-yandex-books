@@ -745,8 +745,9 @@ public class ReaderActivity extends Activity {
         }
 
         if (seekbarFontSize != null) {
-            seekbarFontSize.setMax(24); // 12sp .. 36sp
-            seekbarFontSize.setProgress(Math.max(0, Math.min(24, typographyConfig.getFontSizeSp() - 12)));
+            seekbarFontSize.setMax(48); // 12sp .. 60sp
+            seekbarFontSize.setProgress(Math.max(0, Math.min(48, typographyConfig.getFontSizeSp() - 12)));
+            final long[] lastDragPreviewMs = new long[]{0L};
             seekbarFontSize.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 @Override
                 public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
@@ -754,6 +755,15 @@ public class ReaderActivity extends Activity {
                         int size = 12 + progress;
                         typographyConfig.setFontSizeSp(size);
                         if (fontSizeLabel != null) fontSizeLabel.setText(String.valueOf(size));
+                        long now = android.os.SystemClock.uptimeMillis();
+                        if (now - lastDragPreviewMs[0] >= 140L) {
+                            lastDragPreviewMs[0] = now;
+                            if (pendingRepagAnchorCharOffset < 0 && currentPages != null && !currentPages.isEmpty() && currentPageIndex < currentPages.size()) {
+                                pendingRepagAnchorCharOffset = Math.max(0, currentPages.get(currentPageIndex).startCharOffset);
+                                pendingRepagAnchorFraction = (double) currentPageIndex / (double) Math.max(1, currentPages.size());
+                            }
+                            renderInstantViewportPreview(Math.max(0, pendingRepagAnchorCharOffset));
+                        }
                     }
                 }
 
@@ -776,12 +786,12 @@ public class ReaderActivity extends Activity {
                 @Override
                 public void onClick(View v) {
                     int cur = typographyConfig.getFontSizeSp();
-                    if (cur < 36) {
+                    if (cur < 60) {
                         int next = cur + 1;
                         typographyConfig.setFontSizeSp(next);
                         appSettings.setFontSizeSp(next);
                         if (fontSizeLabel != null) fontSizeLabel.setText(String.valueOf(next));
-                        if (seekbarFontSize != null) seekbarFontSize.setProgress(next - 12);
+                        if (seekbarFontSize != null) seekbarFontSize.setProgress(Math.max(0, Math.min(48, next - 12)));
                         scheduleDebouncedRepaginate();
                     }
                 }
@@ -2140,12 +2150,16 @@ public class ReaderActivity extends Activity {
                 for (int i = 0; i < sIdx; i++) {
                     preceding += (chapterPageCounts != null && i < chapterPageCounts.length) ? chapterPageCounts[i] : 1;
                 }
-                int chPages = (chapterPageCounts != null && sIdx < chapterPageCounts.length) ? chapterPageCounts[sIdx] : 1;
+                int chPages = Math.max(1, (chapterPageCounts != null && sIdx < chapterPageCounts.length) ? chapterPageCounts[sIdx] : 1);
                 long chLen = (chapterLengths != null && sIdx < chapterLengths.length) ? chapterLengths[sIdx] : 10000;
+                String cachedRaw = chapterTextMemoryCache.get(sIdx);
+                long approxRawLen = (cachedRaw != null && !cachedRaw.isEmpty())
+                        ? cachedRaw.length()
+                        : Math.max(chLen, (long) (chLen * 1.12));
                 int pInCh = 0;
-                if (node.charOffset > 0 && chLen > 0) {
-                    double frac = (double) node.charOffset / (double) chLen;
-                    pInCh = Math.min(chPages - 1, (int) Math.round(frac * (chPages - 1)));
+                if (node.charOffset > 0 && approxRawLen > 0) {
+                    double frac = Math.max(0.0, Math.min(1.0, (double) node.charOffset / (double) Math.max(approxRawLen, node.charOffset)));
+                    pInCh = Math.max(0, Math.min(chPages - 1, (int) Math.round(frac * Math.max(0, chPages - 1))));
                 }
                 node.pageNumber = preceding + pInCh + 1;
             }
@@ -2215,6 +2229,9 @@ public class ReaderActivity extends Activity {
                 node.charOffset = 0;
                 rawTree.add(node);
             }
+        }
+        if (chapterLengths == null || chapterLengths.length != chapters.size()) {
+            calculateChapterLengths();
         }
         calculateTocPageNumbers(rawTree);
 
@@ -2378,7 +2395,24 @@ public class ReaderActivity extends Activity {
                     dialog.dismiss();
                     hideMenuOverlay();
                     userHasInteracted = true;
-                    loadChapterAtCharOffset(clicked.spineIndex, clicked.charOffset);
+                    int targetSpine = clicked.spineIndex;
+                    int targetOffset = Math.max(0, clicked.charOffset);
+                    if ((targetSpine < 0 || targetSpine >= chapters.size()) && clicked.title != null) {
+                        String wantTitle = clicked.title.trim();
+                        for (int ci = 0; ci < chapters.size(); ci++) {
+                            String ct = chapters.get(ci).getTitle();
+                            if (ct != null && ct.trim().equalsIgnoreCase(wantTitle)) {
+                                targetSpine = ci;
+                                targetOffset = 0;
+                                break;
+                            }
+                        }
+                    }
+                    if (targetSpine < 0 || targetSpine >= chapters.size()) {
+                        targetSpine = 0;
+                        targetOffset = 0;
+                    }
+                    loadChapterAtCharOffset(targetSpine, targetOffset);
                 }
             }
         });
@@ -3025,7 +3059,13 @@ public class ReaderActivity extends Activity {
         totalBookLength = 0;
         for (int i = 0; i < chapters.size(); i++) {
             Chapter ch = chapters.get(i);
-            long len = cacheManager.getChapterLength(bookUuid, ch.getId());
+            long len = ch.getCharCount();
+            if (len <= 0) {
+                long fileBytes = cacheManager.getChapterLength(bookUuid, ch.getId());
+                if (fileBytes > 0) {
+                    len = Math.max(1L, Math.round(fileBytes * 0.52));
+                }
+            }
             if (len <= 0) {
                 len = 10000; // Оценочная длина по умолчанию
             }
@@ -3258,6 +3298,17 @@ public class ReaderActivity extends Activity {
             return;
         }
 
+        final boolean looksLikeFootnoteLabel = rawLabel != null
+                && rawLabel.trim().matches("^\\s*[\\[\\(]?[0-9\\*†‡§]+[\\]\\)]?\\s*$");
+        if (!looksLikeFootnoteLabel && cacheManager != null && bookUuid != null
+                && chapters != null && !chapters.isEmpty() && !lower.contains("note") && !lower.contains("fn")) {
+            EpubParser.TocNode directNode = findTocNodeByTargetHref(cacheManager.loadTocTree(bookUuid), target);
+            if (directNode != null && directNode.spineIndex >= 0 && directNode.spineIndex < chapters.size()) {
+                loadChapterAtCharOffset(directNode.spineIndex, Math.max(0, directNode.charOffset));
+                return;
+            }
+        }
+
         final String fallbackTitle = (rawLabel != null && !rawLabel.trim().isEmpty())
                 ? "Ссылка: " + rawLabel.trim()
                 : "Внутренняя ссылка";
@@ -3287,6 +3338,33 @@ public class ReaderActivity extends Activity {
                 });
             }
         });
+    }
+
+    private EpubParser.TocNode findTocNodeByTargetHref(List<EpubParser.TocNode> nodes, String rawTarget) {
+        if (nodes == null || rawTarget == null || rawTarget.isEmpty()) return null;
+        String cleanTarget = rawTarget.trim();
+        String targetFile = cleanTarget.contains("#") ? cleanTarget.substring(0, cleanTarget.indexOf('#')) : cleanTarget;
+        String targetAnchor = cleanTarget.contains("#") ? cleanTarget.substring(cleanTarget.indexOf('#') + 1) : "";
+        String targetBase = targetFile.contains("/") ? targetFile.substring(targetFile.lastIndexOf('/') + 1) : targetFile;
+        for (EpubParser.TocNode node : nodes) {
+            if (node.rawHref != null && !node.rawHref.isEmpty()) {
+                String nh = node.rawHref.trim();
+                String nFile = nh.contains("#") ? nh.substring(0, nh.indexOf('#')) : nh;
+                String nAnchor = nh.contains("#") ? nh.substring(nh.indexOf('#') + 1) : "";
+                String nBase = nFile.contains("/") ? nFile.substring(nFile.lastIndexOf('/') + 1) : nFile;
+                if (nh.equalsIgnoreCase(cleanTarget)
+                        || (!targetAnchor.isEmpty() && targetAnchor.equalsIgnoreCase(nAnchor)
+                                && (targetBase.isEmpty() || targetBase.equalsIgnoreCase(nBase)))
+                        || (targetAnchor.isEmpty() && nAnchor.isEmpty() && !targetBase.isEmpty() && targetBase.equalsIgnoreCase(nBase))) {
+                    return node;
+                }
+            }
+            if (node.children != null && !node.children.isEmpty()) {
+                EpubParser.TocNode found = findTocNodeByTargetHref(node.children, rawTarget);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 
     private void showLoadingOverlay(final String message) {
@@ -3527,12 +3605,22 @@ public class ReaderActivity extends Activity {
             percent = intentPercent;
             if (intentChapter >= 0) {
                 targetChapter = spineIndexToChapterIndex(intentChapter);
+            } else {
+                // Серверный процент выше локального, но номер главы не передан:
+                // сбрасываем устаревший локальный targetChapter/targetParagraph, чтобы открыть книгу строго по percent
+                targetChapter = -1;
             }
+            targetPage = 0;
+            targetParagraph = 0;
         } else if (percent <= 0.0 && intentPercent > 0.0) {
             percent = intentPercent;
             if (intentChapter >= 0) {
                 targetChapter = spineIndexToChapterIndex(intentChapter);
+            } else {
+                targetChapter = -1;
             }
+            targetPage = 0;
+            targetParagraph = 0;
         }
 
         // Защита от ложного 100% (когда глава 0 или книга только открыта)
@@ -3618,7 +3706,8 @@ public class ReaderActivity extends Activity {
             dbHelper.saveProgress(cloudProgress);
             dbHelper.ensureCloudSyncBookmark(bookUuid, currentChapterIndex, currentPageIndex, (float) cloudPercent);
             EinkNotice.show(ReaderActivity.this, "Синхронизация", String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d, абз. %d)\n[Закладка создана]", cloudPercent, currentChapterIndex + 1, cloudParagraph + 1));
-        } else if (cloudChapter >= 0 && cloudChapter < chapters.size()) {
+        } else if (cloudChapter >= 0 && cloudChapter < chapters.size()
+                && (cloudChapter > 0 || cloudPercent <= 1.0 || cloudProgress.getPageIndex() > 0)) {
             currentChapterIndex = cloudChapter;
             currentPageIndex = Math.max(0, cloudProgress.getPageIndex());
             loadChapter(currentChapterIndex, currentPageIndex);
@@ -3794,7 +3883,7 @@ public class ReaderActivity extends Activity {
 
     private float getReadablePopupTextSizeSp() {
         int bookSp = (typographyConfig != null) ? typographyConfig.getFontSizeSp() : 18;
-        return Math.max(16.0f, Math.min(21.0f, bookSp * 0.90f));
+        return Math.max(16.0f, Math.min(24.0f, bookSp * 0.85f));
     }
 
     private static String formatQuotedPreview(String raw) {
@@ -4898,17 +4987,20 @@ public class ReaderActivity extends Activity {
 
     private void flipPageForward() {
         try {
-            if (isPaginating) {
-                return; // Защита от наложения параллельных пагинаций при быстром нажатии
+            if (isPaginating || isInitialLoading
+                    || chapters == null || chapters.isEmpty()
+                    || currentPages == null || currentPages.isEmpty()
+                    || (readerLoadingOverlay != null && readerLoadingOverlay.getVisibility() == View.VISIBLE)) {
+                return; // Защита от наложения пагинаций и ложного завершения до загрузки книги
             }
             userHasInteracted = true;
             isInitialLoading = false;
-            if (currentPages != null && currentPageIndex + 1 < currentPages.size()) {
+            if (currentPageIndex + 1 < currentPages.size()) {
                 currentPageIndex++;
                 renderCurrentPage();
                 updateMenuControls();
                 scheduleAutoSaveProgress();
-            } else if (chapters != null && currentChapterIndex + 1 < chapters.size()) {
+            } else if (currentChapterIndex + 1 < chapters.size()) {
                 currentChapterIndex++;
                 currentPageIndex = 0;
                 loadChapter(currentChapterIndex, 0);
@@ -4923,6 +5015,13 @@ public class ReaderActivity extends Activity {
 
     private void markBookCompletedAtEnd() {
         try {
+            if (isPaginating || isInitialLoading
+                    || chapters == null || chapters.isEmpty()
+                    || currentPages == null || currentPages.isEmpty()
+                    || currentChapterIndex < chapters.size() - 1
+                    || currentPageIndex < currentPages.size() - 1) {
+                return;
+            }
             boolean alreadyDone = false;
             String cardId = null;
             String docUuid = null;
@@ -4986,8 +5085,11 @@ public class ReaderActivity extends Activity {
 
     private void flipPageBackward() {
         try {
-            if (isPaginating) {
-                return; // Защита от наложения параллельных пагинаций при быстром нажатии
+            if (isPaginating || isInitialLoading
+                    || chapters == null || chapters.isEmpty()
+                    || currentPages == null || currentPages.isEmpty()
+                    || (readerLoadingOverlay != null && readerLoadingOverlay.getVisibility() == View.VISIBLE)) {
+                return; // Защита от наложения пагинаций и случайных нажатий во время загрузки
             }
             userHasInteracted = true;
             isInitialLoading = false;

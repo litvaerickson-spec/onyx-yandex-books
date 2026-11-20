@@ -7,6 +7,7 @@ import com.onyx.yandexbooks.core.epub.EpubFormatting;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
@@ -205,6 +206,7 @@ public class TextPaginator {
         private final float baseTextSize;
         private final boolean baseFakeBold;
         private final Typeface[] derivedCache = new Typeface[8];
+        private final HashMap<String, Float> textWidthCache = new HashMap<>(512);
         private int currentStyle = -1;
         private float currentScale = -1f;
         private float cachedSpaceWidth = -1f;
@@ -252,6 +254,11 @@ public class TextPaginator {
             if (style == currentStyle && Math.abs(fontScale - currentScale) < 0.001f) {
                 return;
             }
+            if (Math.abs(fontScale - currentScale) >= 0.001f || style != currentStyle) {
+                if (textWidthCache.size() > 2048) {
+                    textWidthCache.clear();
+                }
+            }
             currentStyle = style;
             currentScale = fontScale;
             cachedSpaceWidth = -1f;
@@ -278,6 +285,19 @@ public class TextPaginator {
 
         float measurePiece(WordPiece piece, float fontScale) {
             prepare(piece.style, fontScale);
+            if (piece.text.length() <= 32) {
+                String cacheKey = piece.style + "_" + Float.floatToRawIntBits(fontScale) + "_" + piece.text;
+                Float cached = textWidthCache.get(cacheKey);
+                if (cached != null) {
+                    return cached.floatValue();
+                }
+                float w = workPaint.measureText(piece.text);
+                if (textWidthCache.size() >= 2048) {
+                    textWidthCache.clear();
+                }
+                textWidthCache.put(cacheKey, w);
+                return w;
+            }
             return workPaint.measureText(piece.text);
         }
 

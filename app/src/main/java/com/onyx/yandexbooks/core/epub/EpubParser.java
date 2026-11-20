@@ -47,6 +47,8 @@ public class EpubParser {
         public int spineIndex;
         public int originalOpfSpineIndex = -1;
         public String opfItemId = "";
+        public int rawHtmlStartOffset = 0;
+        public int rawHtmlEndOffset = -1;
     }
 
     private static class SpineItem {
@@ -202,7 +204,7 @@ public class EpubParser {
 
             if (chapterHrefs.size() == 1) {
                 // Если файл книги всего 1 большой HTML: проверяем деление по h1/h2
-                List<ChapterData> byHeadings = splitSingleFileByHeadings(zip, chapterHrefs.get(0));
+                List<ChapterData> byHeadings = splitSingleFileByHeadings(zip, chapterHrefs.get(0), rawHtmlCache);
                 if (byHeadings != null && byHeadings.size() > 1) {
                     chapters = byHeadings;
                 }
@@ -355,87 +357,170 @@ public class EpubParser {
         }
     }
 
+    private static final class TocLookupIndex {
+        final Map<String, List<Integer>> exactNormToChapters = new HashMap<>();
+        final Map<String, List<Integer>> shortNameToChapters = new HashMap<>();
+        final List<String> normalizedChapterPaths = new ArrayList<>();
+        final List<String> normalizedSpinePaths = new ArrayList<>();
+        final Map<String, Integer> exactNormToSpine = new HashMap<>();
+
+        TocLookupIndex(List<ChapterData> chapters, List<String> spineHrefs) {
+            for (int i = 0; i < chapters.size(); i++) {
+                ChapterData cd = chapters.get(i);
+                String norm = (cd != null && cd.fileHref != null && !"ch_0_cover".equals(cd.id))
+                        ? resolveZipPath("", cd.fileHref).toLowerCase(java.util.Locale.US) : "";
+                normalizedChapterPaths.add(norm);
+                if (!norm.isEmpty()) {
+                    List<Integer> list = exactNormToChapters.get(norm);
+                    if (list == null) {
+                        list = new ArrayList<>(1);
+                        exactNormToChapters.put(norm, list);
+                    }
+                    list.add(i);
+
+                    int slash = norm.lastIndexOf('/');
+                    String fname = slash >= 0 ? norm.substring(slash + 1) : norm;
+                    List<Integer> sList = shortNameToChapters.get(fname);
+                    if (sList == null) {
+                        sList = new ArrayList<>(1);
+                        shortNameToChapters.put(fname, sList);
+                    }
+                    sList.add(i);
+                }
+            }
+            if (spineHrefs != null) {
+                for (int s = 0; s < spineHrefs.size(); s++) {
+                    String sn = resolveZipPath("", spineHrefs.get(s)).toLowerCase(java.util.Locale.US);
+                    normalizedSpinePaths.add(sn);
+                    if (!sn.isEmpty() && !exactNormToSpine.containsKey(sn)) {
+                        exactNormToSpine.put(sn, s);
+                    }
+                }
+            }
+        }
+
+        List<Integer> findChapterCandidates(String rawPath) {
+            if (rawPath == null || rawPath.isEmpty()) return null;
+            String norm = resolveZipPath("", rawPath).toLowerCase(java.util.Locale.US);
+            if (norm.isEmpty()) return null;
+
+            List<Integer> exact = exactNormToChapters.get(norm);
+            if (exact != null && !exact.isEmpty()) return exact;
+
+            for (Map.Entry<String, List<Integer>> e : exactNormToChapters.entrySet()) {
+                String k = e.getKey();
+                if (k.endsWith("/" + norm) || norm.endsWith("/" + k)) {
+                    return e.getValue();
+                }
+            }
+
+            int slash = norm.lastIndexOf('/');
+            String fname = slash >= 0 ? norm.substring(slash + 1) : norm;
+            String dir = slash >= 0 ? norm.substring(0, slash) : "";
+            List<Integer> byName = shortNameToChapters.get(fname);
+            if (byName != null && !byName.isEmpty()) {
+                if (dir.isEmpty()) return byName;
+                List<Integer> filtered = new ArrayList<>();
+                for (int idx : byName) {
+                    String cp = normalizedChapterPaths.get(idx);
+                    String cDir = cp.contains("/") ? cp.substring(0, cp.lastIndexOf('/')) : "";
+                    if (cDir.isEmpty() || cDir.equals(dir) || cDir.endsWith("/" + dir) || dir.endsWith("/" + cDir)) {
+                        filtered.add(idx);
+                    }
+                }
+                if (!filtered.isEmpty()) return filtered;
+            }
+            return null;
+        }
+
+        int findSpineIdx(String rawPath) {
+            if (rawPath == null || rawPath.isEmpty()) return -1;
+            String norm = resolveZipPath("", rawPath).toLowerCase(java.util.Locale.US);
+            if (norm.isEmpty()) return -1;
+            Integer exact = exactNormToSpine.get(norm);
+            if (exact != null) return exact;
+            for (int s = 0; s < normalizedSpinePaths.size(); s++) {
+                String sp = normalizedSpinePaths.get(s);
+                if (sp.endsWith("/" + norm) || norm.endsWith("/" + sp)) return s;
+            }
+            int slash = norm.lastIndexOf('/');
+            String fname = slash >= 0 ? norm.substring(slash + 1) : norm;
+            for (int s = 0; s < normalizedSpinePaths.size(); s++) {
+                String sp = normalizedSpinePaths.get(s);
+                String sf = sp.contains("/") ? sp.substring(sp.lastIndexOf('/') + 1) : sp;
+                if (sf.equals(fname)) return s;
+            }
+            return -1;
+        }
+    }
+
     private static void resolveNodeOffsets(List<TocNode> nodes, List<ChapterData> chapters, List<String> spineHrefs, Map<Integer, String> rawHtmlCache) {
+        if (nodes == null || chapters == null || chapters.isEmpty()) return;
+        TocLookupIndex lookup = new TocLookupIndex(chapters, spineHrefs);
+        resolveNodeOffsetsRecursive(nodes, chapters, lookup, rawHtmlCache);
+    }
+
+    private static void resolveNodeOffsetsRecursive(List<TocNode> nodes, List<ChapterData> chapters, TocLookupIndex lookup, Map<Integer, String> rawHtmlCache) {
         if (nodes == null || chapters == null || chapters.isEmpty()) return;
 
         for (TocNode node : nodes) {
-            int matchedChapter = -1;
-
-            // 1. Поиск точного соответствия полного пути с главами (приоритет над коротким именем для многотомников)
-            if (node.fileHref != null && !node.fileHref.isEmpty()) {
-                for (int i = 0; i < chapters.size(); i++) {
-                    ChapterData cd = chapters.get(i);
-                    if (cd.fileHref != null && hrefsExactOrSuffixMatch(cd.fileHref, node.fileHref)) {
-                        matchedChapter = i;
-                        break;
-                    }
-                }
-                if (matchedChapter < 0) {
-                    for (int i = 0; i < chapters.size(); i++) {
-                        ChapterData cd = chapters.get(i);
-                        if (cd.fileHref != null && hrefsMatch(cd.fileHref, node.fileHref)) {
-                            matchedChapter = i;
-                            break;
-                        }
-                    }
-                }
+            List<Integer> candidates = lookup.findChapterCandidates(node.fileHref);
+            if ((candidates == null || candidates.isEmpty()) && node.rawHref != null && !node.rawHref.isEmpty()) {
+                candidates = lookup.findChapterCandidates(node.rawHref);
             }
 
-            // 2. Поиск по rawHref
-            if (matchedChapter < 0 && node.rawHref != null && !node.rawHref.isEmpty()) {
-                for (int i = 0; i < chapters.size(); i++) {
-                    ChapterData cd = chapters.get(i);
-                    if (cd.fileHref != null && hrefsMatch(cd.fileHref, node.rawHref)) {
-                        matchedChapter = i;
-                        break;
-                    }
-                }
-            }
-
-            // 3. Fallback: поиск по оригинальным spineHrefs
+            int matchedChapter = (candidates != null && !candidates.isEmpty()) ? candidates.get(0) : -1;
             if (matchedChapter < 0) {
-                int spineIdx = findSpineIndex(spineHrefs, node.fileHref);
-                if (spineIdx >= 0) {
-                    String targetHref = spineHrefs.get(spineIdx);
-                    for (int i = 0; i < chapters.size(); i++) {
-                        if (hrefsMatch(chapters.get(i).fileHref, targetHref)) {
-                            matchedChapter = i;
-                            break;
-                        }
+                int sIdx = lookup.findSpineIdx(node.fileHref);
+                if (sIdx >= 0 && sIdx < lookup.normalizedSpinePaths.size()) {
+                    candidates = lookup.findChapterCandidates(lookup.normalizedSpinePaths.get(sIdx));
+                    if (candidates != null && !candidates.isEmpty()) {
+                        matchedChapter = candidates.get(0);
                     }
                 }
             }
-
             if (matchedChapter < 0) {
                 matchedChapter = 0;
             }
 
             node.spineIndex = matchedChapter;
+            node.charOffset = 0;
 
-            // Расчет символьного смещения якоря charOffset за один быстрый проход без O(N^2) перепарсинга HTML
             if (node.anchor != null && !node.anchor.isEmpty()) {
-                int spineFileIndex = findSpineIndex(spineHrefs, node.fileHref);
+                int spineFileIndex = lookup.findSpineIdx(node.fileHref);
                 String rawHtml = (spineFileIndex >= 0) ? rawHtmlCache.get(spineFileIndex) : null;
                 if (rawHtml != null) {
                     int anchorTagStart = findAnchorOffset(rawHtml, node.anchor);
-                    if (anchorTagStart > 0 && anchorTagStart < rawHtml.length()) {
-                        String chText = (matchedChapter >= 0 && matchedChapter < chapters.size())
-                                ? chapters.get(matchedChapter).textContent : null;
-                        node.charOffset = estimateAnchorCharOffsetFast(rawHtml, anchorTagStart, chText);
-                    } else {
-                        node.charOffset = 0;
+                    if (anchorTagStart >= 0 && anchorTagStart < rawHtml.length()) {
+                        // Если один HTML-файл разбит по заголовкам h1/h2 на несколько глав — находим точный фрагмент!
+                        if (candidates != null && candidates.size() > 1) {
+                            for (int cIdx : candidates) {
+                                ChapterData cd = chapters.get(cIdx);
+                                int end = (cd.rawHtmlEndOffset > cd.rawHtmlStartOffset) ? cd.rawHtmlEndOffset : rawHtml.length();
+                                if (anchorTagStart >= cd.rawHtmlStartOffset && anchorTagStart < end) {
+                                    matchedChapter = cIdx;
+                                    node.spineIndex = matchedChapter;
+                                    break;
+                                }
+                            }
+                        }
+                        ChapterData cdMatched = (matchedChapter >= 0 && matchedChapter < chapters.size())
+                                ? chapters.get(matchedChapter) : null;
+                        int sliceStart = (cdMatched != null) ? cdMatched.rawHtmlStartOffset : 0;
+                        int sliceEnd = (cdMatched != null && cdMatched.rawHtmlEndOffset > sliceStart)
+                                ? Math.min(cdMatched.rawHtmlEndOffset, rawHtml.length()) : rawHtml.length();
+                        int localAnchorStart = anchorTagStart - sliceStart;
+                        if (localAnchorStart > 0 && sliceStart < sliceEnd) {
+                            String chText = cdMatched != null ? cdMatched.textContent : null;
+                            node.charOffset = estimateAnchorCharOffsetFast(rawHtml, sliceStart, sliceEnd, anchorTagStart, chText);
+                        }
                     }
-                } else {
-                    node.charOffset = 0;
                 }
-            } else {
-                node.charOffset = 0;
             }
 
             node.hasChildren = (node.children != null && !node.children.isEmpty());
-
             if (node.children != null && !node.children.isEmpty()) {
-                resolveNodeOffsets(node.children, chapters, spineHrefs, rawHtmlCache);
+                resolveNodeOffsetsRecursive(node.children, chapters, lookup, rawHtmlCache);
             }
         }
     }
@@ -470,10 +555,13 @@ public class EpubParser {
     /**
      * Разделение единого большого XHTML-файла по тегам h1/h2 для книг без детального spine.
      */
-    private static List<ChapterData> splitSingleFileByHeadings(ZipFile zip, String href) {
+    private static List<ChapterData> splitSingleFileByHeadings(ZipFile zip, String href, Map<Integer, String> rawHtmlCache) {
         List<ChapterData> list = new ArrayList<>();
         String rawHtml = readEntryRawHtml(zip, href);
         if (rawHtml == null || rawHtml.length() < 200) return list;
+        if (rawHtmlCache != null) {
+            rawHtmlCache.put(0, rawHtml);
+        }
 
         Pattern p = Pattern.compile("<(h[1-2])[^>]*>(.*?)</\\1>", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
         Matcher m = p.matcher(rawHtml);
@@ -505,6 +593,8 @@ public class EpubParser {
                     cd0.fileHref = href;
                     cd0.title = "Начало книги";
                     cd0.textContent = front;
+                    cd0.rawHtmlStartOffset = 0;
+                    cd0.rawHtmlEndOffset = headings.get(0).start;
                     list.add(cd0);
                 }
             }
@@ -520,6 +610,8 @@ public class EpubParser {
                     cd.fileHref = href;
                     cd.title = TocNode.normalizeTitle(headings.get(i).title);
                     cd.textContent = formatted;
+                    cd.rawHtmlStartOffset = from;
+                    cd.rawHtmlEndOffset = to;
                     list.add(cd);
                 }
             }
@@ -528,48 +620,109 @@ public class EpubParser {
     }
 
     /**
-     * Быстрый расчёт символьного смещения якоря внутри уже распарсенного текста главы
-     * без повторного вызова EpubFormatting.extractRichHtmlText (устраняет O(N^2) задержку на крупных EPUB).
+     * Быстрый расчёт точного символьного смещения якоря внутри уже распарсенного текста главы
+     * без повторного вызова EpubFormatting.extractRichHtmlText (пропорция видимого текста + привязка к абзацу).
      */
-    private static int estimateAnchorCharOffsetFast(String rawHtml, int anchorTagStart, String chapterText) {
-        if (rawHtml == null || anchorTagStart <= 0) return 0;
-        int len = rawHtml.length();
-        int bodyStart = rawHtml.indexOf("<body");
-        if (bodyStart < 0) bodyStart = rawHtml.indexOf("<BODY");
-        if (bodyStart >= 0) {
-            int gt = rawHtml.indexOf('>', bodyStart);
-            bodyStart = (gt > bodyStart) ? (gt + 1) : 0;
-        } else {
-            bodyStart = 0;
+    private static int estimateAnchorCharOffsetFast(String rawHtml, int sliceStart, int sliceEnd, int anchorTagStart, String chapterText) {
+        if (rawHtml == null || anchorTagStart <= sliceStart) return 0;
+        int len = Math.min(sliceEnd, rawHtml.length());
+        int start = Math.max(0, sliceStart);
+        if (start == 0) {
+            int bodyStart = rawHtml.indexOf("<body");
+            if (bodyStart < 0) bodyStart = rawHtml.indexOf("<BODY");
+            if (bodyStart >= 0 && bodyStart < len) {
+                int gt = rawHtml.indexOf('>', bodyStart);
+                if (gt > bodyStart && gt < len) start = gt + 1;
+            }
         }
-        if (anchorTagStart <= bodyStart) return 0;
+        if (anchorTagStart <= start) return 0;
 
         int visibleBefore = 0;
+        int visibleTotal = 0;
         boolean inTag = false;
         boolean prevSpace = true;
-        int limit = Math.min(anchorTagStart, len);
-        for (int i = bodyStart; i < limit; i++) {
+        int i = start;
+        while (i < len) {
+            if (!inTag && rawHtml.startsWith("<!--", i)) {
+                int endCom = rawHtml.indexOf("-->", i + 4);
+                i = (endCom >= 0 && endCom + 3 <= len) ? endCom + 3 : len;
+                continue;
+            }
             char c = rawHtml.charAt(i);
             if (c == '<') {
                 inTag = true;
+                if (i + 6 < len && (rawHtml.regionMatches(true, i, "<style", 0, 6) || rawHtml.regionMatches(true, i, "<script", 0, 7))) {
+                    String closeTag = rawHtml.regionMatches(true, i, "<style", 0, 6) ? "</style>" : "</script>";
+                    int endBlk = -1;
+                    for (int k = i + 6; k + closeTag.length() <= len; k++) {
+                        if (rawHtml.regionMatches(true, k, closeTag, 0, closeTag.length())) {
+                            endBlk = k + closeTag.length();
+                            break;
+                        }
+                    }
+                    if (endBlk > i) {
+                        i = endBlk;
+                        inTag = false;
+                        continue;
+                    }
+                }
             } else if (c == '>') {
                 inTag = false;
             } else if (!inTag) {
                 if (c <= ' ') {
                     if (!prevSpace) {
-                        visibleBefore++;
+                        visibleTotal++;
+                        if (i < anchorTagStart) visibleBefore++;
                         prevSpace = true;
                     }
                 } else {
-                    visibleBefore++;
+                    visibleTotal++;
+                    if (i < anchorTagStart) visibleBefore++;
                     prevSpace = false;
                 }
             }
+            i++;
         }
-        if (chapterText != null && !chapterText.isEmpty()) {
-            return Math.min(visibleBefore, Math.max(0, chapterText.length() - 1));
+
+        if (visibleBefore < 40) return 0;
+        if (chapterText == null || chapterText.isEmpty()) {
+            return visibleBefore;
         }
-        return visibleBefore;
+        int chLen = chapterText.length();
+        int approx = (visibleTotal > 0)
+                ? (int) Math.round(((double) visibleBefore / (double) visibleTotal) * chLen)
+                : Math.min(visibleBefore, chLen - 1);
+        approx = Math.max(0, Math.min(approx, Math.max(0, chLen - 1)));
+
+        // Точная привязка к началу строки по текстовому сниппету сразу после якоря
+        StringBuilder snippet = new StringBuilder(20);
+        boolean snInTag = false;
+        int snLimit = Math.min(len, anchorTagStart + 500);
+        for (int k = anchorTagStart; k < snLimit && snippet.length() < 16; k++) {
+            char ch = rawHtml.charAt(k);
+            if (ch == '<') {
+                snInTag = true;
+            } else if (ch == '>') {
+                snInTag = false;
+            } else if (!snInTag && ch > ' ' && ch != '&' && ch != ';') {
+                if (snippet.length() > 0 || Character.isLetterOrDigit(ch)) {
+                    snippet.append(ch);
+                }
+            } else if (!snInTag && ch <= ' ' && snippet.length() > 0 && snippet.charAt(snippet.length() - 1) != ' ') {
+                snippet.append(' ');
+            }
+        }
+        String probe = snippet.toString().trim();
+        if (probe.length() >= 4) {
+            int winStart = Math.max(0, approx - 1500);
+            int winEnd = Math.min(chLen, approx + 1500);
+            int hit = chapterText.indexOf(probe, winStart);
+            if (hit >= winStart && hit < winEnd) {
+                int lineStart = chapterText.lastIndexOf('\n', hit);
+                return (lineStart >= 0) ? (lineStart + 1) : 0;
+            }
+        }
+        return approx;
     }
 
     /**
@@ -751,6 +904,9 @@ public class EpubParser {
                     if (href.contains("#")) {
                         href = href.substring(0, href.indexOf('#'));
                     }
+                    try {
+                        href = URLDecoder.decode(href, "UTF-8");
+                    } catch (Exception ignored) {}
                     String fullPath = baseDir.isEmpty() ? href : (baseDir + href);
                     boolean alreadyExists = false;
                     for (int k = 0; k < result.size(); k++) {
@@ -1377,6 +1533,12 @@ public class EpubParser {
         return null;
     }
 
+    private static final Pattern FOOTNOTE_REF_PATTERN =
+            Pattern.compile("(?is)<a\\b[^>]*?href\\s*=\\s*[\"']([^\"']*#[^\"']+)[\"'][^>]*>(.*?)</a>");
+    private static final Pattern FOOTNOTE_TAG_STRIP_PATTERN = Pattern.compile("<[^>]+>");
+    private static final Pattern FOOTNOTE_BACKLINK_PATTERN = Pattern.compile("(?is)<a\\b[^>]*>(?:\\s*[↑^←↩]\\s*)</a>");
+    private static final Pattern FOOTNOTE_WS_PATTERN = Pattern.compile("\\s+");
+
     /**
      * Извлекает определения сносок для каждой главы из EPUB-архива (поддерживает <aside epub:type="footnote">,
      * <p|div|li|dd|section id="...">, в т.ч. перекрёстные ссылки на отдельный notes.xhtml).
@@ -1404,8 +1566,6 @@ public class EpubParser {
                 }
             }
 
-            Pattern refPattern = Pattern.compile("(?is)<a\\b[^>]*?href\\s*=\\s*[\"']([^\"']*#[^\"']+)[\"'][^>]*>(.*?)</a>");
-
             for (int chIdx = 0; chIdx < chapters.size(); chIdx++) {
                 ChapterData cd = chapters.get(chIdx);
                 if (cd == null || "ch_0_cover".equals(cd.id) || cd.fileHref == null || cd.fileHref.isEmpty()) {
@@ -1428,12 +1588,17 @@ public class EpubParser {
                     srcBaseDir = srcNormHref.substring(0, srcNormHref.lastIndexOf('/') + 1);
                 }
 
-                Matcher m = refPattern.matcher(srcHtml);
+                Matcher m = FOOTNOTE_REF_PATTERN.matcher(srcHtml);
                 while (m.find()) {
                     String href = m.group(1);
                     String innerRaw = m.group(2);
                     if (href == null) continue;
-                    String cleanLabel = innerRaw != null ? innerRaw.replaceAll("<[^>]+>", "").replaceAll("\\s+", " ").trim() : "";
+                    String cleanLabel = "";
+                    if (innerRaw != null) {
+                        String noTags = innerRaw.indexOf('<') >= 0
+                                ? FOOTNOTE_TAG_STRIP_PATTERN.matcher(innerRaw).replaceAll("") : innerRaw;
+                        cleanLabel = FOOTNOTE_WS_PATTERN.matcher(noTags).replaceAll(" ").trim();
+                    }
                     String bare = normalizeFootnoteBareToken(cleanLabel);
                     if (bare == null) continue;
 
@@ -1441,9 +1606,11 @@ public class EpubParser {
                     if (hashIdx < 0 || hashIdx + 1 >= href.length()) continue;
                     String filePart = href.substring(0, hashIdx).trim();
                     String anchorId = href.substring(hashIdx + 1).trim();
-                    try {
-                        anchorId = URLDecoder.decode(anchorId, "UTF-8");
-                    } catch (Exception ignored) {}
+                    if (anchorId.indexOf('%') >= 0) {
+                        try {
+                            anchorId = URLDecoder.decode(anchorId, "UTF-8");
+                        } catch (Exception ignored) {}
+                    }
                     if (anchorId.isEmpty()) continue;
 
                     String targetNormHref = filePart.isEmpty() ? srcNormHref : resolveZipPath(srcBaseDir, filePart);
@@ -1497,38 +1664,59 @@ public class EpubParser {
     private static String extractElementTextById(String html, String targetId, String targetHref, String bareMarker) {
         if (html == null || targetId == null || targetId.isEmpty()) return null;
         try {
-            Pattern startPat = Pattern.compile(
-                    "(?is)<(aside|div|p|li|dd|section)\\b[^>]*?\\bid\\s*=\\s*[\"']" + Pattern.quote(targetId) + "[\"'][^>]*>");
-            Matcher m = startPat.matcher(html);
-            if (!m.find()) {
+            int tagStart = findAnchorOffset(html, targetId);
+            if (tagStart < 0 || tagStart + 2 >= html.length()) {
                 return null;
             }
-            String tagName = m.group(1).toLowerCase();
-            int bodyStart = m.end();
+            int openEnd = html.indexOf('>', tagStart);
+            if (openEnd <= tagStart) {
+                return null;
+            }
+            int nameEnd = tagStart + 1;
+            while (nameEnd < openEnd && !Character.isWhitespace(html.charAt(nameEnd))) {
+                nameEnd++;
+            }
+            String tagName = html.substring(tagStart + 1, nameEnd).toLowerCase(java.util.Locale.US);
+            if (!"aside".equals(tagName) && !"div".equals(tagName) && !"p".equals(tagName)
+                    && !"li".equals(tagName) && !"dd".equals(tagName) && !"section".equals(tagName)) {
+                return null;
+            }
+            int bodyStart = openEnd + 1;
             int limit = Math.min(html.length(), bodyStart + 6000);
-            Pattern tagPat = Pattern.compile("(?is)<(/?)" + Pattern.quote(tagName) + "\\b[^>]*>");
-            Matcher tm = tagPat.matcher(html);
-            tm.region(bodyStart, limit);
             int depth = 1;
             int bodyEnd = -1;
-            while (tm.find()) {
-                String fullTag = tm.group(0);
-                if (tm.group(1) != null && !tm.group(1).isEmpty()) {
-                    depth--;
-                    if (depth == 0) {
-                        bodyEnd = tm.start();
-                        break;
+            int cursor = bodyStart;
+            int tagLen = tagName.length();
+            while (cursor < limit) {
+                int lt = html.indexOf('<', cursor);
+                if (lt < 0 || lt >= limit) break;
+                int gt = html.indexOf('>', lt + 1);
+                if (gt < 0) break;
+                if (lt + 1 + tagLen < gt && html.charAt(lt + 1) == '/' && html.regionMatches(true, lt + 2, tagName, 0, tagLen)) {
+                    char after = html.charAt(lt + 2 + tagLen);
+                    if (after == '>' || Character.isWhitespace(after)) {
+                        depth--;
+                        if (depth == 0) {
+                            bodyEnd = lt;
+                            break;
+                        }
                     }
-                } else if (!fullTag.endsWith("/>")) {
-                    depth++;
+                } else if (lt + 1 + tagLen <= gt && html.regionMatches(true, lt + 1, tagName, 0, tagLen)) {
+                    char after = html.charAt(lt + 1 + tagLen);
+                    if ((after == '>' || Character.isWhitespace(after)) && html.charAt(gt - 1) != '/') {
+                        depth++;
+                    }
                 }
+                cursor = gt + 1;
             }
             if (bodyEnd <= bodyStart) {
                 return null;
             }
             String rawInner = html.substring(bodyStart, bodyEnd);
-            rawInner = rawInner.replaceAll("(?is)<a\\b[^>]*>(?:\\s*[↑^←↩]\\s*)</a>", "");
-            String clean = cleanHtmlText(rawInner, targetHref).replaceAll("\\s+", " ").trim();
+            if (rawInner.indexOf('<') >= 0) {
+                rawInner = FOOTNOTE_BACKLINK_PATTERN.matcher(rawInner).replaceAll("");
+            }
+            String clean = FOOTNOTE_WS_PATTERN.matcher(cleanHtmlText(rawInner, targetHref)).replaceAll(" ").trim();
             if (clean.isEmpty()) return null;
 
             if (bareMarker != null && !bareMarker.isEmpty()) {
@@ -1557,12 +1745,12 @@ public class EpubParser {
     }
 
     private static String readStreamToString(InputStream is) throws Exception {
-        BufferedReader reader = new BufferedReader(new InputStreamReader(is, "UTF-8"));
-        StringBuilder sb = new StringBuilder();
-        String line;
-        while ((line = reader.readLine()) != null) {
-            sb.append(line).append("\n");
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream(8192);
+        byte[] buf = new byte[16384];
+        int n;
+        while ((n = is.read(buf)) > 0) {
+            baos.write(buf, 0, n);
         }
-        return sb.toString();
+        return new String(baos.toByteArray(), "UTF-8");
     }
 }

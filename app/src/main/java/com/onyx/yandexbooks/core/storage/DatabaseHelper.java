@@ -20,7 +20,7 @@ import java.util.List;
 public class DatabaseHelper extends SQLiteOpenHelper {
 
     private static final String DATABASE_NAME = "yandex_books_lite.db";
-    private static final int DATABASE_VERSION = 8;
+    private static final int DATABASE_VERSION = 9;
 
     private static DatabaseHelper instance;
 
@@ -64,6 +64,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 "ALTER TABLE bookmarks ADD COLUMN created_at INTEGER",
                 "ALTER TABLE chapters ADD COLUMN original_opf_spine_index INTEGER DEFAULT -1",
                 "ALTER TABLE chapters ADD COLUMN opf_item_id TEXT",
+                "ALTER TABLE chapters ADD COLUMN char_count INTEGER DEFAULT 0",
                 "ALTER TABLE books ADD COLUMN file_url TEXT"
         };
         for (String sql : migrations) {
@@ -104,7 +105,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 "content TEXT," +
                 "is_downloaded INTEGER," +
                 "original_opf_spine_index INTEGER DEFAULT -1," +
-                "opf_item_id TEXT" +
+                "opf_item_id TEXT," +
+                "char_count INTEGER DEFAULT 0" +
                 ")");
 
         // Таблица прогресса
@@ -780,6 +782,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 cv.put("is_downloaded", 1);
                 cv.put("original_opf_spine_index", ch.getOriginalOpfSpineIndex());
                 cv.put("opf_item_id", ch.getOpfItemId());
+                cv.put("char_count", ch.getCharCount());
                 db.insertWithOnConflict("chapters", null, cv, SQLiteDatabase.CONFLICT_REPLACE);
             }
             db.setTransactionSuccessful();
@@ -803,6 +806,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 if (opfIdxCol >= 0) ch.setOriginalOpfSpineIndex(c.getInt(opfIdxCol));
                 int opfIdCol = c.getColumnIndex("opf_item_id");
                 if (opfIdCol >= 0) ch.setOpfItemId(c.getString(opfIdCol));
+                int charCountCol = c.getColumnIndex("char_count");
+                if (charCountCol >= 0) ch.setCharCount(c.getInt(charCountCol));
                 list.add(ch);
             }
             c.close();
@@ -1508,7 +1513,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 if (meta.has("contrast_mode")) settings.setContrastMode(meta.optString("contrast_mode", "normal"));
                 if (meta.has("vertical_margin_mode")) settings.setVerticalMarginMode(meta.optString("vertical_margin_mode", "normal"));
                 if (meta.has("night_mode_enabled")) settings.setNightMode(meta.optBoolean("night_mode_enabled", false));
-                if (meta.has("dither_covers_enabled")) settings.setDitherCoversEnabled(meta.optBoolean("dither_covers_enabled", true));
+                if (meta.has("dither_covers_enabled")) settings.setDitherCoversEnabled(meta.optBoolean("dither_covers_enabled", false));
                 if (meta.has("edge_brightness_swipe")) settings.setEdgeBrightnessSwipeEnabled(meta.optBoolean("edge_brightness_swipe", true));
                 if (meta.has("audio_sync_enabled")) settings.setAudioSyncEnabled(meta.optBoolean("audio_sync_enabled", true));
                 if (meta.has("use_epub_fonts")) settings.setUseEpubFonts(meta.optBoolean("use_epub_fonts", false));

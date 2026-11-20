@@ -182,10 +182,20 @@ public class EpubFormatting {
     private static final Pattern ATTR_HREF_PATTERN = Pattern.compile("(?is)(?:^|\\s)href\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))");
 
     public static final class CssSheet {
+        private static final class DescendantRule {
+            final String[] ancestors;
+            final CssRuleProps props;
+            DescendantRule(String[] ancestors, CssRuleProps props) {
+                this.ancestors = ancestors;
+                this.props = props;
+            }
+        }
+
         private final Map<String, CssRuleProps> rules = new HashMap<>();
+        private final Map<String, List<DescendantRule>> descendantRules = new HashMap<>();
 
         public void mergeSheet(CssSheet other) {
-            if (other == null || other.rules.isEmpty()) return;
+            if (other == null) return;
             for (Map.Entry<String, CssRuleProps> e : other.rules.entrySet()) {
                 CssRuleProps existing = rules.get(e.getKey());
                 if (existing == null) {
@@ -195,6 +205,14 @@ public class EpubFormatting {
                 } else {
                     existing.mergeFrom(e.getValue());
                 }
+            }
+            for (Map.Entry<String, List<DescendantRule>> e : other.descendantRules.entrySet()) {
+                List<DescendantRule> dst = descendantRules.get(e.getKey());
+                if (dst == null) {
+                    dst = new ArrayList<>(e.getValue().size());
+                    descendantRules.put(e.getKey(), dst);
+                }
+                dst.addAll(e.getValue());
             }
         }
 
@@ -213,13 +231,49 @@ public class EpubFormatting {
 
                 String[] selectors = selectorGroup.split(",");
                 for (String selRaw : selectors) {
-                    String sel = normalizeSelector(selRaw);
-                    if (!sel.isEmpty()) {
-                        CssRuleProps existing = rules.get(sel);
+                    String selClean = normalizeRawSelector(selRaw);
+                    if (selClean.isEmpty()) continue;
+                    // Не переносим соседние селекторы (+, ~) типа br+p {text-indent:0} или p+p на все <p>
+                    if (selClean.indexOf('+') >= 0 || selClean.indexOf('~') >= 0) {
+                        continue;
+                    }
+                    // Не переносим псевдо-селекторы (:first-child, :first-line, ::before и т.п.) на все теги
+                    if (selClean.indexOf(':') >= 0) {
+                        continue;
+                    }
+
+                    if (selClean.indexOf(' ') >= 0 || selClean.indexOf('>') >= 0) {
+                        String[] chain = selClean.split("\\s*[>\\s]+\\s*");
+                        if (chain.length >= 2) {
+                            String target = chain[chain.length - 1].trim();
+                            if (!target.isEmpty()) {
+                                String[] ancestors = new String[chain.length - 1];
+                                boolean valid = true;
+                                for (int k = 0; k < chain.length - 1; k++) {
+                                    ancestors[k] = chain[k].trim();
+                                    if (ancestors[k].isEmpty()) {
+                                        valid = false;
+                                        break;
+                                    }
+                                }
+                                if (valid) {
+                                    CssRuleProps copy = new CssRuleProps();
+                                    copy.mergeFrom(props);
+                                    List<DescendantRule> list = descendantRules.get(target);
+                                    if (list == null) {
+                                        list = new ArrayList<>();
+                                        descendantRules.put(target, list);
+                                    }
+                                    list.add(new DescendantRule(ancestors, copy));
+                                }
+                            }
+                        }
+                    } else {
+                        CssRuleProps existing = rules.get(selClean);
                         if (existing == null) {
                             CssRuleProps copy = new CssRuleProps();
                             copy.mergeFrom(props);
-                            rules.put(sel, copy);
+                            rules.put(selClean, copy);
                         } else {
                             existing.mergeFrom(props);
                         }
@@ -228,18 +282,10 @@ public class EpubFormatting {
             }
         }
 
-        private static String normalizeSelector(String selRaw) {
+        private static String normalizeRawSelector(String selRaw) {
             if (selRaw == null) return "";
             String s = selRaw.trim().toLowerCase(Locale.US);
-            // Берем последний простой селектор из цепочки (например, "div.body p.title" -> "p.title")
-            int lastSpace = Math.max(s.lastIndexOf(' '), Math.max(s.lastIndexOf('>'), s.lastIndexOf('+')));
-            if (lastSpace >= 0 && lastSpace + 1 < s.length()) {
-                s = s.substring(lastSpace + 1).trim();
-            }
-            int pseudo = s.indexOf(':');
-            if (pseudo > 0) {
-                s = s.substring(0, pseudo).trim();
-            }
+            if (s.isEmpty() || s.indexOf('[') >= 0 || s.indexOf('*') >= 0) return "";
             return s;
         }
 
@@ -359,24 +405,46 @@ public class EpubFormatting {
         }
 
         CssRuleProps resolveElement(String tagName, String idAttr, String classAttr, String alignAttr, String inlineStyle) {
+            return resolveElement(tagName, idAttr, classAttr, alignAttr, inlineStyle, null);
+        }
+
+        CssRuleProps resolveElement(String tagName, String idAttr, String classAttr, String alignAttr, String inlineStyle, List<Frame> ancestorStack) {
             CssRuleProps merged = new CssRuleProps();
             String tag = tagName != null ? tagName.toLowerCase(Locale.US) : "";
             merged.mergeFrom(rules.get(tag));
 
+            String[] parsedClasses = null;
             if (classAttr != null && !classAttr.trim().isEmpty()) {
-                String[] classes = classAttr.trim().split("\\s+");
-                for (String cls : classes) {
-                    String c = cls.toLowerCase(Locale.US).trim();
+                parsedClasses = classAttr.trim().split("\\s+");
+                for (int k = 0; k < parsedClasses.length; k++) {
+                    parsedClasses[k] = parsedClasses[k].toLowerCase(Locale.US).trim();
+                }
+                for (String c : parsedClasses) {
                     if (c.isEmpty()) continue;
                     merged.mergeFrom(rules.get("." + c));
                     merged.mergeFrom(rules.get(tag + "." + c));
                 }
             }
 
-            if (idAttr != null && !idAttr.trim().isEmpty()) {
-                String id = idAttr.trim().toLowerCase(Locale.US);
-                merged.mergeFrom(rules.get("#" + id));
-                merged.mergeFrom(rules.get(tag + "#" + id));
+            String normId = (idAttr != null && !idAttr.trim().isEmpty()) ? idAttr.trim().toLowerCase(Locale.US) : "";
+            if (!normId.isEmpty()) {
+                merged.mergeFrom(rules.get("#" + normId));
+                merged.mergeFrom(rules.get(tag + "#" + normId));
+            }
+
+            if (!descendantRules.isEmpty() && ancestorStack != null && !ancestorStack.isEmpty()) {
+                applyDescendantRules(merged, tag, ancestorStack);
+                if (parsedClasses != null) {
+                    for (String c : parsedClasses) {
+                        if (c.isEmpty()) continue;
+                        applyDescendantRules(merged, "." + c, ancestorStack);
+                        applyDescendantRules(merged, tag + "." + c, ancestorStack);
+                    }
+                }
+                if (!normId.isEmpty()) {
+                    applyDescendantRules(merged, "#" + normId, ancestorStack);
+                    applyDescendantRules(merged, tag + "#" + normId, ancestorStack);
+                }
             }
 
             if (alignAttr != null && !alignAttr.trim().isEmpty()) {
@@ -391,6 +459,52 @@ public class EpubFormatting {
                 merged.mergeFrom(parseDeclarations(inlineStyle));
             }
             return merged;
+        }
+
+        private void applyDescendantRules(CssRuleProps dst, String targetKey, List<Frame> ancestorStack) {
+            List<DescendantRule> list = descendantRules.get(targetKey);
+            if (list == null) return;
+            for (int i = 0; i < list.size(); i++) {
+                DescendantRule dr = list.get(i);
+                if (matchesAncestorChain(dr.ancestors, ancestorStack)) {
+                    dst.mergeFrom(dr.props);
+                }
+            }
+        }
+
+        private static boolean matchesAncestorChain(String[] ancestors, List<Frame> stack) {
+            int reqIdx = ancestors.length - 1;
+            for (int s = stack.size() - 1; s >= 0 && reqIdx >= 0; s--) {
+                if (matchesFrameSimpleSelector(stack.get(s), ancestors[reqIdx])) {
+                    reqIdx--;
+                }
+            }
+            return reqIdx < 0;
+        }
+
+        private static boolean matchesFrameSimpleSelector(Frame frame, String sel) {
+            if (frame == null || sel == null || sel.isEmpty()) return false;
+            if (sel.charAt(0) == '.') {
+                String cls = sel.substring(1);
+                return frame.hasClass(cls);
+            }
+            if (sel.charAt(0) == '#') {
+                String id = sel.substring(1);
+                return id.equals(frame.idAttr);
+            }
+            int dot = sel.indexOf('.');
+            if (dot > 0) {
+                String tag = sel.substring(0, dot);
+                String cls = sel.substring(dot + 1);
+                return tag.equals(frame.tag) && frame.hasClass(cls);
+            }
+            int hash = sel.indexOf('#');
+            if (hash > 0) {
+                String tag = sel.substring(0, hash);
+                String id = sel.substring(hash + 1);
+                return tag.equals(frame.tag) && id.equals(frame.idAttr);
+            }
+            return sel.equals(frame.tag);
         }
     }
 
@@ -455,7 +569,22 @@ public class EpubFormatting {
 
         Matcher sm = INLINE_STYLE_BLOCK_PATTERN.matcher(html);
         while (sm.find()) {
-            sheet.parseCss(sm.group(1));
+            String inlineCss = sm.group(1);
+            if (inlineCss == null || inlineCss.isEmpty()) continue;
+            if (parsedCssSheetCache != null) {
+                String key = "__inline__:" + inlineCss.length() + ":" + inlineCss.hashCode();
+                CssSheet cachedInline = parsedCssSheetCache.get(key);
+                if (cachedInline != null) {
+                    sheet.mergeSheet(cachedInline);
+                } else {
+                    CssSheet inlineSheet = new CssSheet();
+                    inlineSheet.parseCss(inlineCss);
+                    parsedCssSheetCache.put(key, inlineSheet);
+                    sheet.mergeSheet(inlineSheet);
+                }
+            } else {
+                sheet.parseCss(inlineCss);
+            }
         }
         return sheet;
     }
@@ -601,6 +730,8 @@ public class EpubFormatting {
 
     private static final class Frame {
         String tag;
+        String idAttr = "";
+        String[] classList;
         boolean isBlock;
         BlockStyle blockStyle;
         boolean boldDelta;
@@ -609,6 +740,25 @@ public class EpubFormatting {
         boolean strikeDelta;
         boolean monoDelta;
         String linkTarget;
+
+        void setAttrs(String id, String cls) {
+            this.idAttr = (id != null && !id.trim().isEmpty()) ? id.trim().toLowerCase(Locale.US) : "";
+            if (cls != null && !cls.trim().isEmpty()) {
+                String[] parts = cls.trim().split("\\s+");
+                for (int k = 0; k < parts.length; k++) {
+                    parts[k] = parts[k].toLowerCase(Locale.US).trim();
+                }
+                this.classList = parts;
+            }
+        }
+
+        boolean hasClass(String cls) {
+            if (classList == null || cls == null || cls.isEmpty()) return false;
+            for (int k = 0; k < classList.length; k++) {
+                if (cls.equals(classList[k])) return true;
+            }
+            return false;
+        }
     }
 
     private static List<String> tokenizeHtmlToRichLines(
@@ -755,12 +905,34 @@ public class EpubFormatting {
                 continue;
             }
 
+            // Игнорируем встроенные <style> и <script> внутри <body>, чтобы их содержимое не попадало в текст книги
+            if ("style".equals(tagName) || "script".equals(tagName)) {
+                if (!isSelfClosing) {
+                    String closeTag = "</" + tagName;
+                    int lowerEnd = -1;
+                    int cLen = closeTag.length();
+                    for (int k = i; k + cLen <= len; k++) {
+                        if (html.regionMatches(true, k, closeTag, 0, cLen)) {
+                            lowerEnd = k;
+                            break;
+                        }
+                    }
+                    if (lowerEnd >= 0) {
+                        int endGt = html.indexOf('>', lowerEnd);
+                        i = (endGt >= 0) ? (endGt + 1) : len;
+                    } else {
+                        i = len;
+                    }
+                }
+                continue;
+            }
+
             // Открывающий тег
             String idAttr = extractAttr(attrsStr, "id");
             String classAttr = extractAttr(attrsStr, "class");
             String alignAttr = extractAttr(attrsStr, "align");
             String styleAttr = extractAttr(attrsStr, "style");
-            CssRuleProps css = cssSheet.resolveElement(tagName, idAttr, classAttr, alignAttr, styleAttr);
+            CssRuleProps css = cssSheet.resolveElement(tagName, idAttr, classAttr, alignAttr, styleAttr, stack);
 
             if (blockTag) {
                 flushRichLine(lines, curBody, activeLineStyle, stack.peek().blockStyle,
@@ -781,6 +953,7 @@ public class EpubFormatting {
                 f.tag = tagName;
                 f.isBlock = true;
                 f.blockStyle = inherited;
+                f.setAttrs(idAttr, classAttr);
 
                 // Вычисляем инлайн-дельты от блока/CSS
                 boolean targetBold = Boolean.TRUE.equals(css.bold) || isHeadingTag(tagName);
@@ -816,6 +989,7 @@ public class EpubFormatting {
                 f.tag = tagName;
                 f.isBlock = false;
                 f.blockStyle = stack.peek().blockStyle;
+                f.setAttrs(idAttr, classAttr);
                 if (resolvedHref != null && !resolvedHref.isEmpty()) {
                     if (activeLinkTarget != null) {
                         closePendingLink(curBody, activeLinkTarget, linkTextBuffer);
@@ -836,6 +1010,7 @@ public class EpubFormatting {
             f.tag = tagName;
             f.isBlock = false;
             f.blockStyle = stack.peek().blockStyle;
+            f.setAttrs(idAttr, classAttr);
 
             boolean addBold = ("b".equals(tagName) || "strong".equals(tagName) || Boolean.TRUE.equals(css.bold));
             boolean addItalic = ("i".equals(tagName) || "em".equals(tagName) || "cite".equals(tagName)

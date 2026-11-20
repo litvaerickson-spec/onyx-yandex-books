@@ -1571,12 +1571,13 @@ public class MainActivity extends Activity {
             }
         });
         final AlertDialog dialog = builder.create();
+        dialog.setCanceledOnTouchOutside(false);
         if (dialog.getWindow() != null) {
             dialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
         }
         dialog.show();
 
-        // 25-секундный предохранитель для защиты от зависаний
+        // 60-секундный предохранитель для защиты от зависаний (увеличен для крупных книг)
         new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -1588,7 +1589,7 @@ public class MainActivity extends Activity {
                     EpdController.requestFullRefresh(MainActivity.this, null);
                 }
             }
-        }, 25000);
+        }, 60000);
 
         return dialog;
     }

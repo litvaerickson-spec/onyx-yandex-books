@@ -14,6 +14,7 @@ public class Chapter implements Serializable {
     private boolean isDownloaded;
     private int originalOpfSpineIndex = -1;
     private String opfItemId = "";
+    private int charCount = 0;
 
     public Chapter() {}
 
@@ -48,4 +49,7 @@ public class Chapter implements Serializable {
 
     public String getOpfItemId() { return opfItemId != null ? opfItemId : ""; }
     public void setOpfItemId(String opfItemId) { this.opfItemId = opfItemId != null ? opfItemId : ""; }
+
+    public int getCharCount() { return Math.max(0, charCount); }
+    public void setCharCount(int charCount) { this.charCount = Math.max(0, charCount); }
 }

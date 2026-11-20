@@ -228,7 +228,7 @@ public class AppSettings {
     public boolean isNightMode() { return prefs.getBoolean(KEY_NIGHT_MODE, false); }
     public void setNightMode(boolean enabled) { prefs.edit().putBoolean(KEY_NIGHT_MODE, enabled).apply(); }
 
-    public boolean isDitherCoversEnabled() { return prefs.getBoolean(KEY_DITHER_COVERS, true); }
+    public boolean isDitherCoversEnabled() { return prefs.getBoolean(KEY_DITHER_COVERS, false); }
     public void setDitherCoversEnabled(boolean enabled) { prefs.edit().putBoolean(KEY_DITHER_COVERS, enabled).apply(); }
 
     public boolean isEdgeBrightnessSwipeEnabled() { return prefs.getBoolean(KEY_EDGE_BRIGHTNESS_SWIPE, true); }

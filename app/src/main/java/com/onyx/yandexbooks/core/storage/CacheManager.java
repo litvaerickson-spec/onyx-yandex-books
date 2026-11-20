@@ -184,13 +184,13 @@ public class CacheManager {
 
     public boolean isFormattedCacheCurrent(String bookUuid) {
         if (bookUuid == null) return true;
-        File flag = getBookFile(bookUuid, "format_v201.flag");
+        File flag = getBookFile(bookUuid, "format_v203.flag");
         return flag.exists() && flag.length() > 0;
     }
 
     public void markFormattedCacheCurrent(String bookUuid) {
         if (bookUuid == null) return;
-        writeTextFile(getBookFile(bookUuid, "format_v201.flag"), "v2.0.1");
+        writeTextFile(getBookFile(bookUuid, "format_v203.flag"), "v2.0.3");
     }
 
     public void saveBookEpubFonts(String bookUuid, Map<String, String> fonts) {
@@ -557,21 +557,19 @@ public class CacheManager {
     }
 
     public void saveChapter(String bookUuid, String chapterId, String content) {
-        FileOutputStream fos = null;
-        OutputStreamWriter writer = null;
+        java.io.BufferedOutputStream bos = null;
         try {
             File file = getChapterFile(bookUuid, chapterId);
-            fos = new FileOutputStream(file);
-            writer = new OutputStreamWriter(fos, "UTF-8");
-            writer.write(content);
+            bos = new java.io.BufferedOutputStream(new FileOutputStream(file), 16384);
+            if (content != null) {
+                bos.write(content.getBytes("UTF-8"));
+            }
+            bos.flush();
         } catch (Exception e) {
             Log.e(TAG, "Error saving chapter " + chapterId, e);
         } finally {
-            if (writer != null) {
-                try { writer.close(); } catch (Throwable ignored) {}
-            }
-            if (fos != null) {
-                try { fos.close(); } catch (Throwable ignored) {}
+            if (bos != null) {
+                try { bos.close(); } catch (Throwable ignored) {}
             }
         }
     }
@@ -717,6 +715,7 @@ public class CacheManager {
             ch.setTitle(cd.title);
             ch.setOriginalOpfSpineIndex(cd.originalOpfSpineIndex);
             ch.setOpfItemId(cd.opfItemId);
+            ch.setCharCount(com.onyx.yandexbooks.core.epub.EpubFormatting.stripFormattingTokens(cd.textContent).length());
             chapters.add(ch);
         }
 

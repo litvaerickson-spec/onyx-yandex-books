@@ -51,7 +51,7 @@ public class TypographyConfig implements Serializable {
     public TypographyConfig() {}
 
     public int getFontSizeSp() { return fontSizeSp; }
-    public void setFontSizeSp(int fontSizeSp) { this.fontSizeSp = Math.max(12, Math.min(fontSizeSp, 48)); }
+    public void setFontSizeSp(int fontSizeSp) { this.fontSizeSp = Math.max(12, Math.min(fontSizeSp, 60)); }
 
     public float getLineSpacingMultiplier() { return lineSpacingMultiplier; }
     public void setLineSpacingMultiplier(float multiplier) { this.lineSpacingMultiplier = Math.max(0.9f, Math.min(multiplier, 2.0f)); }
