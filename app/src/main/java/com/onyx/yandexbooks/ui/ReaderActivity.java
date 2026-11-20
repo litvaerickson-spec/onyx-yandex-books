@@ -334,6 +334,14 @@ public class ReaderActivity extends Activity {
         typographyConfig.setPaddingRightPx(marginPx);
 
         paginator = new TextPaginator();
+        paginator.setImageDimensionProvider(new TextPaginator.ImageDimensionProvider() {
+            @Override
+            public int[] getImageDimensions(String imagePath) {
+                return (cacheManager != null && bookUuid != null)
+                        ? cacheManager.getImageDimensionsFromEpub(bookUuid, imagePath)
+                        : null;
+            }
+        });
 
         if (readerCanvas != null) {
             readerCanvas.setTypographyConfig(typographyConfig);
@@ -2210,8 +2218,16 @@ public class ReaderActivity extends Activity {
         titleView.setTypeface(null, Typeface.BOLD);
         titleView.setTextColor(Color.BLACK);
         titleView.setGravity(Gravity.CENTER);
-        titleView.setPadding(0, 0, 0, (int) (6 * density));
+        titleView.setPadding(0, 0, 0, (int) (2 * density));
         root.addView(titleView);
+
+        TextView tocHintView = new TextView(this);
+        tocHintView.setText("Папки: тап — раскрыть, удержание — перейти");
+        tocHintView.setTextSize(10.5f);
+        tocHintView.setTextColor(Color.DKGRAY);
+        tocHintView.setGravity(Gravity.CENTER);
+        tocHintView.setPadding(0, 0, 0, (int) (5 * density));
+        root.addView(tocHintView);
 
         // Сегментированные вкладки: [ Оглавление ] | [ Закладки ] | [ Цитаты ]
         LinearLayout tabsLayout = new LinearLayout(this);
@@ -2318,10 +2334,13 @@ public class ReaderActivity extends Activity {
 
                     TextView tvArrow = new TextView(ReaderActivity.this);
                     tvArrow.setTag("arrow");
-                    tvArrow.setTextSize(12);
+                    tvArrow.setTextSize(14);
+                    tvArrow.setTypeface(null, Typeface.BOLD);
                     tvArrow.setGravity(Gravity.CENTER);
                     tvArrow.setTextColor(Color.BLACK);
-                    LinearLayout.LayoutParams lpArr = new LinearLayout.LayoutParams((int) (22 * density), ViewGroup.LayoutParams.WRAP_CONTENT);
+                    tvArrow.setClickable(false);
+                    tvArrow.setFocusable(false);
+                    LinearLayout.LayoutParams lpArr = new LinearLayout.LayoutParams((int) (32 * density), ViewGroup.LayoutParams.WRAP_CONTENT);
                     rowLayout.addView(tvArrow, lpArr);
 
                     TextView tvTitle = new TextView(ReaderActivity.this);
@@ -2352,23 +2371,15 @@ public class ReaderActivity extends Activity {
                 int indentLeft = (int) ((node.level * 16 + 4) * density);
                 rowLayout.setPadding(indentLeft, (int) (8 * density), (int) (6 * density), (int) (8 * density));
 
-                if (node.hasChildren) {
-                    tvArrow.setText(node.isExpanded ? "v " : "> ");
+                tvArrow.setOnClickListener(null);
+                if (node.hasChildren && node.children != null && !node.children.isEmpty()) {
+                    tvArrow.setText(node.isExpanded ? "▼" : "▶");
+                    tvArrow.setTextColor(Color.BLACK);
                     tvArrow.setVisibility(View.VISIBLE);
-                    tvArrow.setOnClickListener(new View.OnClickListener() {
-                        @Override
-                        public void onClick(View v) {
-                            node.isExpanded = !node.isExpanded;
-                            visibleTocNodes.clear();
-                            flattenVisibleNodes(tocTree, visibleTocNodes);
-                            btnTabChapters.setText("Оглавление (" + visibleTocNodes.size() + ")");
-                            notifyDataSetChanged();
-                            EpdController.requestFullRefresh(ReaderActivity.this, root);
-                        }
-                    });
                 } else {
-                    tvArrow.setText("   ");
-                    tvArrow.setOnClickListener(null);
+                    tvArrow.setText(node.level > 0 ? "•" : " ");
+                    tvArrow.setTextColor(Color.DKGRAY);
+                    tvArrow.setVisibility(View.VISIBLE);
                 }
 
                 String title = (node.title != null && !node.title.isEmpty()) ? node.title : ("Глава " + (node.spineIndex + 1));
@@ -2392,28 +2403,37 @@ public class ReaderActivity extends Activity {
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                 if (position >= 0 && position < visibleTocNodes.size()) {
                     EpubParser.TocNode clicked = visibleTocNodes.get(position);
+                    // Короткое нажатие по папке со вложенными главами — раскрывает/сворачивает ветку без потери прокрутки
+                    if (clicked.hasChildren && clicked.children != null && !clicked.children.isEmpty()) {
+                        int firstVis = listChaptersView.getFirstVisiblePosition();
+                        View firstChild = listChaptersView.getChildAt(0);
+                        int topOffset = (firstChild != null) ? firstChild.getTop() : 0;
+                        clicked.isExpanded = !clicked.isExpanded;
+                        visibleTocNodes.clear();
+                        flattenVisibleNodes(tocTree, visibleTocNodes);
+                        btnTabChapters.setText("Оглавление (" + visibleTocNodes.size() + ")");
+                        tocAdapter.notifyDataSetChanged();
+                        listChaptersView.setSelectionFromTop(firstVis, topOffset);
+                        EpdController.requestFullRefresh(ReaderActivity.this, root);
+                        return;
+                    }
                     dialog.dismiss();
                     hideMenuOverlay();
-                    userHasInteracted = true;
-                    int targetSpine = clicked.spineIndex;
-                    int targetOffset = Math.max(0, clicked.charOffset);
-                    if ((targetSpine < 0 || targetSpine >= chapters.size()) && clicked.title != null) {
-                        String wantTitle = clicked.title.trim();
-                        for (int ci = 0; ci < chapters.size(); ci++) {
-                            String ct = chapters.get(ci).getTitle();
-                            if (ct != null && ct.trim().equalsIgnoreCase(wantTitle)) {
-                                targetSpine = ci;
-                                targetOffset = 0;
-                                break;
-                            }
-                        }
-                    }
-                    if (targetSpine < 0 || targetSpine >= chapters.size()) {
-                        targetSpine = 0;
-                        targetOffset = 0;
-                    }
-                    loadChapterAtCharOffset(targetSpine, targetOffset);
+                    openTocNode(clicked);
                 }
+            }
+        });
+        listChaptersView.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
+            @Override
+            public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
+                if (position >= 0 && position < visibleTocNodes.size()) {
+                    EpubParser.TocNode clicked = visibleTocNodes.get(position);
+                    dialog.dismiss();
+                    hideMenuOverlay();
+                    openTocNode(clicked);
+                    return true;
+                }
+                return false;
             }
         });
         root.addView(listChaptersView);
@@ -2950,7 +2970,9 @@ public class ReaderActivity extends Activity {
         String info = "Книга: " + (bookTitle != null ? bookTitle : "") + "\n\n"
                 + String.format(Locale.getDefault(), "Прочитано: %.1f%%\n", percent)
                 + "Глава: " + (currentChapterIndex + 1) + " из " + totalCh + "\n"
-                + "Страница главы: " + (currentPageIndex + 1) + " из " + totalP;
+                + "Страница главы: " + (currentPageIndex + 1) + " из " + totalP + "\n\n"
+                + "Автосинхронизация срабатывает при открытии и закрытии книги.\n"
+                + "Кнопка ниже сверяет позицию с облаком в обе стороны.";
         infoView.setText(info);
         root.addView(infoView);
 
@@ -2967,16 +2989,111 @@ public class ReaderActivity extends Activity {
             @Override
             public void onClick(View v) {
                 btnSyncNow.setEnabled(false);
-                btnSyncNow.setText("Синхронизация...");
-                saveProgress();
-                syncManager.flushOfflineQueue();
-                new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                btnSyncNow.setText("Проверка облака...");
+                final ReadingProgress localSnapshot = (dbHelper != null && bookUuid != null) ? dbHelper.getProgress(bookUuid) : null;
+                final long localTs = (localSnapshot != null) ? localSnapshot.getTimestamp() : 0L;
+                final double localPct = calculateCurrentGlobalPercent();
+                final int localCh = currentChapterIndex;
+                final int localPar = calculateCurrentParagraphIndex();
+
+                apiClient.getReadingProgress(bookUuid, new YandexBooksApiClient.ApiCallback<ReadingProgress>() {
                     @Override
-                    public void run() {
-                        btnSyncNow.setText("Синхронизировано");
-                        EinkNotice.show(ReaderActivity.this, "Синхронизация", "Прогресс отправлен в облако Яндекс Книг.");
+                    public void onSuccess(final ReadingProgress cloud) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (isFinishing()) return;
+                                if (cloud != null) {
+                                    int rCh = cloud.getChapterIndex();
+                                    int rPar = cloud.getParagraphIndex();
+                                    if (cloud.getCfi() != null && !cloud.getCfi().isEmpty()) {
+                                        YandexBooksApiClient.CfiPosition cp = YandexBooksApiClient.parseCfiPosition(cloud.getCfi());
+                                        if (cp != null) {
+                                            if (cp.paragraphIndex > 0 || rPar <= 0) rPar = cp.paragraphIndex;
+                                            if (cp.chapterIndex >= 0 || !cp.opfItemId.isEmpty()) rCh = resolveChapterIndexFromCfi(cp);
+                                        }
+                                    } else if (hasCoverChapter() && rCh >= 0) {
+                                        rCh = spineIndexToChapterIndex(rCh);
+                                    }
+                                    double cPct = cloud.getPercent();
+                                    if (cPct <= 0.05 && rCh > 0) {
+                                        cPct = estimatePercentForChapter(rCh);
+                                    }
+                                    final int finalCloudCh = rCh;
+                                    final int finalCloudPar = rPar;
+                                    final double finalCloudPct = cPct;
+                                    boolean cloudValid = finalCloudPct < 99.0 && (finalCloudPct > 0.1 || finalCloudCh > 0 || finalCloudPar > 0);
+                                    boolean differs = Math.abs(finalCloudPct - localPct) >= 1.5
+                                            || finalCloudCh != localCh
+                                            || Math.abs(finalCloudPar - localPar) > 2;
+                                    boolean cloudFavored = cloud.getTimestamp() > localTs + 5000L
+                                            || (finalCloudPct > localPct + 1.5 && cloud.getTimestamp() >= localTs);
+
+                                    if (cloudValid && differs && cloudFavored) {
+                                        btnSyncNow.setEnabled(true);
+                                        btnSyncNow.setText("Синхронизировать");
+                                        String prompt = String.format(Locale.getDefault(),
+                                                "В облаке найдена другая позиция:\nГл. %d (%.1f%%)\n\nНа устройстве сейчас:\nГл. %d (%.1f%%)\n\nВыберите действие:",
+                                                Math.max(1, finalCloudCh + 1), finalCloudPct, Math.max(1, localCh + 1), localPct);
+                                        EinkNotice.showConfirm(ReaderActivity.this, "Синхронизация с облаком", prompt,
+                                                "Перейти из облака", "Отправить мою",
+                                                new Runnable() {
+                                                    @Override
+                                                    public void run() {
+                                                        try { dialog.dismiss(); } catch (Throwable ignored) {}
+                                                        navigateToResolvedProgress(cloud, finalCloudCh, finalCloudPar, finalCloudPct);
+                                                    }
+                                                },
+                                                new Runnable() {
+                                                    @Override
+                                                    public void run() {
+                                                        saveProgress();
+                                                        syncManager.flushOfflineQueue();
+                                                        EinkNotice.show(ReaderActivity.this, "Синхронизация",
+                                                                String.format(Locale.getDefault(), "Текущая позиция (Гл. %d, %.1f%%) отправлена в облако.", localCh + 1, localPct));
+                                                    }
+                                                });
+                                        return;
+                                    }
+                                }
+
+                                // Локальная позиция актуальна или впереди — отправляем её в облако
+                                saveProgress();
+                                syncManager.flushOfflineQueue(new SyncManager.SyncCompleteCallback() {
+                                    @Override
+                                    public void onSyncFinished(int syncedCount) {
+                                        runOnUiThread(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                btnSyncNow.setEnabled(true);
+                                                btnSyncNow.setText("Синхронизировано");
+                                                EinkNotice.show(ReaderActivity.this, "Синхронизация",
+                                                        String.format(Locale.getDefault(), "Позиция (Гл. %d, %.1f%%) синхронизирована с облаком Яндекс Книг.", localCh + 1, localPct));
+                                            }
+                                        });
+                                    }
+                                });
+                            }
+                        });
                     }
-                }, 1000);
+
+                    @Override
+                    public void onError(final String errorMessage) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (isFinishing()) return;
+                                saveProgress();
+                                syncManager.flushOfflineQueue();
+                                btnSyncNow.setEnabled(true);
+                                btnSyncNow.setText("Повторить синхронизацию");
+                                EinkNotice.show(ReaderActivity.this, "Синхронизация (офлайн)",
+                                        String.format(Locale.getDefault(), "Нет ответа от сервера (%s).\nПозиция (Гл. %d, %.1f%%) сохранена локально и отправится при появлении сети.",
+                                                errorMessage != null ? errorMessage : "сеть недоступна", localCh + 1, localPct));
+                            }
+                        });
+                    }
+                });
             }
         });
         root.addView(btnSyncNow);
@@ -3161,6 +3278,15 @@ public class ReaderActivity extends Activity {
                     int n = chaptersSnap.size();
                     final int[] exactCounts = new int[n];
                     TextPaginator bgPaginator = new TextPaginator();
+                    bgPaginator.setImageDimensionProvider(new TextPaginator.ImageDimensionProvider() {
+                        @Override
+                        public int[] getImageDimensions(String imagePath) {
+                            return (cacheManager != null)
+                                    ? cacheManager.getImageDimensionsFromEpub(bookId, imagePath)
+                                    : null;
+                        }
+                    });
+                    final TextPaginator.StyleMeasurer sharedMeasurer = new TextPaginator.StyleMeasurer(basePaint);
                     for (int i = 0; i < n; i++) {
                         while (isPaginating && myTaskId == prepaginationTaskId.get()) {
                             try { Thread.sleep(40); } catch (InterruptedException ignored) { break; }
@@ -3186,13 +3312,17 @@ public class ReaderActivity extends Activity {
                             String t = ch.getTitle();
                             text = (t != null && !t.startsWith("ch_") && !t.startsWith("ch-")) ? t : "";
                         }
-                        List<TextPaginator.Page> pList = bgPaginator.paginateCancellable(
-                                text, screenW, screenH, basePaint, cfgCopy, prepaginationTaskId, myTaskId);
-                        if (pList == null || myTaskId != prepaginationTaskId.get()) {
+                        int pageCount = bgPaginator.countPagesOnlyCancellable(
+                                text, screenW, screenH, basePaint, sharedMeasurer, cfgCopy, prepaginationTaskId, myTaskId);
+                        if (pageCount < 0 || myTaskId != prepaginationTaskId.get()) {
                             return;
                         }
-                        exactCounts[i] = !pList.isEmpty() ? pList.size() : 1;
-                        Thread.yield();
+                        exactCounts[i] = Math.max(1, pageCount);
+                        if (n > 40 && (i & 3) == 0) {
+                            try { Thread.sleep(4); } catch (InterruptedException ignored) { break; }
+                        } else {
+                            Thread.yield();
+                        }
                     }
                     if (myTaskId != prepaginationTaskId.get()) {
                         return;
@@ -3305,9 +3435,14 @@ public class ReaderActivity extends Activity {
                 && rawLabel.trim().matches("^\\s*[\\[\\(]?[0-9\\*†‡§]+[\\]\\)]?\\s*$");
         if (!looksLikeFootnoteLabel && cacheManager != null && bookUuid != null
                 && chapters != null && !chapters.isEmpty() && !lower.contains("note") && !lower.contains("fn")) {
-            EpubParser.TocNode directNode = findTocNodeByTargetHref(cacheManager.loadTocTree(bookUuid), target);
+            List<EpubParser.TocNode> tocNodes = cachedTocTree;
+            if (tocNodes == null || tocNodes.isEmpty()) {
+                tocNodes = cacheManager.loadTocTree(bookUuid);
+                cachedTocTree = tocNodes;
+            }
+            EpubParser.TocNode directNode = findTocNodeByTargetHref(tocNodes, target);
             if (directNode != null && directNode.spineIndex >= 0 && directNode.spineIndex < chapters.size()) {
-                loadChapterAtCharOffset(directNode.spineIndex, Math.max(0, directNode.charOffset));
+                openTocNode(directNode);
                 return;
             }
         }
@@ -3315,7 +3450,7 @@ public class ReaderActivity extends Activity {
         final String fallbackTitle = (rawLabel != null && !rawLabel.trim().isEmpty())
                 ? "Ссылка: " + rawLabel.trim()
                 : "Внутренняя ссылка";
-        paginationExecutor.execute(new Runnable() {
+        prepaginationExecutor.execute(new Runnable() {
             @Override
             public void run() {
                 String[] preview = null;
@@ -3343,27 +3478,92 @@ public class ReaderActivity extends Activity {
         });
     }
 
+    private void openTocNode(EpubParser.TocNode clicked) {
+        if (clicked == null || chapters == null || chapters.isEmpty()) return;
+        userHasInteracted = true;
+        int targetSpine = clicked.spineIndex;
+        int targetOffset = Math.max(0, clicked.charOffset);
+        if ((targetSpine < 0 || targetSpine >= chapters.size()) && clicked.title != null) {
+            String wantTitle = clicked.title.trim();
+            for (int ci = 0; ci < chapters.size(); ci++) {
+                String ct = chapters.get(ci).getTitle();
+                if (ct != null && ct.trim().equalsIgnoreCase(wantTitle)) {
+                    targetSpine = ci;
+                    targetOffset = 0;
+                    break;
+                }
+            }
+        }
+        if (targetSpine < 0 || targetSpine >= chapters.size()) {
+            targetSpine = 0;
+            targetOffset = 0;
+        }
+        loadChapterAtCharOffset(targetSpine, targetOffset);
+    }
+
+    private double estimatePercentForChapter(int targetChapter) {
+        if (chapters == null || chapters.isEmpty() || targetChapter <= 0) return 0.0;
+        int clamped = Math.min(targetChapter, chapters.size() - 1);
+        if (chapterLengths == null || chapterLengths.length != chapters.size()) {
+            calculateChapterLengths();
+        }
+        if (chapterLengths != null && chapterLengths.length == chapters.size() && totalBookLength > 0) {
+            long acc = 0L;
+            for (int i = 0; i < clamped; i++) {
+                acc += chapterLengths[i];
+            }
+            return Math.min(98.9, Math.max(0.1, ((double) acc * 100.0) / (double) totalBookLength));
+        }
+        return Math.min(98.9, Math.max(0.1, ((double) clamped * 100.0) / (double) chapters.size()));
+    }
+
     private EpubParser.TocNode findTocNodeByTargetHref(List<EpubParser.TocNode> nodes, String rawTarget) {
         if (nodes == null || rawTarget == null || rawTarget.isEmpty()) return null;
-        String cleanTarget = rawTarget.trim();
+        String cleanTarget = rawTarget.trim().replace('\\', '/');
+        while (cleanTarget.startsWith("./") || cleanTarget.startsWith("../")) {
+            cleanTarget = cleanTarget.startsWith("./") ? cleanTarget.substring(2) : cleanTarget.substring(3);
+        }
         String targetFile = cleanTarget.contains("#") ? cleanTarget.substring(0, cleanTarget.indexOf('#')) : cleanTarget;
         String targetAnchor = cleanTarget.contains("#") ? cleanTarget.substring(cleanTarget.indexOf('#') + 1) : "";
         String targetBase = targetFile.contains("/") ? targetFile.substring(targetFile.lastIndexOf('/') + 1) : targetFile;
+        EpubParser.TocNode exactMatch = findTocNodeByHrefPass(nodes, cleanTarget, targetFile, targetAnchor, targetBase, true);
+        if (exactMatch != null) return exactMatch;
+        return findTocNodeByHrefPass(nodes, cleanTarget, targetFile, targetAnchor, targetBase, false);
+    }
+
+    private EpubParser.TocNode findTocNodeByHrefPass(
+            List<EpubParser.TocNode> nodes, String cleanTarget, String targetFile,
+            String targetAnchor, String targetBase, boolean strictPath) {
+        if (nodes == null) return null;
         for (EpubParser.TocNode node : nodes) {
             if (node.rawHref != null && !node.rawHref.isEmpty()) {
-                String nh = node.rawHref.trim();
+                String nh = node.rawHref.trim().replace('\\', '/');
+                while (nh.startsWith("./") || nh.startsWith("../")) {
+                    nh = nh.startsWith("./") ? nh.substring(2) : nh.substring(3);
+                }
                 String nFile = nh.contains("#") ? nh.substring(0, nh.indexOf('#')) : nh;
                 String nAnchor = nh.contains("#") ? nh.substring(nh.indexOf('#') + 1) : "";
                 String nBase = nFile.contains("/") ? nFile.substring(nFile.lastIndexOf('/') + 1) : nFile;
-                if (nh.equalsIgnoreCase(cleanTarget)
-                        || (!targetAnchor.isEmpty() && targetAnchor.equalsIgnoreCase(nAnchor)
-                                && (targetBase.isEmpty() || targetBase.equalsIgnoreCase(nBase)))
-                        || (targetAnchor.isEmpty() && nAnchor.isEmpty() && !targetBase.isEmpty() && targetBase.equalsIgnoreCase(nBase))) {
-                    return node;
+
+                boolean fileExact = !targetFile.isEmpty() && (
+                        nFile.equalsIgnoreCase(targetFile)
+                        || nFile.toLowerCase(Locale.US).endsWith("/" + targetFile.toLowerCase(Locale.US))
+                        || targetFile.toLowerCase(Locale.US).endsWith("/" + nFile.toLowerCase(Locale.US)));
+                boolean anchorExact = (!targetAnchor.isEmpty() && targetAnchor.equalsIgnoreCase(nAnchor));
+                boolean noAnchorBoth = targetAnchor.isEmpty() && nAnchor.isEmpty();
+
+                if (strictPath) {
+                    if (nh.equalsIgnoreCase(cleanTarget) || (fileExact && (anchorExact || noAnchorBoth))) {
+                        return node;
+                    }
+                } else {
+                    if (!targetBase.isEmpty() && targetBase.equalsIgnoreCase(nBase) && (anchorExact || noAnchorBoth)) {
+                        return node;
+                    }
                 }
             }
             if (node.children != null && !node.children.isEmpty()) {
-                EpubParser.TocNode found = findTocNodeByTargetHref(node.children, rawTarget);
+                EpubParser.TocNode found = findTocNodeByHrefPass(node.children, cleanTarget, targetFile, targetAnchor, targetBase, strictPath);
                 if (found != null) return found;
             }
         }
@@ -3421,11 +3621,12 @@ public class ReaderActivity extends Activity {
                 readerCanvas.setEpubFontPaths(cacheManager.loadBookEpubFonts(bookUuid));
             }
             resolveInitialPositionAndOpen();
-            // Загружаем дерево оглавления в фоне (название текущей главы уже доступно из chapters)
+            // Загружаем дерево оглавления и прогреваем размеры изображений в фоне (название главы уже доступно)
             prepaginationExecutor.execute(new Runnable() {
                 @Override
                 public void run() {
                     try {
+                        cacheManager.warmupImageDimensionsFromEpub(bookUuid);
                         final List<EpubParser.TocNode> tree = cacheManager.loadTocTree(bookUuid);
                         cachedTocTree = tree;
                     } catch (Throwable ignored) {}
@@ -3444,6 +3645,14 @@ public class ReaderActivity extends Activity {
                         readerCanvas.setEpubFontPaths(cacheManager.loadBookEpubFonts(bookUuid));
                         readerCanvas.setTypographyConfig(typographyConfig);
                     }
+                    prepaginationExecutor.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                cacheManager.warmupImageDimensionsFromEpub(bookUuid);
+                            } catch (Throwable ignored) {}
+                        }
+                    });
                     if (!chapters.isEmpty()) {
                         resolveInitialPositionAndOpen();
                     } else {
@@ -3604,7 +3813,7 @@ public class ReaderActivity extends Activity {
             }
         }
 
-        if (intentPercent > percent) {
+        if ((p == null || p.isSyncedWithServer()) && intentPercent > percent) {
             percent = intentPercent;
             if (intentChapter >= 0) {
                 targetChapter = spineIndexToChapterIndex(intentChapter);
@@ -3702,27 +3911,27 @@ public class ReaderActivity extends Activity {
 
     private void navigateToResolvedProgress(ReadingProgress cloudProgress, int cloudChapter, int cloudParagraph, double cloudPercent) {
         if (chapters == null || chapters.isEmpty()) return;
+        double displayPct = (cloudPercent > 0.05 || cloudChapter <= 0)
+                ? cloudPercent
+                : estimatePercentForChapter(cloudChapter);
+        String msgText;
         // Если есть конкретный абзац и допустимая глава (>= 0)
         if (cloudChapter >= 0 && cloudChapter < chapters.size() && cloudParagraph > 0) {
             currentChapterIndex = cloudChapter;
             loadChapterAtParagraph(currentChapterIndex, cloudParagraph);
-            dbHelper.saveProgress(cloudProgress);
-            dbHelper.ensureCloudSyncBookmark(bookUuid, currentChapterIndex, currentPageIndex, (float) cloudPercent);
-            EinkNotice.show(ReaderActivity.this, "Синхронизация", String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d, абз. %d)\n[Закладка создана]", cloudPercent, currentChapterIndex + 1, cloudParagraph + 1));
+            msgText = String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d, абз. %d)\n[Закладка создана]", displayPct, currentChapterIndex + 1, cloudParagraph + 1);
         } else if (cloudChapter >= 0 && cloudChapter < chapters.size()
-                && (cloudChapter > 0 || cloudPercent <= 1.0 || cloudProgress.getPageIndex() > 0)) {
+                && (cloudChapter > 0 || displayPct <= 1.0 || cloudProgress.getPageIndex() > 0)) {
             currentChapterIndex = cloudChapter;
             currentPageIndex = Math.max(0, cloudProgress.getPageIndex());
             loadChapter(currentChapterIndex, currentPageIndex);
-            dbHelper.saveProgress(cloudProgress);
-            dbHelper.ensureCloudSyncBookmark(bookUuid, currentChapterIndex, currentPageIndex, (float) cloudPercent);
-            EinkNotice.show(ReaderActivity.this, "Синхронизация", String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)\n[Закладка создана]", cloudPercent, currentChapterIndex + 1));
-        } else if (cloudPercent > 0 && cloudPercent < 99.0 && totalBookLength > 0) {
+            msgText = String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)\n[Закладка создана]", displayPct, currentChapterIndex + 1);
+        } else if (displayPct > 0 && displayPct < 99.0 && totalBookLength > 0) {
             // Если номер главы не указан – маппинг по общей длине
             if (chapterLengths == null || chapterLengths.length != chapters.size()) {
                 calculateChapterLengths();
             }
-            long targetGlobalOffset = (long) ((cloudPercent / 100.0) * totalBookLength);
+            long targetGlobalOffset = (long) ((displayPct / 100.0) * totalBookLength);
             long acc = 0;
             int matchedCh = 0;
             long matchedOffset = 0;
@@ -3740,10 +3949,26 @@ public class ReaderActivity extends Activity {
 
             currentChapterIndex = matchedCh;
             loadChapterWithFraction(currentChapterIndex, chapterFraction);
-            dbHelper.saveProgress(cloudProgress);
-            dbHelper.ensureCloudSyncBookmark(bookUuid, currentChapterIndex, currentPageIndex, (float) cloudPercent);
-            EinkNotice.show(ReaderActivity.this, "Синхронизация", String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)\n[Закладка создана]", cloudPercent, currentChapterIndex + 1));
+            msgText = String.format(Locale.getDefault(), "Синхронизировано: %.0f%% (Гл. %d)\n[Закладка создана]", displayPct, currentChapterIndex + 1);
+        } else {
+            return;
         }
+
+        ReadingProgress normalized = new ReadingProgress(
+                bookUuid,
+                displayPct,
+                chapterIndexToSpineIndex(currentChapterIndex),
+                Math.max(0, cloudParagraph),
+                currentPageIndex,
+                cloudProgress.getTimestamp() > 0L ? cloudProgress.getTimestamp() : System.currentTimeMillis()
+        );
+        normalized.setCfi(cloudProgress.getCfi());
+        normalized.setLibraryCardId(cloudProgress.getLibraryCardId());
+        normalized.setDocumentUuid(cloudProgress.getDocumentUuid());
+        normalized.setSyncedWithServer(true);
+        dbHelper.saveProgress(normalized);
+        dbHelper.ensureCloudSyncBookmark(bookUuid, currentChapterIndex, currentPageIndex, (float) displayPct);
+        EinkNotice.show(ReaderActivity.this, "Синхронизация", msgText);
     }
 
     private void applyCloudProgressIfNewer(final ReadingProgress cloudProgress) {
@@ -3751,7 +3976,7 @@ public class ReaderActivity extends Activity {
 
         ReadingProgress local = dbHelper.getProgress(bookUuid);
         double curPercent = calculateCurrentGlobalPercent();
-        final double cloudPercent = cloudProgress.getPercent();
+        final double rawCloudPercent = cloudProgress.getPercent();
         int resolvedChapter = cloudProgress.getChapterIndex();
         int resolvedParagraph = cloudProgress.getParagraphIndex();
         if (cloudProgress.getCfi() != null && !cloudProgress.getCfi().isEmpty()) {
@@ -3764,13 +3989,17 @@ public class ReaderActivity extends Activity {
                     resolvedChapter = resolveChapterIndexFromCfi(cfiPos);
                 }
             }
-        } else if (resolvedChapter == 0 && resolvedParagraph <= 0 && cloudPercent > 1.0) {
+        } else if (resolvedChapter == 0 && resolvedParagraph <= 0 && rawCloudPercent > 1.0) {
             // Сервер вернул только процент чтения без CFI и номера главы: не смещаем на главу обложки (1),
             // а передаём -1, чтобы navigateToResolvedProgress открыл позицию по totalBookLength
             resolvedChapter = -1;
         } else if (hasCoverChapter() && resolvedChapter >= 0) {
             resolvedChapter = spineIndexToChapterIndex(resolvedChapter);
         }
+
+        final double cloudPercent = (rawCloudPercent > 0.05 || resolvedChapter <= 0)
+                ? rawCloudPercent
+                : estimatePercentForChapter(resolvedChapter);
 
         // Защита от искаженного 100% при 0 главе или завершенной книге
         if (cloudPercent >= 99.0) {
@@ -3781,19 +4010,31 @@ public class ReaderActivity extends Activity {
         final int targetParagraph = resolvedParagraph;
         long localTs = (local != null) ? local.getTimestamp() : 0L;
         long cloudTs = cloudProgress.getTimestamp();
+        int curPar = calculateCurrentParagraphIndex();
+
+        // Подавляем ложное срабатывание при минимальной разнице позиций (< 1.5% в той же главе)
+        if (Math.abs(cloudPercent - curPercent) < 1.5
+                && (targetChapter < 0 || targetChapter == currentChapterIndex)
+                && Math.abs(targetParagraph - curPar) <= 2) {
+            return;
+        }
 
         boolean isForward = false;
         boolean isBackward = false;
 
-        if (targetChapter > currentChapterIndex || (targetChapter == currentChapterIndex && targetParagraph > calculateCurrentParagraphIndex()) || cloudPercent > curPercent + 0.5) {
+        if ((targetChapter >= 0 && targetChapter > currentChapterIndex)
+                || (targetChapter == currentChapterIndex && targetParagraph > curPar + 1)
+                || cloudPercent > curPercent + 0.5) {
             isForward = true;
-        } else if (targetChapter < currentChapterIndex || (targetChapter == currentChapterIndex && targetParagraph < calculateCurrentParagraphIndex()) || cloudPercent < curPercent - 2.0) {
+        } else if ((targetChapter >= 0 && targetChapter < currentChapterIndex)
+                || (targetChapter == currentChapterIndex && targetParagraph + 1 < curPar)
+                || cloudPercent < curPercent - 2.0) {
             isBackward = true;
         }
 
         // 1. Читатель уже начал листать страницы книги на ридере во время сетевого запроса
         if (userHasInteracted) {
-            if (isForward && (cloudTs >= localTs || cloudPercent > curPercent + 1.0)) {
+            if (isForward && ((cloudTs > localTs && cloudTs > 0) || (cloudTs >= localTs && cloudPercent > curPercent + 1.5))) {
                 String msg = String.format(Locale.getDefault(),
                         "На другом устройстве вы остановились дальше:\nГл. %d (%.0f%%)\n\nПерейти к этому месту?",
                         Math.max(1, targetChapter + 1), cloudPercent);
@@ -3814,9 +4055,9 @@ public class ReaderActivity extends Activity {
             return;
         }
 
-        // 2. Защита от случайного отката назад (LWW с валидацией вперед)
+        // 2. Защита от случайного отката назад (никогда не откатываемся без более свежего серверного timestamp)
         if (isBackward) {
-            if (cloudTs > localTs && localTs > 0) {
+            if (cloudTs > localTs && localTs > 0 && cloudTs > 0) {
                 String msg = String.format(Locale.getDefault(),
                         "На другом устройстве открыта более ранняя позиция:\nГл. %d (%.0f%%)\n\nОткатиться назад к этому месту?",
                         Math.max(1, targetChapter + 1), cloudPercent);
@@ -3840,12 +4081,10 @@ public class ReaderActivity extends Activity {
         // 3. Бесшовное открытие сохраненной позиции при запуске ридера
         boolean isNewer = false;
         if (local == null) {
-            isNewer = (cloudPercent > 0 || targetChapter > 0 || targetParagraph > 0 || (cloudProgress.getCfi() != null && !cloudProgress.getCfi().isEmpty()));
+            isNewer = (cloudPercent > 0.05 || targetChapter > 0 || targetParagraph > 0 || (cloudProgress.getCfi() != null && !cloudProgress.getCfi().isEmpty()));
         } else if (cloudTs > localTs && cloudTs > 0) {
-            if (Math.abs(cloudPercent - curPercent) > 0.05 || targetChapter != currentChapterIndex || Math.abs(targetParagraph - calculateCurrentParagraphIndex()) > 0) {
-                isNewer = true;
-            }
-        } else if (isForward && (cloudTs >= localTs || cloudTs == 0 || local.isSyncedWithServer())) {
+            isNewer = true;
+        } else if (isForward && (local.isSyncedWithServer() || curPercent <= 0.5) && (cloudTs >= localTs || cloudTs == 0)) {
             isNewer = true;
         }
 
@@ -4258,7 +4497,7 @@ public class ReaderActivity extends Activity {
 
     private void loadBookFootnotesAsync() {
         if (bookUuid == null || bookUuid.isEmpty() || cacheManager == null) return;
-        paginationExecutor.execute(new Runnable() {
+        prepaginationExecutor.execute(new Runnable() {
             @Override
             public void run() {
                 final Map<String, String> notes = cacheManager.ensureFootnotesExtractedSync(bookUuid);
@@ -4431,9 +4670,9 @@ public class ReaderActivity extends Activity {
                     final String rawText = text;
                     chapterTextMemoryCache.put(index, rawText);
 
-                    // 1.5 APPLE-ПОДХОД: для больших глав (> 12 КБ) сначала мгновенно показываем 1 видимую страницу (~10 мс),
-                    // пока полная пагинация всей главы дорабатывает в фоне!
-                    if (rawText.length() > 12000 && (currentPages == null || currentPages.isEmpty())) {
+                    // 1.5 APPLE-ПОДХОД: для больших глав (> 8 КБ) сначала мгновенно показываем 1 видимую страницу (~10 мс),
+                    // пока полная пагинация всей главы дорабатывает в фоне (включая переходы между главами)
+                    if (rawText.length() > 8000 && targetPage != -999) {
                         int quickOffset = -1;
                         if (targetCharOffset >= 0) {
                             quickOffset = targetCharOffset;
@@ -4598,6 +4837,7 @@ public class ReaderActivity extends Activity {
     }
 
     private void preloadAdjacentChapters(final int curIndex) {
+        final long preloadTaskId = paginationTaskId.get();
         final int[] adj = new int[]{curIndex + 1, curIndex - 1};
         for (final int targetIdx : adj) {
             if (targetIdx >= 0 && chapters != null && targetIdx < chapters.size()) {
@@ -4609,6 +4849,7 @@ public class ReaderActivity extends Activity {
                         @Override
                         public void run() {
                             try {
+                                if (preloadTaskId != paginationTaskId.get() || isFinishing()) return;
                                 if (chapterPagesMemoryCache.containsKey(targetIdx)) return;
                                 String text = cacheManager.loadChapter(bookUuid, chId);
                                 if (text == null) text = cacheManager.loadChapter(bookUuid, String.valueOf(targetIdx));
@@ -4624,8 +4865,9 @@ public class ReaderActivity extends Activity {
                                     h = getResources().getDisplayMetrics().heightPixels;
                                 }
 
-                                List<TextPaginator.Page> pages = paginator.paginate(text, w, h, paint, cfg);
-                                if (pages != null && !pages.isEmpty()) {
+                                List<TextPaginator.Page> pages = paginator.paginateCancellable(
+                                        text, w, h, paint, cfg, paginationTaskId, preloadTaskId);
+                                if (pages != null && !pages.isEmpty() && preloadTaskId == paginationTaskId.get()) {
                                     chapterPagesMemoryCache.put(targetIdx, pages);
                                     chapterTextMemoryCache.put(targetIdx, text);
                                     if (chapterPageCounts != null && targetIdx < chapterPageCounts.length) {

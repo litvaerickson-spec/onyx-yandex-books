@@ -20,7 +20,7 @@ import java.util.List;
 public class DatabaseHelper extends SQLiteOpenHelper {
 
     private static final String DATABASE_NAME = "yandex_books_lite.db";
-    private static final int DATABASE_VERSION = 9;
+    private static final int DATABASE_VERSION = 10;
 
     private static DatabaseHelper instance;
 
@@ -72,6 +72,34 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 db.execSQL(sql);
             } catch (Throwable ignored) {}
         }
+        // Автовосстановление таблицы chapters, если осталась устаревшая схема с одиночным id TEXT PRIMARY KEY
+        Cursor schemaCur = null;
+        try {
+            schemaCur = db.rawQuery("SELECT sql FROM sqlite_master WHERE type='table' AND name='chapters'", null);
+            if (schemaCur != null && schemaCur.moveToFirst()) {
+                String ddl = schemaCur.getString(0);
+                if (ddl != null && !ddl.contains("PRIMARY KEY (book_uuid, chapter_index)")) {
+                    db.execSQL("DROP TABLE IF EXISTS chapters");
+                    db.execSQL("CREATE TABLE IF NOT EXISTS chapters (" +
+                            "id TEXT," +
+                            "book_uuid TEXT," +
+                            "chapter_index INTEGER," +
+                            "title TEXT," +
+                            "content TEXT," +
+                            "is_downloaded INTEGER," +
+                            "original_opf_spine_index INTEGER DEFAULT -1," +
+                            "opf_item_id TEXT," +
+                            "char_count INTEGER DEFAULT 0," +
+                            "PRIMARY KEY (book_uuid, chapter_index)" +
+                            ")");
+                }
+            }
+        } catch (Throwable ignored) {
+        } finally {
+            if (schemaCur != null) {
+                try { schemaCur.close(); } catch (Throwable ignored) {}
+            }
+        }
     }
 
     private void createTables(SQLiteDatabase db) {
@@ -96,9 +124,9 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 "file_url TEXT" +
                 ")");
 
-        // Таблица глав
+        // Таблица глав (составной ключ исключает перезапись глав при открытии нескольких книг)
         db.execSQL("CREATE TABLE IF NOT EXISTS chapters (" +
-                "id TEXT PRIMARY KEY," +
+                "id TEXT," +
                 "book_uuid TEXT," +
                 "chapter_index INTEGER," +
                 "title TEXT," +
@@ -106,7 +134,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 "is_downloaded INTEGER," +
                 "original_opf_spine_index INTEGER DEFAULT -1," +
                 "opf_item_id TEXT," +
-                "char_count INTEGER DEFAULT 0" +
+                "char_count INTEGER DEFAULT 0," +
+                "PRIMARY KEY (book_uuid, chapter_index)" +
                 ")");
 
         // Таблица прогресса
@@ -222,7 +251,13 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             } catch (Exception ignored) {}
         }
 
-        if (oldVersion < 8) {
+        if (oldVersion < 10) {
+            try {
+                db.execSQL("DROP TABLE IF EXISTS chapters");
+                createTables(db);
+            } catch (Exception ignored) {}
+            ensureSchemaMigration(db);
+        } else if (oldVersion < 8) {
             ensureSchemaMigration(db);
         }
     }
@@ -360,6 +395,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             boolean localFullySynced = isLocalProgressSynced && !hasUnsyncedQueue;
             boolean serverIsNewerAndFurther = false;
 
+            boolean savedInRecentSession = com.onyx.yandexbooks.core.sync.SyncManager.wasBookSavedRecently(book.getUuid(), 15000L);
             if (hasLocalProgress) {
                 // Серверный прогресс новее, если книга не была только что сброшена локально, и:
                 // 1) таймштамп сервера новее — пользователь читал на смартфоне позже, чем на ридере, ИЛИ
@@ -370,7 +406,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 boolean paragraphAdvanced = (book.getCurrentChapterIndex() == bestLocalCh && book.getCurrentParagraphIndex() > bestLocalPar);
                 boolean hasAnyCloudProgress = book.getPercent() > 0.01 || book.getCurrentChapterIndex() > 0 || (book.getCfi() != null && !book.getCfi().isEmpty());
 
-                serverIsNewerAndFurther = !wasJustResetLocally && cloudPercentValid && (
+                serverIsNewerAndFurther = !wasJustResetLocally && !savedInRecentSession && cloudPercentValid && (
                         (cloudTimestamp > bestLocalTs && cloudTimestamp > 0)
                         || (bestLocalPercent <= 0.0 && bestLocalCh == 0 && hasAnyCloudProgress)
                         || (localFullySynced && (percentAdvanced || chapterAdvanced || paragraphAdvanced) && (cloudTimestamp <= 0 || cloudTimestamp >= bestLocalTs))

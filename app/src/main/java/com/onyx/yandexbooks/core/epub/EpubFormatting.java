@@ -661,6 +661,43 @@ public class EpubFormatting {
     }
 
     /**
+     * Быстрый подсчёт числа видимых текстовых символов без аллокации StringBuilder.
+     */
+    public static int countPlainChars(String richText) {
+        if (richText == null || richText.isEmpty()) return 0;
+        int count = 0;
+        int len = richText.length();
+        int i = 0;
+        while (i < len) {
+            char c = richText.charAt(i);
+            if (c == BLK_START) {
+                int end = richText.indexOf(BLK_END, i + 1);
+                if (end >= 0 && end - i <= 24) {
+                    i = end + 1;
+                    continue;
+                }
+            } else if (c == BLK_END || c == PAGE_BREAK_CHAR || (c >= '\uE010' && c <= '\uE019')) {
+                i++;
+                continue;
+            } else if (c == LINK_START) {
+                int sep = richText.indexOf(LINK_SEP, i + 1);
+                int end = richText.indexOf(LINK_END, i + 1);
+                if (sep > i && end > sep) {
+                    count += (end - (sep + 1));
+                    i = end + 1;
+                    continue;
+                }
+            } else if (c == LINK_SEP || c == LINK_END) {
+                i++;
+                continue;
+            }
+            count++;
+            i++;
+        }
+        return count;
+    }
+
+    /**
      * Полностью очищает форматирующие служебные токены, оставляя только читаемый текст книги.
      */
     public static String stripFormattingTokens(String richText) {
@@ -1214,12 +1251,20 @@ public class EpubFormatting {
             style.spaceBottom = true;
         } else if (!isContainer && (lowerCls.contains("footnote") || lowerCls.contains("endnote"))) {
             style.role = 'N';
-        } else if (!isContainer && (lowerCls.contains("subtitle") || lowerCls.contains("chapter-title") || lowerCls.contains("chapter_title"))) {
+        } else if (!isContainer && (lowerCls.contains("subtitle") || lowerCls.contains("chapter-title") || lowerCls.contains("chapter_title")
+                || "title".equals(lowerCls.trim()) || lowerCls.contains(" title"))) {
             if (style.role == 'P') {
                 if (style.align == 'D') style.align = 'C';
                 style.spaceTop = true;
                 style.spaceBottom = true;
             }
+        } else if (lowerCls.equals("h1") || lowerCls.equals("h2") || lowerCls.equals("h3")
+                || lowerCls.equals("h4") || lowerCls.equals("h5") || lowerCls.equals("h6")) {
+            style.role = lowerCls.charAt(1);
+            if (style.align == 'D') style.align = 'C';
+            style.spaceTop = true;
+            style.spaceBottom = true;
+            style.bold = true;
         }
 
         if (css != null) {

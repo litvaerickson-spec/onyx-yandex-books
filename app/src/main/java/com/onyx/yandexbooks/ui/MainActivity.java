@@ -482,20 +482,30 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 dialog.dismiss();
+                if (!isNetworkAvailable()) {
+                    EinkNotice.show(MainActivity.this, "Синхронизация",
+                            "Нет подключения к интернету.\nВесь прогресс чтения сохранён локально и автоматически отправится в облако при подключении к Wi-Fi.");
+                    return;
+                }
                 syncManager.flushOfflineQueue(new SyncManager.SyncCompleteCallback() {
                     @Override
                     public void onSyncFinished(final int count) {
-                        runOnUiThread(new Runnable() {
+                        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
                             @Override
                             public void run() {
-                                loadBooks(currentShelf);
+                                if (isFinishing()) return;
+                                if (!"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
+                                    loadBooks(currentShelf);
+                                }
                                 if (count > 0) {
-                                    EinkNotice.show(MainActivity.this, "Синхронизация", "Синхронизирован прогресс " + count + " книг с облаком!");
+                                    EinkNotice.show(MainActivity.this, "Синхронизация",
+                                            "Двусторонняя синхронизация выполнена.\nОтправлено обновлений в облако: " + count + ". Полки и прогресс обновлены с сервера.");
                                 } else {
-                                    EinkNotice.show(MainActivity.this, "Синхронизация", "Синхронизация выполнена. Полки и прогресс чтения обновлены.");
+                                    EinkNotice.show(MainActivity.this, "Синхронизация",
+                                            "Двусторонняя синхронизация выполнена.\nПолки и прогресс чтения обновлены с сервера Яндекс Книг.");
                                 }
                             }
-                        });
+                        }, count > 0 ? 450L : 100L);
                     }
                 });
             }
@@ -2235,13 +2245,24 @@ public class MainActivity extends Activity {
             if (!"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
                 currentBooks = dbHelper.getBooksByShelf(currentShelf);
                 adapter.notifyDataSetChanged();
-                // Автоматическое фоновое обновление библиотеки из облака, чтобы книги со смартфона появлялись сразу
-                loadBooks(currentShelf);
             }
             updateTabBadges();
             updateShelfFooter();
-            // Автоматическая фоновая отправка прогресса офлайн-чтения в облако Яндекса
-            syncManager.flushOfflineQueue();
+            // Сначала дожидаемся отправки локального/офлайн-прогресса в облако,
+            // и только затем подтягиваем полки с сервера, чтобы исключить гонку старого процента
+            syncManager.flushOfflineQueue(new SyncManager.SyncCompleteCallback() {
+                @Override
+                public void onSyncFinished(final int syncedCount) {
+                    new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (!isFinishing() && !"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
+                                loadBooks(currentShelf);
+                            }
+                        }
+                    }, syncedCount > 0 ? 500L : 350L);
+                }
+            });
 
             // Автоматическая фоновая проверка обновлений при появлении интернета
             if (!sUpdateCheckedSuccessfully && isNetworkAvailable()) {

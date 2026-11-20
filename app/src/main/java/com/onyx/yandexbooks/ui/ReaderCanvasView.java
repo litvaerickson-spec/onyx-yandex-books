@@ -142,6 +142,7 @@ public class ReaderCanvasView extends View {
     private int selectionFocusOffset = -1;
     private final Paint selectionFillPaint = new Paint();
     private final Paint savedQuoteFillPaint = new Paint();
+    private final Paint inlineImagePaint = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final Runnable longPressRunnable = new Runnable() {
         @Override
         public void run() {
@@ -530,9 +531,10 @@ public class ReaderCanvasView extends View {
 
         boolean isImagePage = false;
         String imgPath = null;
-        if (currentPage.lines != null && !currentPage.lines.isEmpty()) {
-            String firstLine = currentPage.lines.get(0).text.trim();
-            if (firstLine.startsWith("[IMG:") && firstLine.endsWith("]")) {
+        if (currentPage.lines != null && currentPage.lines.size() == 1) {
+            TextPaginator.Line onlyLine = currentPage.lines.get(0);
+            String firstLine = onlyLine.text.trim();
+            if (onlyLine.inlineImagePath == null && firstLine.startsWith("[IMG:") && firstLine.endsWith("]")) {
                 isImagePage = true;
                 imgPath = firstLine.substring(5, firstLine.length() - 1).trim();
             }
@@ -604,9 +606,32 @@ public class ReaderCanvasView extends View {
                     footerTopLimitY
             );
 
-            // Отрисовка строк текущей страницы (поддержка гибридного форматирования v1.7.0)
+            // Отрисовка строк и встроенных виньеток текущей страницы
             boolean isFirstRenderedLine = true;
             for (TextPaginator.Line line : currentPage.lines) {
+                if (line.inlineImagePath != null) {
+                    float topGapImg = isFirstRenderedLine ? 0f : line.extraTopPx;
+                    float imgTopY = currentY + fm.top + topGapImg;
+                    float imgBottomY = imgTopY + line.inlineImageH;
+                    if (imgBottomY > screenLimitY + 6f) {
+                        break;
+                    }
+                    float availImgW = maxAllowedX - startX;
+                    Bitmap bmp = (imageLoader != null) ? imageLoader.loadImage(
+                            line.inlineImagePath,
+                            Math.max(40, Math.round(line.inlineImageW)),
+                            Math.max(12, Math.round(line.inlineImageH))) : null;
+                    if (bmp != null && !bmp.isRecycled()) {
+                        float destX = startX + Math.max(0f, (availImgW - line.inlineImageW) / 2f);
+                        Rect srcRect = new Rect(0, 0, bmp.getWidth(), bmp.getHeight());
+                        RectF dstRect = new RectF(destX, imgTopY, destX + line.inlineImageW, imgBottomY);
+                        canvas.drawBitmap(bmp, srcRect, dstRect, inlineImagePaint);
+                    }
+                    currentY += topGapImg + line.inlineImageH + line.extraBottomPx;
+                    isFirstRenderedLine = false;
+                    continue;
+                }
+
                 float scaledLineHeight = lineHeight * line.fontScale;
                 if (!isFirstRenderedLine && line.extraTopPx > 0f) {
                     currentY += line.extraTopPx;

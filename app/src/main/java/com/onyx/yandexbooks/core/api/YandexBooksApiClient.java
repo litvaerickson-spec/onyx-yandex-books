@@ -342,21 +342,21 @@ public class YandexBooksApiClient {
                 }
             }
             Matcher mElem = Pattern.compile("/(\\d+)").matcher(elemPath);
-            int firstBodyElemNum = -1;
+            int targetElemNum = -1;
             int stepCount = 0;
             while (mElem.find()) {
                 try {
                     int n = Integer.parseInt(mElem.group(1));
                     stepCount++;
-                    if (stepCount == 2) {
-                        firstBodyElemNum = n;
-                    } else if (stepCount == 1) {
-                        firstBodyElemNum = n;
+                    // Шаг 1 (/4) — <body>; чётные шаги (>= 2) — DOM-элементы внутри тела
+                    // (берём последний чётный шаг, чтобы не застревать на обёртке <div class="section">/2)
+                    if (stepCount >= 2 && (n % 2 == 0 || targetElemNum < 0)) {
+                        targetElemNum = n;
                     }
                 } catch (Exception ignored) {}
             }
-            if (firstBodyElemNum > 0) {
-                paragraphIndex = Math.max(0, (firstBodyElemNum / 2) - 1);
+            if (targetElemNum > 0) {
+                paragraphIndex = Math.max(0, (targetElemNum / 2) - 1);
             }
         }
 
@@ -999,48 +999,71 @@ public class YandexBooksApiClient {
         return null;
     }
 
-    /**
-     * Синхронный поиск UUID карточки библиотеки (library_card.uuid) для заданной книги.
-     */
-    private String findLibraryCardUuidForBookSync(String bookUuid) {
-        if (bookUuid == null || bookUuid.isEmpty()) return "";
-        String[] urls = new String[] {
-            BASE_URL + "/profile/library_cards?book_uuid=" + bookUuid + "&per_page=100",
-            BASE_URL + "/profile/library_cards?per_page=100&page=1",
-            BASE_URL + "/profile/library_cards?per_page=100&page=2"
-        };
-        for (int uIdx = 0; uIdx < urls.length; uIdx++) {
+    private JSONObject findLibraryCardObjectForBookSync(String bookUuid) {
+        if (bookUuid == null || bookUuid.isEmpty()) return null;
+        java.util.Set<String> seenCardKeys = new java.util.HashSet<>();
+        for (int pass = 0; pass <= 15; pass++) {
+            String url = (pass == 0)
+                    ? (BASE_URL + "/profile/library_cards?book_uuid=" + bookUuid + "&per_page=100")
+                    : (BASE_URL + "/profile/library_cards?per_page=100&page=" + pass);
             Response resp = null;
             try {
-                Request req = createAuthRequestBuilder(urls[uIdx]).get().build();
+                Request req = createAuthRequestBuilder(url).get().build();
                 resp = httpClient.newCall(req).execute();
-                if (!resp.isSuccessful()) {
-                    continue;
+                if (!resp.isSuccessful() || resp.body() == null) {
+                    if (pass == 0) continue;
+                    break;
                 }
-                String body = resp.body() != null ? resp.body().string() : "";
-                if (body.isEmpty()) continue;
+                String body = resp.body().string();
+                if (body.isEmpty()) {
+                    if (pass == 0) continue;
+                    break;
+                }
                 JSONObject json = new JSONObject(body);
                 JSONArray arr = json.optJSONArray("library_cards");
                 if (arr == null) arr = json.optJSONArray("objects");
                 if (arr == null) arr = json.optJSONArray("items");
                 if (arr == null || arr.length() == 0) {
+                    if (pass == 0) continue;
                     break;
                 }
                 JSONObject matched = findMatchingLibraryCardInArray(arr, bookUuid);
                 if (matched != null) {
-                    String resolved = extractLibraryCardId(matched, matched.optJSONObject("book"), bookUuid);
-                    if (!resolved.isEmpty()) {
-                        return resolved;
-                    }
+                    return matched;
                 }
-                if (arr.length() < 100) {
-                    break;
+                if (pass > 0) {
+                    int newOnPage = 0;
+                    for (int i = 0; i < arr.length(); i++) {
+                        JSONObject c = arr.optJSONObject(i);
+                        if (c == null) continue;
+                        String k = c.optString("uuid", c.optString("id", ""));
+                        if (!k.isEmpty() && seenCardKeys.add(k)) {
+                            newOnPage++;
+                        }
+                    }
+                    if (newOnPage == 0) {
+                        break;
+                    }
                 }
             } catch (Exception ignored) {
             } finally {
                 if (resp != null) {
                     try { resp.close(); } catch (Exception ignored) {}
                 }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Синхронный поиск UUID карточки библиотеки (library_card.uuid) для заданной книги.
+     */
+    private String findLibraryCardUuidForBookSync(String bookUuid) {
+        JSONObject matched = findLibraryCardObjectForBookSync(bookUuid);
+        if (matched != null) {
+            String resolved = extractLibraryCardId(matched, matched.optJSONObject("book"), bookUuid);
+            if (!resolved.isEmpty()) {
+                return resolved;
             }
         }
         return "";
@@ -1091,7 +1114,7 @@ public class YandexBooksApiClient {
                         }
                     } catch (Exception ignored) {}
 
-                    // 2. Запрос карточки библиотеки для извлечения процента и cardId
+                    // 2. Запрос карточки библиотеки для извлечения процента и cardId (с постраничным поиском)
                     double cardPercent = 0.0;
                     String cardId = "";
                     long cardTs = 0L;
@@ -1099,35 +1122,19 @@ public class YandexBooksApiClient {
                     int cardParagraph = 0;
                     AudioMeta linkedAudioMeta = null;
 
-                    Response cardResp = null;
                     try {
-                        String endpoint = BASE_URL + "/profile/library_cards?book_uuid=" + bookUuid + "&per_page=100";
-                        Request cardReq = createAuthRequestBuilder(endpoint).get().build();
-                        cardResp = httpClient.newCall(cardReq).execute();
-                        if (cardResp.isSuccessful() && cardResp.body() != null) {
-                            String body = cardResp.body().string();
-                            JSONObject json = new JSONObject(body);
-                            JSONArray arr = json.optJSONArray("library_cards");
-                            if (arr != null && arr.length() > 0) {
-                                JSONObject card = findMatchingLibraryCardInArray(arr, bookUuid);
-                                if (card != null) {
-                                    JSONObject bObj = card.optJSONObject("book");
-                                    ParsedProgress pr = extractProgress(card, bObj);
-                                    cardPercent = pr.percent;
-                                    cardChapter = pr.chapterIndex;
-                                    cardParagraph = pr.paragraphIndex;
-                                    cardTs = pr.timestamp;
-                                    cardId = extractLibraryCardId(card, bObj, bookUuid);
-                                    linkedAudioMeta = extractLinkedAudioMeta(card, bObj);
-                                }
-                            }
+                        JSONObject card = findLibraryCardObjectForBookSync(bookUuid);
+                        if (card != null) {
+                            JSONObject bObj = card.optJSONObject("book");
+                            ParsedProgress pr = extractProgress(card, bObj);
+                            cardPercent = pr.percent;
+                            cardChapter = pr.chapterIndex;
+                            cardParagraph = pr.paragraphIndex;
+                            cardTs = pr.timestamp;
+                            cardId = extractLibraryCardId(card, bObj, bookUuid);
+                            linkedAudioMeta = extractLinkedAudioMeta(card, bObj);
                         }
-                    } catch (Exception ignored) {
-                    } finally {
-                        if (cardResp != null) {
-                            try { cardResp.close(); } catch (Exception ignored) {}
-                        }
-                    }
+                    } catch (Exception ignored) {}
 
                     // 3. Синтез наиболее точного прогресса
                     int finalChapter = cardChapter;
@@ -1139,9 +1146,11 @@ public class YandexBooksApiClient {
                     }
 
                     if (gqlCfiStart != null || cardPercent > 0.0 || !cardId.isEmpty()) {
+                        // Не подставляем System.currentTimeMillis() при отсутствии серверного времени — оставляем 0L,
+                        // чтобы облачный прогресс без таймштампа не перезаписывал свежее локальное чтение
                         final ReadingProgress progress = new ReadingProgress(
                                 bookUuid, cardPercent, finalChapter, finalParagraph, 0,
-                                cardTs > 0 ? cardTs : System.currentTimeMillis()
+                                cardTs > 0 ? cardTs : 0L
                         );
                         if (!cardId.isEmpty()) {
                             progress.setLibraryCardId(cardId);

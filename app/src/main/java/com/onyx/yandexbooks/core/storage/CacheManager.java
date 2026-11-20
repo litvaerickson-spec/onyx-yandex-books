@@ -47,6 +47,7 @@ public class CacheManager {
     private final YandexBooksApiClient apiClient;
     private final DatabaseHelper dbHelper;
     private final LruCache<String, Bitmap> imageCache;
+    private final java.util.concurrent.ConcurrentHashMap<String, int[]> imageDimCache = new java.util.concurrent.ConcurrentHashMap<>();
 
     public interface DownloadProgressCallback {
         void onProgress(int downloadedCount, int totalCount);
@@ -184,13 +185,13 @@ public class CacheManager {
 
     public boolean isFormattedCacheCurrent(String bookUuid) {
         if (bookUuid == null) return true;
-        File flag = getBookFile(bookUuid, "format_v203.flag");
+        File flag = getBookFile(bookUuid, "format_v204.flag");
         return flag.exists() && flag.length() > 0;
     }
 
     public void markFormattedCacheCurrent(String bookUuid) {
         if (bookUuid == null) return;
-        writeTextFile(getBookFile(bookUuid, "format_v203.flag"), "v2.0.3");
+        writeTextFile(getBookFile(bookUuid, "format_v204.flag"), "v2.0.4");
     }
 
     public void saveBookEpubFonts(String bookUuid, Map<String, String> fonts) {
@@ -524,6 +525,17 @@ public class CacheManager {
     public boolean isChapterCacheValid(String bookUuid, List<Chapter> chapters) {
         if (chapters == null || chapters.isEmpty()) return false;
         int n = chapters.size();
+        // Защита от сдвинутых глав: индексы обязаны начинаться с 0 и идти непрерывно до n - 1
+        if (chapters.get(0).getChapterIndex() != 0 || chapters.get(n - 1).getChapterIndex() != n - 1) {
+            return false;
+        }
+        if (n <= 600) {
+            for (int i = 0; i < n; i++) {
+                if (chapters.get(i).getChapterIndex() != i) {
+                    return false;
+                }
+            }
+        }
         // Быстрая выборка для больших книг с актуальным флагом формата (5 stat-вызовов вместо сотен на UI-потоке)
         if (n > 8 && isFormattedCacheCurrent(bookUuid)) {
             int[] sampleIdx = new int[]{0, n / 4, n / 2, (3 * n) / 4, n - 1};
@@ -715,7 +727,7 @@ public class CacheManager {
             ch.setTitle(cd.title);
             ch.setOriginalOpfSpineIndex(cd.originalOpfSpineIndex);
             ch.setOpfItemId(cd.opfItemId);
-            ch.setCharCount(com.onyx.yandexbooks.core.epub.EpubFormatting.stripFormattingTokens(cd.textContent).length());
+            ch.setCharCount(com.onyx.yandexbooks.core.epub.EpubFormatting.countPlainChars(cd.textContent));
             chapters.add(ch);
         }
 
@@ -1160,6 +1172,125 @@ public class CacheManager {
         // ContentProvider URI (безопасно для Android 7–14 без FileUriExposedException и для внутреннего кэша)
         android.net.Uri contentUri = com.onyx.yandexbooks.core.update.LocalFileProvider.getUriForFile(epubFile);
         return tryLaunchWithIntent(activity, buildEpubViewIntent(contentUri, percent, chapterIndex), contentUri, percent, targetReaderMode);
+    }
+
+    /**
+     * Быстрый замер габаритов изображений (PNG/JPG/GIF/WEBP) внутри EPUB без декодирования пикселей.
+     * Используется пагинатором для отличия декоративных виньеток заголовков от полностраничных иллюстраций.
+     */
+    public void warmupImageDimensionsFromEpub(String bookUuid) {
+        if (bookUuid == null || bookUuid.trim().isEmpty()) return;
+        File epubFile = getEpubFile(bookUuid);
+        if (!epubFile.exists() || epubFile.length() == 0) return;
+        ZipFile zip = null;
+        try {
+            zip = new ZipFile(epubFile);
+            Enumeration<? extends ZipEntry> en = zip.entries();
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            while (en.hasMoreElements()) {
+                ZipEntry ze = en.nextElement();
+                String name = ze.getName();
+                if (name == null) continue;
+                String lower = name.toLowerCase(java.util.Locale.US);
+                if (!lower.endsWith(".png") && !lower.endsWith(".jpg") && !lower.endsWith(".jpeg")
+                        && !lower.endsWith(".gif") && !lower.endsWith(".webp")) {
+                    continue;
+                }
+                String key = bookUuid + ":" + name.trim();
+                if (imageDimCache.containsKey(key)) continue;
+                opts.inJustDecodeBounds = true;
+                opts.outWidth = 0;
+                opts.outHeight = 0;
+                InputStream is = null;
+                try {
+                    is = zip.getInputStream(ze);
+                    BitmapFactory.decodeStream(is, null, opts);
+                    if (opts.outWidth > 0 && opts.outHeight > 0) {
+                        int[] dims = new int[]{opts.outWidth, opts.outHeight};
+                        imageDimCache.put(key, dims);
+                        imageDimCache.put(bookUuid + ":__file__:" + (lower.contains("/") ? lower.substring(lower.lastIndexOf('/') + 1) : lower), dims);
+                    }
+                } catch (Throwable ignored) {
+                } finally {
+                    if (is != null) {
+                        try { is.close(); } catch (Throwable ignored) {}
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        } finally {
+            if (zip != null) {
+                try { zip.close(); } catch (Throwable ignored) {}
+            }
+        }
+    }
+
+    public int[] getImageDimensionsFromEpub(String bookUuid, String zipPath) {
+        if (bookUuid == null || zipPath == null || zipPath.trim().isEmpty()) return null;
+        String cleanPath = zipPath.trim();
+        String key = bookUuid + ":" + cleanPath;
+        int[] cached = imageDimCache.get(key);
+        if (cached != null) {
+            return (cached[0] > 0 && cached[1] > 0) ? cached : null;
+        }
+        String lower = cleanPath.toLowerCase(java.util.Locale.US);
+        String fileKey = bookUuid + ":__file__:" + (lower.contains("/") ? lower.substring(lower.lastIndexOf('/') + 1) : lower);
+        cached = imageDimCache.get(fileKey);
+        if (cached != null && cached[0] > 0 && cached[1] > 0) {
+            imageDimCache.put(key, cached);
+            return cached;
+        }
+
+        File epubFile = getEpubFile(bookUuid);
+        if (!epubFile.exists() || epubFile.length() == 0) {
+            return null;
+        }
+        ZipFile zip = null;
+        try {
+            zip = new ZipFile(epubFile);
+            ZipEntry entry = zip.getEntry(cleanPath);
+            if (entry == null) {
+                String targetFileName = lower.contains("/") ? lower.substring(lower.lastIndexOf('/') + 1) : lower;
+                Enumeration<? extends ZipEntry> en = zip.entries();
+                while (en.hasMoreElements()) {
+                    ZipEntry ze = en.nextElement();
+                    String name = ze.getName().toLowerCase(java.util.Locale.US);
+                    if (name.equals(lower) || name.endsWith("/" + lower) || name.endsWith("/" + targetFileName)) {
+                        entry = ze;
+                        break;
+                    }
+                }
+            }
+            if (entry == null) {
+                imageDimCache.put(key, new int[]{-1, -1});
+                return null;
+            }
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inJustDecodeBounds = true;
+            InputStream is = null;
+            try {
+                is = zip.getInputStream(entry);
+                BitmapFactory.decodeStream(is, null, opts);
+            } finally {
+                if (is != null) {
+                    try { is.close(); } catch (Throwable ignored) {}
+                }
+            }
+            if (opts.outWidth > 0 && opts.outHeight > 0) {
+                int[] dims = new int[]{opts.outWidth, opts.outHeight};
+                imageDimCache.put(key, dims);
+                imageDimCache.put(fileKey, dims);
+                return dims;
+            }
+            imageDimCache.put(key, new int[]{-1, -1});
+            return null;
+        } catch (Throwable ignored) {
+            return null;
+        } finally {
+            if (zip != null) {
+                try { zip.close(); } catch (Throwable ignored) {}
+            }
+        }
     }
 
     public Bitmap loadImageFromEpub(String bookUuid, String zipPath, int reqWidth, int reqHeight) {

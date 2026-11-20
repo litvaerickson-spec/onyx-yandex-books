@@ -82,19 +82,19 @@ public class DeviceCodeAuthManager {
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
-                if (!response.isSuccessful()) {
-                    final String err = "Ошибка сервера Яндекса: HTTP " + response.code();
-                    mainHandler.post(new Runnable() {
-                        @Override
-                        public void run() {
-                            callback.onError(err);
-                        }
-                    });
-                    return;
-                }
-
                 try {
-                    String responseBody = response.body().string();
+                    if (!response.isSuccessful()) {
+                        final String err = "Ошибка сервера Яндекса: HTTP " + response.code();
+                        mainHandler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                callback.onError(err);
+                            }
+                        });
+                        return;
+                    }
+
+                    String responseBody = response.body() != null ? response.body().string() : "";
                     JSONObject json = new JSONObject(responseBody);
                     final String deviceCode = json.getString("device_code");
                     final String userCode = json.getString("user_code");
@@ -114,6 +114,10 @@ public class DeviceCodeAuthManager {
                             callback.onError("Ошибка парсинга ответа: " + e.getMessage());
                         }
                     });
+                } finally {
+                    if (response != null) {
+                        try { response.close(); } catch (Throwable ignored) {}
+                    }
                 }
             }
         });
@@ -154,10 +158,9 @@ public class DeviceCodeAuthManager {
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
-                if (!isPollingActive) return;
-
                 try {
-                    String body = response.body().string();
+                    if (!isPollingActive) return;
+                    String body = response.body() != null ? response.body().string() : "";
                     JSONObject json = new JSONObject(body);
 
                     if (response.isSuccessful() && json.has("access_token")) {
@@ -232,6 +235,10 @@ public class DeviceCodeAuthManager {
                     }
                 } catch (Exception e) {
                     scheduleNextPoll(deviceCode, intervalSeconds, callback);
+                } finally {
+                    if (response != null) {
+                        try { response.close(); } catch (Throwable ignored) {}
+                    }
                 }
             }
         });

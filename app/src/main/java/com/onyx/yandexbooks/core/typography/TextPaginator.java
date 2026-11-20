@@ -34,6 +34,10 @@ public class TextPaginator {
     public static final int ALIGN_RIGHT = 2;
     public static final int ALIGN_JUSTIFY = 3;
 
+    public interface ImageDimensionProvider {
+        int[] getImageDimensions(String imagePath);
+    }
+
     private static final Pattern BARE_URL_PATTERN = Pattern.compile("(https?://[^\\s<>()\\[\\]{}\"']+)");
 
     public static class LineRun {
@@ -80,11 +84,20 @@ public class TextPaginator {
         public final float extraBottomPx;
         public final List<LineRun> runs;
         public final List<WordBox> wordBoxes;
+        public final String inlineImagePath;
+        public final float inlineImageW;
+        public final float inlineImageH;
 
         public Line(String text, boolean isParagraphStart, boolean isLastLineOfParagraph, float wordSpacing) {
             this(text, isParagraphStart, isLastLineOfParagraph, wordSpacing,
                     isLastLineOfParagraph ? ALIGN_LEFT : ALIGN_JUSTIFY,
-                    1.0f, 0f, 0f, false, 0f, 0f, null, null);
+                    1.0f, 0f, 0f, false, 0f, 0f, null, null, null, 0f, 0f);
+        }
+
+        public Line(String rawMarker, String inlineImagePath, float inlineImageW, float inlineImageH, float extraTopPx, float extraBottomPx) {
+            this(rawMarker, false, true, 0f, ALIGN_CENTER, 1.0f, 0f, 0f, false,
+                    extraTopPx, extraBottomPx, Collections.<LineRun>emptyList(), Collections.<WordBox>emptyList(),
+                    inlineImagePath, inlineImageW, inlineImageH);
         }
 
         public Line(
@@ -103,7 +116,7 @@ public class TextPaginator {
         ) {
             this(text, isParagraphStart, isLastLineOfParagraph, wordSpacing,
                     alignment, fontScale, indentPx, leftInsetPx, drawQuoteBar,
-                    extraTopPx, extraBottomPx, runs, null);
+                    extraTopPx, extraBottomPx, runs, null, null, 0f, 0f);
         }
 
         public Line(
@@ -121,6 +134,29 @@ public class TextPaginator {
                 List<LineRun> runs,
                 List<WordBox> wordBoxes
         ) {
+            this(text, isParagraphStart, isLastLineOfParagraph, wordSpacing,
+                    alignment, fontScale, indentPx, leftInsetPx, drawQuoteBar,
+                    extraTopPx, extraBottomPx, runs, wordBoxes, null, 0f, 0f);
+        }
+
+        public Line(
+                String text,
+                boolean isParagraphStart,
+                boolean isLastLineOfParagraph,
+                float wordSpacing,
+                int alignment,
+                float fontScale,
+                float indentPx,
+                float leftInsetPx,
+                boolean drawQuoteBar,
+                float extraTopPx,
+                float extraBottomPx,
+                List<LineRun> runs,
+                List<WordBox> wordBoxes,
+                String inlineImagePath,
+                float inlineImageW,
+                float inlineImageH
+        ) {
             this.text = text != null ? text : "";
             this.isParagraphStart = isParagraphStart;
             this.isLastLineOfParagraph = isLastLineOfParagraph;
@@ -134,6 +170,9 @@ public class TextPaginator {
             this.extraBottomPx = extraBottomPx;
             this.runs = runs != null ? runs : Collections.singletonList(new LineRun(this.text, STYLE_NORMAL, null, null));
             this.wordBoxes = wordBoxes != null ? wordBoxes : Collections.<WordBox>emptyList();
+            this.inlineImagePath = inlineImagePath;
+            this.inlineImageW = inlineImageW;
+            this.inlineImageH = inlineImageH;
         }
     }
 
@@ -200,7 +239,7 @@ public class TextPaginator {
         }
     }
 
-    private static final class StyleMeasurer implements TeXHyphenator.TextWidthMeasurer {
+    public static final class StyleMeasurer implements TeXHyphenator.TextWidthMeasurer {
         private final Paint workPaint;
         private final Typeface baseTypeface;
         private final float baseTextSize;
@@ -211,7 +250,7 @@ public class TextPaginator {
         private float currentScale = -1f;
         private float cachedSpaceWidth = -1f;
 
-        StyleMeasurer(Paint templatePaint) {
+        public StyleMeasurer(Paint templatePaint) {
             this.workPaint = new Paint(templatePaint);
             this.baseTextSize = templatePaint.getTextSize();
             this.baseFakeBold = templatePaint.isFakeBoldText();
@@ -339,9 +378,14 @@ public class TextPaginator {
     }
 
     private final TeXHyphenator hyphenator;
+    private volatile ImageDimensionProvider imageDimensionProvider;
 
     public TextPaginator() {
         this.hyphenator = TeXHyphenator.getInstance();
+    }
+
+    public void setImageDimensionProvider(ImageDimensionProvider provider) {
+        this.imageDimensionProvider = provider;
     }
 
     /**
@@ -349,7 +393,7 @@ public class TextPaginator {
      * форматирования книги (заголовки, выравнивание, стили, цитаты, ссылки, разрывы).
      */
     public List<Page> paginate(String fullText, int screenWidth, int screenHeight, Paint paint, TypographyConfig config) {
-        return paginateInternal(fullText, screenWidth, screenHeight, paint, config, 0, -1, null, 0L);
+        return paginateInternal(fullText, screenWidth, screenHeight, paint, null, config, 0, -1, null, 0L, false);
     }
 
     /**
@@ -357,7 +401,19 @@ public class TextPaginator {
      */
     public List<Page> paginateCancellable(String fullText, int screenWidth, int screenHeight, Paint paint, TypographyConfig config,
                                           AtomicLong taskIdRef, long expectedTaskId) {
-        return paginateInternal(fullText, screenWidth, screenHeight, paint, config, 0, -1, taskIdRef, expectedTaskId);
+        return paginateInternal(fullText, screenWidth, screenHeight, paint, null, config, 0, -1, taskIdRef, expectedTaskId, false);
+    }
+
+    /**
+     * Сверхлёгкий отменяемый подсчёт числа страниц главы без аллокации WordBox/LineRun
+     * с переиспользованием общего StyleMeasurer. Возвращает -1 при отмене.
+     */
+    public int countPagesOnlyCancellable(String fullText, int screenWidth, int screenHeight, Paint paint,
+                                         StyleMeasurer sharedMeasurer, TypographyConfig config,
+                                         AtomicLong taskIdRef, long expectedTaskId) {
+        List<Page> res = paginateInternal(fullText, screenWidth, screenHeight, paint, sharedMeasurer, config, 0, -1, taskIdRef, expectedTaskId, true);
+        if (res == null) return -1;
+        return Math.max(1, res.size());
     }
 
     /**
@@ -412,15 +468,16 @@ public class TextPaginator {
             }
         }
 
-        List<Page> one = paginateInternal(slice, screenWidth, screenHeight, paint, config, paraStart, 1, null, 0L);
+        List<Page> one = paginateInternal(slice, screenWidth, screenHeight, paint, null, config, paraStart, 1, null, 0L, false);
         if (one != null && !one.isEmpty()) {
             return one.get(0);
         }
         return new Page(0, new ArrayList<Line>(), safeAnchor, safeAnchor);
     }
 
-    private List<Page> paginateInternal(String fullText, int screenWidth, int screenHeight, Paint paint, TypographyConfig config,
-                                        int baseCharOffset, int maxPages, AtomicLong taskIdRef, long expectedTaskId) {
+    private List<Page> paginateInternal(String fullText, int screenWidth, int screenHeight, Paint paint, StyleMeasurer sharedMeasurer,
+                                        TypographyConfig config, int baseCharOffset, int maxPages, AtomicLong taskIdRef, long expectedTaskId,
+                                        boolean lightCountOnly) {
         List<Page> pages = new ArrayList<>();
         if (fullText == null || fullText.isEmpty()) {
             pages.add(new Page(0, new ArrayList<Line>(), baseCharOffset, baseCharOffset));
@@ -436,7 +493,9 @@ public class TextPaginator {
 
         Paint.FontMetrics fm = paint.getFontMetrics();
         float baseLineHeight = Math.max(10f, (fm.bottom - fm.top) * config.getLineSpacingMultiplier());
-        StyleMeasurer measurer = new StyleMeasurer(paint);
+        StyleMeasurer measurer = (sharedMeasurer != null) ? sharedMeasurer : new StyleMeasurer(paint);
+        ImageDimensionProvider dimProvider = this.imageDimensionProvider;
+        float densityScale = (config != null && config.getDensityScale() > 0f) ? config.getDensityScale() : 1.0f;
 
         String[] paragraphs = fullText.split("\n", -1);
         List<Line> currentLines = new ArrayList<>();
@@ -507,8 +566,39 @@ public class TextPaginator {
                 continue;
             }
 
-            // Отдельная страница для иллюстраций и обложек
+            // Встроенная или полностраничная иллюстрация
             if (bodyTrimmed.startsWith("[IMG:") && bodyTrimmed.endsWith("]")) {
+                String imgPath = bodyTrimmed.substring(5, bodyTrimmed.length() - 1).trim();
+                int[] dims = (dimProvider != null && !imgPath.isEmpty()) ? dimProvider.getImageDimensions(imgPath) : null;
+                if (dims != null && dims[0] > 0 && dims[1] > 0) {
+                    float bw = dims[0];
+                    float bh = dims[1];
+                    float maxUpScale = Math.max(1.0f, Math.min(1.5f, densityScale));
+                    float scale = Math.min(availableWidth / bw, maxUpScale);
+                    float destW = bw * scale;
+                    float destH = bh * scale;
+                    if (destH <= availableHeight * 0.40f) {
+                        float padTop = currentLines.isEmpty() ? 0f : Math.max(4f, baseLineHeight * 0.22f);
+                        float padBot = Math.max(4f, baseLineHeight * 0.22f);
+                        float needed = padTop + destH + padBot;
+                        float antiOrphanReserve = (destH <= baseLineHeight * 2.5f && pIdx + 1 < paragraphs.length)
+                                ? (needed + baseLineHeight * 2.2f) : needed;
+                        if (!currentLines.isEmpty() && usedHeight + antiOrphanReserve > availableHeight) {
+                            pages.add(new Page(pageIndex++, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
+                            if (maxPages > 0 && pages.size() >= maxPages) return pages;
+                            currentLines.clear();
+                            usedHeight = 0f;
+                            pageStartCharOffset = globalCharOffset;
+                            padTop = 0f;
+                            needed = destH + padBot;
+                        }
+                        currentLines.add(new Line(bodyTrimmed, imgPath, destW, destH, padTop, padBot));
+                        usedHeight += needed;
+                        globalCharOffset += rawParagraph.length() + 1;
+                        lastWasEmptyLine = false;
+                        continue;
+                    }
+                }
                 if (!currentLines.isEmpty()) {
                     pages.add(new Page(pageIndex++, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
                     if (maxPages > 0 && pages.size() >= maxPages) return pages;
@@ -615,7 +705,7 @@ public class TextPaginator {
                             lineWords.add(splitFirst);
                             Line built = buildLine(lineWords, measurer, effectiveAvailableWidth, alignment, fontScale,
                                     isFirstLineOfParagraph, false, isFirstLineOfParagraph ? firstLineIndent : 0f,
-                                    leftInsetPx, isQuote, topGap, 0f, paraCharCursor, paraEndOffset);
+                                    leftInsetPx, isQuote, topGap, 0f, paraCharCursor, paraEndOffset, lightCountOnly);
                             currentLines.add(built);
                             usedHeight += topGap + thisLineHeight;
                             isFirstLineOfParagraph = false;
@@ -654,7 +744,7 @@ public class TextPaginator {
                                 lineWords.add(chunkTok);
                                 Line built = buildLine(lineWords, measurer, effectiveAvailableWidth, alignment, fontScale,
                                         isFirstLineOfParagraph, false, isFirstLineOfParagraph ? firstLineIndent : 0f,
-                                        leftInsetPx, isQuote, topGap, 0f, paraCharCursor, paraEndOffset);
+                                        leftInsetPx, isQuote, topGap, 0f, paraCharCursor, paraEndOffset, lightCountOnly);
                                 currentLines.add(built);
                                 usedHeight += topGap + thisLineHeight;
                                 isFirstLineOfParagraph = false;
@@ -704,7 +794,7 @@ public class TextPaginator {
 
                         Line built = buildLine(lineWords, measurer, effectiveAvailableWidth, alignment, fontScale,
                                 isFirstLineOfParagraph, false, isFirstLineOfParagraph ? firstLineIndent : 0f,
-                                leftInsetPx, isQuote, topGap, 0f, paraCharCursor, paraEndOffset);
+                                leftInsetPx, isQuote, topGap, 0f, paraCharCursor, paraEndOffset, lightCountOnly);
                         currentLines.add(built);
                         usedHeight += topGap + thisLineHeight;
 
@@ -736,7 +826,7 @@ public class TextPaginator {
                 }
                 Line built = buildLine(lineWords, measurer, effectiveAvailableWidth, alignment, fontScale,
                         isFirstLineOfParagraph, true, isFirstLineOfParagraph ? firstLineIndent : 0f,
-                        leftInsetPx, isQuote, topGap, extraBottomPx, paraCharCursor, paraEndOffset);
+                        leftInsetPx, isQuote, topGap, extraBottomPx, paraCharCursor, paraEndOffset, lightCountOnly);
                 currentLines.add(built);
                 usedHeight += topGap + thisLineHeight + extraBottomPx;
             }
@@ -803,8 +893,14 @@ public class TextPaginator {
             float extraTopPx,
             float extraBottomPx,
             int[] paraCharCursor,
-            int paraEndOffset
+            int paraEndOffset,
+            boolean lightCountOnly
     ) {
+        if (lightCountOnly) {
+            return new Line("", isParagraphStart, isLastLineOfParagraph, 0f, alignment, fontScale,
+                    indentPx, leftInsetPx, false, extraTopPx, extraBottomPx,
+                    Collections.<LineRun>emptyList(), Collections.<WordBox>emptyList(), null, 0f, 0f);
+        }
         StringBuilder plainSb = new StringBuilder();
         List<LineRun> runs = new ArrayList<>();
 

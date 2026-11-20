@@ -27,6 +27,26 @@ public class SyncManager {
 
     private final DatabaseHelper dbHelper;
     private final YandexBooksApiClient apiClient;
+    private static final java.util.concurrent.ConcurrentHashMap<String, Long> RECENT_LOCAL_SAVES_ELAPSED =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    public static void markBookSavedRecently(String bookUuid) {
+        if (bookUuid == null || bookUuid.isEmpty()) return;
+        try {
+            RECENT_LOCAL_SAVES_ELAPSED.put(bookUuid, android.os.SystemClock.elapsedRealtime());
+        } catch (Throwable ignored) {}
+    }
+
+    public static boolean wasBookSavedRecently(String bookUuid, long windowMs) {
+        if (bookUuid == null || bookUuid.isEmpty()) return false;
+        Long ts = RECENT_LOCAL_SAVES_ELAPSED.get(bookUuid);
+        if (ts == null) return false;
+        try {
+            return (android.os.SystemClock.elapsedRealtime() - ts) <= windowMs;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
 
     public SyncManager(Context context, YandexBooksApiClient apiClient) {
         this.dbHelper = DatabaseHelper.getInstance(context);
@@ -54,7 +74,8 @@ public class SyncManager {
                 } catch (Exception ignored) {}
             }
 
-            // Всегда сохраняем в локальную БД мгновенно
+            // Всегда сохраняем в локальную БД мгновенно и защищаем от гонки с устаревшим кэшем облака
+            markBookSavedRecently(localProgress.getBookUuid());
             dbHelper.saveProgress(localProgress);
 
             if (!isOnline) {
