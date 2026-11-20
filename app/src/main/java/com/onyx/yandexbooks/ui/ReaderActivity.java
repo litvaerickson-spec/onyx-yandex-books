@@ -3162,6 +3162,9 @@ public class ReaderActivity extends Activity {
                     final int[] exactCounts = new int[n];
                     TextPaginator bgPaginator = new TextPaginator();
                     for (int i = 0; i < n; i++) {
+                        while (isPaginating && myTaskId == prepaginationTaskId.get()) {
+                            try { Thread.sleep(40); } catch (InterruptedException ignored) { break; }
+                        }
                         if (myTaskId != prepaginationTaskId.get()) {
                             return;
                         }
@@ -3761,6 +3764,10 @@ public class ReaderActivity extends Activity {
                     resolvedChapter = resolveChapterIndexFromCfi(cfiPos);
                 }
             }
+        } else if (resolvedChapter == 0 && resolvedParagraph <= 0 && cloudPercent > 1.0) {
+            // Сервер вернул только процент чтения без CFI и номера главы: не смещаем на главу обложки (1),
+            // а передаём -1, чтобы navigateToResolvedProgress открыл позицию по totalBookLength
+            resolvedChapter = -1;
         } else if (hasCoverChapter() && resolvedChapter >= 0) {
             resolvedChapter = spineIndexToChapterIndex(resolvedChapter);
         }

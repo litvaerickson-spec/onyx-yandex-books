@@ -3458,7 +3458,7 @@ def test_v163_beta_downloads_ui_and_full_settings_backup():
     st = rd(jb + "core/storage/AppSettings.java")
     declared_keys = [
         k for k in re.findall(r'(?:public|private)\s+static\s+final\s+String\s+KEY_[A-Z0-9_]+\s*=\s*"([^"]+)"', st)
-        if k != "quotes_purged_v201"
+        if k not in ("quotes_purged_v201", "dither_default_v203_migrated")
     ]
     assert len(declared_keys) == 24, f"Ожидалось 24 ключа настроек в AppSettings.java, найдено: {len(declared_keys)} -> {declared_keys}"
 
@@ -4134,21 +4134,24 @@ def test_v203_beta_all_7_feedback_fixes():
     assert "DATABASE_VERSION = 9" in db and "char_count" in db and "getCharCount" in ch and "setCharCount" in cm
     assert "findTocNodeByTargetHref" in ra
     assert "Math.min(fontSizeSp, 60)" in tc
-    assert "seekbarFontSize.setMax(48)" in ra and "cur < 60" in ra
+    assert "seekbarFontSize.setMax(48)" in ra and "cur < 60" in ra and 'android:max="48"' in rx
 
     # 4. Баг 3: Каталог (Accept-Language: ru-RU,ru + динамические полки и темы)
     api = rd(jb + "core/api/YandexBooksApiClient.java")
     assert '"Accept-Language", "ru-RU,ru"' in api
     assert "TOPIC_CATEGORY_PREFIX" in api and "/topics/PNZcAxtW/bookshelves" in api
     assert 'BASE_URL + "/catalog"' in api and "loadTopicBooks" in api and "loadTopicFirstBookshelfFallback" in api
+    assert '"antichnaya-literatura-ru"' in api and '"ezoterika-ru"' in api
 
-    # 5. Баг 4: Цветные обложки по умолчанию
+    # 5. Баг 4: Цветные обложки по умолчанию и однократная миграция для обновившихся пользователей
     st = rd(jb + "core/storage/AppSettings.java")
     assert "prefs.getBoolean(KEY_DITHER_COVERS, false)" in st
+    assert "KEY_DITHER_DEFAULT_V203_MIGRATED" in st
     assert 'meta.optBoolean("dither_covers_enabled", false)' in db
 
-    # 6. Баг 5: Исправление расхождения прогресса (сброс устаревшего targetChapter при intentPercent > percent)
+    # 6. Баг 5: Исправление расхождения прогресса (сброс устаревшего targetChapter при intentPercent > percent и cloudChapter==0)
     assert "targetChapter = -1;" in ra
+    assert "resolvedChapter = -1;" in ra
     assert "cloudChapter > 0 || cloudPercent <= 1.0 || cloudProgress.getPageIndex() > 0" in ra
 
     # 7. Живой разбор пользовательских EPUB из docs/feedback_v202/ (Опоздавшие к лету + В глубине Великого Кристалла)

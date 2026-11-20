@@ -73,11 +73,18 @@ public class AppSettings {
     public static final int MAX_FOOTER_OFFSET_DP = 48;
 
     private static final String KEY_QUOTES_PURGED_V201 = "quotes_purged_v201";
+    private static final String KEY_DITHER_DEFAULT_V203_MIGRATED = "dither_default_v203_migrated";
 
     private final SharedPreferences prefs;
 
     public AppSettings(Context context) {
         this.prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        if (!prefs.contains(KEY_DITHER_DEFAULT_V203_MIGRATED)) {
+            prefs.edit()
+                    .putBoolean(KEY_DITHER_COVERS, false)
+                    .putBoolean(KEY_DITHER_DEFAULT_V203_MIGRATED, true)
+                    .apply();
+        }
     }
 
     /**

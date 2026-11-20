@@ -2360,7 +2360,12 @@ public class YandexBooksApiClient {
                 || s.contains("sinhronizirovano") || s.contains("inoagent")
                 || "luch-ru".equals(s) || "kniga-kino-ru".equals(s)
                 || "predreliz-ru".equals(s) || "serial-ru".equals(s)
-                || "biblii-ru".equals(s) || "normativno-pravovye-akty-ru".equals(s);
+                || "biblii-ru".equals(s) || "normativno-pravovye-akty-ru".equals(s)
+                || "antichnaya-literatura-ru".equals(s) || "drevnerusskaya-literatura-ru".equals(s)
+                || "svyaschennye-teksty-ru".equals(s) || "nezavisimye-avtory-ru".equals(s)
+                || "podrostkovyy-non-fikshn-ru".equals(s) || "spravochniki-ru".equals(s)
+                || "kollektsionirovanie-ru".equals(s) || "sobraniya-sochineniy-ru".equals(s)
+                || "transport-ru".equals(s) || "ezoterika-ru".equals(s);
     }
 
     /**
@@ -2461,6 +2466,7 @@ public class YandexBooksApiClient {
                                 boolean hasSub = subtopics != null && subtopics.length() > 0;
                                 boolean hasLegacyBg = !tObj.isNull("background");
                                 if (hasLegacyBg && !hasSub) continue;
+                                if (!hasSub && "proza-ru".equalsIgnoreCase(slug)) continue;
                                 if (!tUuid.isEmpty() && !tTitle.isEmpty()) {
                                     String normTitle = tTitle.toLowerCase(Locale.US);
                                     if (seenTopicTitles.add(normTitle)) {
