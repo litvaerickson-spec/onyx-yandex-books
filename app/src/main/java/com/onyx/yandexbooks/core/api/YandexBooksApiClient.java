@@ -25,6 +25,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Random;
 import java.util.TimeZone;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -42,6 +44,7 @@ import okhttp3.Response;
 public class YandexBooksApiClient {
 
     private static final String TAG = "YandexBooksApi";
+    private static final ExecutorService PROGRESS_SYNC_EXECUTOR = Executors.newSingleThreadExecutor();
     private static final String BASE_URL = "https://api.bookmate.yandex.net/api/v5";
     private static final String REST_GATEWAY_URL = "https://api-gateway-rest.bookmate.yandex.net/api/v5";
     private static final String PRIMARY_GRAPHQL_URL = "https://api-gateway.bookmate.yandex.net/graphql";
@@ -364,16 +367,31 @@ public class YandexBooksApiClient {
             Matcher mElem = Pattern.compile("/(\\d+)").matcher(elemPath);
             int targetElemNum = -1;
             int stepCount = 0;
+            List<Integer> evenAfterBody = new ArrayList<>();
+            int lastRawStep = -1;
             while (mElem.find()) {
                 try {
                     int n = Integer.parseInt(mElem.group(1));
                     stepCount++;
+                    lastRawStep = n;
                     // Шаг 1 (/4) — <body>; чётные шаги (>= 2) — DOM-элементы внутри тела
                     // (берём последний чётный шаг, чтобы не застревать на обёртке <div class="section">/2)
                     if (stepCount >= 2 && (n % 2 == 0 || targetElemNum < 0)) {
                         targetElemNum = n;
                     }
+                    if (stepCount >= 2 && n % 2 == 0) {
+                        evenAfterBody.add(n);
+                    }
                 } catch (Exception ignored) {}
+            }
+            // Если внутри абзаца CFI зашёл во вложенный инлайновый тег (например .../4/2/34/2/1:15),
+            // не сбрасываем абзац /34 до 0 из-за инлайн-обёртки /2 перед текстовым узлом /1
+            if (evenAfterBody.size() >= 3 && lastRawStep >= 1 && (lastRawStep % 2 == 1)) {
+                int trailingEven = evenAfterBody.get(evenAfterBody.size() - 1);
+                int parentEven = evenAfterBody.get(evenAfterBody.size() - 2);
+                if (trailingEven == 2 && parentEven >= 4) {
+                    targetElemNum = parentEven;
+                }
             }
             if (targetElemNum > 0) {
                 paragraphIndex = Math.max(0, (targetElemNum / 2) - 1);
@@ -381,6 +399,20 @@ public class YandexBooksApiClient {
         }
 
         return new CfiPosition(chapterIndex, paragraphIndex, charOffset, opfItemId, clean);
+    }
+
+    public static String buildCanonicalCfiWithDomPath(int originalOpfSpineIndex, String opfItemId, String domElemPath, int charOffset) {
+        if (domElemPath != null && domElemPath.startsWith("/4/")) {
+            int spineCfiIndex = Math.max(2, (Math.max(0, originalOpfSpineIndex) + 1) * 2);
+            int safeChar = Math.max(0, charOffset);
+            if (opfItemId != null && !opfItemId.isEmpty()) {
+                return String.format(Locale.US, "epubcfi(/6/%d[%s]!%s/1:%d)",
+                        spineCfiIndex, opfItemId, domElemPath, safeChar);
+            }
+            return String.format(Locale.US, "epubcfi(/6/%d!%s/1:%d)",
+                    spineCfiIndex, domElemPath, safeChar);
+        }
+        return buildCanonicalCfi(originalOpfSpineIndex, opfItemId, 0, charOffset);
     }
 
     public static String buildCanonicalCfi(int originalOpfSpineIndex, String opfItemId, int paragraphDomIndex, int charOffset) {
@@ -504,6 +536,29 @@ public class YandexBooksApiClient {
         return "";
     }
 
+    private static double extractPositivePercentFromJson(JSONObject obj, String state, boolean allowPercentageKey) {
+        if (obj == null) return 0.0;
+        String[] keys = allowPercentageKey
+                ? new String[] { "percent", "reading_progress", "progress_percent", "percentage", "progress" }
+                : new String[] { "percent", "reading_progress", "progress_percent", "progress" };
+        for (String key : keys) {
+            if (!obj.has(key) || obj.isNull(key)) continue;
+            double p = obj.optDouble(key, -1.0);
+            if (Double.isNaN(p) || p <= 0.0) continue;
+            if (p < 1.0) {
+                return p * 100.0;
+            } else if (p == 1.0) {
+                if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state)
+                        || "completed".equalsIgnoreCase(state) || "done".equalsIgnoreCase(state)) {
+                    return 100.0;
+                }
+                return 1.0;
+            }
+            return Math.min(100.0, p);
+        }
+        return 0.0;
+    }
+
     public static ParsedProgress extractProgress(JSONObject card, JSONObject bObj) {
         ParsedProgress result = new ParsedProgress();
         if (card == null) return result;
@@ -545,25 +600,9 @@ public class YandexBooksApiClient {
         // 1. Поиск процента прочитанного в специализированных объектах позиции
         for (JSONObject obj : positionObjects) {
             if (obj == null) continue;
-            double p = -1.0;
-            if (obj.has("percent")) p = obj.optDouble("percent", -1.0);
-            else if (obj.has("reading_progress")) p = obj.optDouble("reading_progress", -1.0);
-            else if (obj.has("progress_percent")) p = obj.optDouble("progress_percent", -1.0);
-            else if (obj.has("progress")) p = obj.optDouble("progress", -1.0);
-
-            if (p > 0.0) {
-                if (p < 1.0) {
-                    result.percent = p * 100.0;
-                } else if (p == 1.0) {
-                    // 1.0: если книга явно прочитана, то 100%, иначе 1.0%
-                    if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state) || "completed".equalsIgnoreCase(state) || "done".equalsIgnoreCase(state)) {
-                        result.percent = 100.0;
-                    } else {
-                        result.percent = 1.0;
-                    }
-                } else {
-                    result.percent = Math.min(100.0, p);
-                }
+            double extracted = extractPositivePercentFromJson(obj, state, true);
+            if (extracted > 0.0) {
+                result.percent = extracted;
                 break;
             }
         }
@@ -571,28 +610,14 @@ public class YandexBooksApiClient {
         // 2. Если во вложенных объектах процент не найден, проверяем свойства самой пользовательской карточки LibraryCard
         // В Bookmate API v5 GET /profile/library_cards возвращает карточки с полем reading_progress (0.0..1.0) и updated_at (unix sec) без last_read_at!
         boolean isPlannedOnly = ("to_read".equalsIgnoreCase(state) || "want_to_read".equalsIgnoreCase(state) || "planned".equalsIgnoreCase(state));
+        boolean allowCardPercentage = hasLastRead || hasPosObject || card.has("library_card") || card.has("lc");
         if (result.percent <= 0.0 && (!isPlannedOnly || hasPosObject)) {
             JSONObject[] cardCandidates = new JSONObject[] { lcObj, card };
             for (JSONObject cObj : cardCandidates) {
                 if (cObj == null) continue;
-                double p = -1.0;
-                if (cObj.has("reading_progress") && !cObj.isNull("reading_progress")) p = cObj.optDouble("reading_progress", -1.0);
-                else if (cObj.has("percent") && !cObj.isNull("percent")) p = cObj.optDouble("percent", -1.0);
-                else if (cObj.has("progress_percent") && !cObj.isNull("progress_percent")) p = cObj.optDouble("progress_percent", -1.0);
-                else if (cObj.has("progress") && !cObj.isNull("progress")) p = cObj.optDouble("progress", -1.0);
-
-                if (p > 0.0) {
-                    if (p < 1.0) {
-                        result.percent = p * 100.0;
-                    } else if (p == 1.0) {
-                        if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state) || "completed".equalsIgnoreCase(state) || "done".equalsIgnoreCase(state)) {
-                            result.percent = 100.0;
-                        } else {
-                            result.percent = 1.0;
-                        }
-                    } else {
-                        result.percent = Math.min(100.0, p);
-                    }
+                double extracted = extractPositivePercentFromJson(cObj, state, allowCardPercentage);
+                if (extracted > 0.0) {
+                    result.percent = extracted;
                     break;
                 }
             }
@@ -611,6 +636,23 @@ public class YandexBooksApiClient {
             positionObjects[3], positionObjects[4], positionObjects[5],
             lcObj, (card != bObj ? card : null)
         };
+
+        for (JSONObject obj : allCandidates) {
+            if (obj == null) continue;
+            if (result.cfi.isEmpty() && obj.has("cfi") && !obj.isNull("cfi")) {
+                JSONObject cfiSub = obj.optJSONObject("cfi");
+                String cfiStr = (cfiSub != null) ? cfiSub.optString("start", "") : obj.optString("cfi", "");
+                if (cfiStr != null && !cfiStr.trim().isEmpty() && !"null".equalsIgnoreCase(cfiStr.trim())) {
+                    result.cfi = cfiStr.trim();
+                }
+            }
+            if (result.documentUuid.isEmpty()) {
+                String docStr = obj.optString("document_uuid", obj.optString("documentUuid", ""));
+                if (docStr != null && !docStr.trim().isEmpty() && !"null".equalsIgnoreCase(docStr.trim())) {
+                    result.documentUuid = docStr.trim();
+                }
+            }
+        }
 
         for (JSONObject obj : allCandidates) {
             if (obj == null) continue;
@@ -641,6 +683,18 @@ public class YandexBooksApiClient {
             }
         }
 
+        if (!result.cfi.isEmpty() && (result.chapterIndex == 0 || result.paragraphIndex == 0)) {
+            CfiPosition parsedFromCard = parseCfiPosition(result.cfi);
+            if (parsedFromCard != null) {
+                if (result.chapterIndex == 0 && parsedFromCard.chapterIndex > 0) {
+                    result.chapterIndex = parsedFromCard.chapterIndex;
+                }
+                if (result.paragraphIndex == 0 && parsedFromCard.paragraphIndex > 0) {
+                    result.paragraphIndex = parsedFromCard.paragraphIndex;
+                }
+            }
+        }
+
         // 6. Поиск временной метки (long timestamp, unix seconds или ISO-8601 строка) в объектах позиции и самой карточке
         JSONObject[] tsCandidates = new JSONObject[] {
             positionObjects[0], positionObjects[1], positionObjects[2],
@@ -662,9 +716,9 @@ public class YandexBooksApiClient {
                 ts = obj.optLong("updated_at", 0L);
                 if (ts == 0L) ts = parseIsoTimestamp(obj.optString("updated_at", null));
             }
-            if (ts <= 0L && obj.has("added_at") && !obj.isNull("added_at")) {
-                ts = obj.optLong("added_at", 0L);
-                if (ts == 0L) ts = parseIsoTimestamp(obj.optString("added_at", null));
+            if (ts <= 0L && obj.has("read_at") && !obj.isNull("read_at")) {
+                ts = obj.optLong("read_at", 0L);
+                if (ts == 0L) ts = parseIsoTimestamp(obj.optString("read_at", null));
             }
 
             if (ts > 0) {
@@ -764,7 +818,11 @@ public class YandexBooksApiClient {
         }
 
         String docUuid = bObj.optString("document_uuid", card.optString("document_uuid", ""));
-        if (!docUuid.isEmpty()) {
+        if ((docUuid == null || docUuid.isEmpty() || "null".equalsIgnoreCase(docUuid))
+                && pr.documentUuid != null && !pr.documentUuid.isEmpty()) {
+            docUuid = pr.documentUuid;
+        }
+        if (docUuid != null && !docUuid.isEmpty() && !"null".equalsIgnoreCase(docUuid)) {
             book.setDocumentUuid(docUuid);
         }
         if (pr.cfi != null && !pr.cfi.isEmpty()) {
@@ -1140,6 +1198,8 @@ public class YandexBooksApiClient {
                     long cardTs = 0L;
                     int cardChapter = 0;
                     int cardParagraph = 0;
+                    String cardCfi = "";
+                    String cardDocUuid = "";
                     AudioMeta linkedAudioMeta = null;
 
                     try {
@@ -1151,21 +1211,24 @@ public class YandexBooksApiClient {
                             cardChapter = pr.chapterIndex;
                             cardParagraph = pr.paragraphIndex;
                             cardTs = pr.timestamp;
+                            cardCfi = pr.cfi != null ? pr.cfi : "";
+                            cardDocUuid = pr.documentUuid != null ? pr.documentUuid : "";
                             cardId = extractLibraryCardId(card, bObj, bookUuid);
                             linkedAudioMeta = extractLinkedAudioMeta(card, bObj);
                         }
                     } catch (Exception ignored) {}
 
                     // 3. Синтез наиболее точного прогресса
+                    String effectiveCfi = (gqlCfiStart != null && !gqlCfiStart.isEmpty()) ? gqlCfiStart : cardCfi;
                     int finalChapter = cardChapter;
                     int finalParagraph = cardParagraph;
-                    if (gqlCfiStart != null && !gqlCfiStart.isEmpty()) {
-                        CfiPosition pos = parseCfiPosition(gqlCfiStart);
+                    if (effectiveCfi != null && !effectiveCfi.isEmpty()) {
+                        CfiPosition pos = parseCfiPosition(effectiveCfi);
                         finalChapter = pos.chapterIndex;
                         finalParagraph = pos.paragraphIndex;
                     }
 
-                    if (gqlCfiStart != null || cardPercent > 0.0 || !cardId.isEmpty()) {
+                    if ((effectiveCfi != null && !effectiveCfi.isEmpty()) || cardPercent > 0.0 || !cardId.isEmpty()) {
                         // Не подставляем System.currentTimeMillis() при отсутствии серверного времени — оставляем 0L,
                         // чтобы облачный прогресс без таймштампа не перезаписывал свежее локальное чтение
                         final ReadingProgress progress = new ReadingProgress(
@@ -1175,8 +1238,11 @@ public class YandexBooksApiClient {
                         if (!cardId.isEmpty()) {
                             progress.setLibraryCardId(cardId);
                         }
-                        if (gqlCfiStart != null && !gqlCfiStart.isEmpty()) {
-                            progress.setCfi(gqlCfiStart);
+                        if (!cardDocUuid.isEmpty()) {
+                            progress.setDocumentUuid(cardDocUuid);
+                        }
+                        if (effectiveCfi != null && !effectiveCfi.isEmpty()) {
+                            progress.setCfi(effectiveCfi);
                         }
                         if (linkedAudioMeta != null && linkedAudioMeta.hasAudio()) {
                             progress.setLinkedAudioUuid(linkedAudioMeta.audioUuid);
@@ -1221,6 +1287,8 @@ public class YandexBooksApiClient {
                     if (card == null) card = json;
                     ParsedProgress pr = extractProgress(card, card.optJSONObject("book"));
                     final ReadingProgress progress = new ReadingProgress(bookUuid, pr.percent, pr.chapterIndex, pr.paragraphIndex, 0, pr.timestamp);
+                    if (pr.cfi != null && !pr.cfi.isEmpty()) progress.setCfi(pr.cfi);
+                    if (pr.documentUuid != null && !pr.documentUuid.isEmpty()) progress.setDocumentUuid(pr.documentUuid);
                     String cardId = extractLibraryCardId(card, card.optJSONObject("book"), bookUuid);
                     if (!cardId.isEmpty()) {
                         progress.setLibraryCardId(cardId);
@@ -1261,6 +1329,8 @@ public class YandexBooksApiClient {
                     if (card == null) card = json;
                     ParsedProgress pr = extractProgress(card, card.optJSONObject("book"));
                     final ReadingProgress progress = new ReadingProgress(bookUuid, pr.percent, pr.chapterIndex, pr.paragraphIndex, 0, pr.timestamp);
+                    if (pr.cfi != null && !pr.cfi.isEmpty()) progress.setCfi(pr.cfi);
+                    if (pr.documentUuid != null && !pr.documentUuid.isEmpty()) progress.setDocumentUuid(pr.documentUuid);
                     String cardId = extractLibraryCardId(card, card.optJSONObject("book"), bookUuid);
                     if (!cardId.isEmpty()) {
                         progress.setLibraryCardId(cardId);
@@ -1994,7 +2064,7 @@ public class YandexBooksApiClient {
             return;
         }
 
-        new Thread(new Runnable() {
+        PROGRESS_SYNC_EXECUTOR.execute(new Runnable() {
             @Override
             public void run() {
                 try {
@@ -2126,7 +2196,7 @@ public class YandexBooksApiClient {
                             if (putResp.isSuccessful()) {
                                 anySuccess = true;
                                 String rb = putResp.body() != null ? putResp.body().string() : "";
-                                if (isCardStateMatchingResponse(rb, targetState)) {
+                                if (rb.trim().isEmpty() || isCardStateMatchingResponse(rb, targetState)) {
                                     stateConfirmed = true;
                                 }
                             }
@@ -2146,7 +2216,7 @@ public class YandexBooksApiClient {
                             if (patchResp.isSuccessful()) {
                                 anySuccess = true;
                                 String rb = patchResp.body() != null ? patchResp.body().string() : "";
-                                if (isCardStateMatchingResponse(rb, targetState)) {
+                                if (rb.trim().isEmpty() || isCardStateMatchingResponse(rb, targetState)) {
                                     stateConfirmed = true;
                                 }
                             }
@@ -2220,7 +2290,7 @@ public class YandexBooksApiClient {
                     postError(callback, e.getMessage());
                 }
             }
-        }).start();
+        });
     }
 
     private void sendReadingProgressFallbackPost(final ReadingProgress progress, final JSONObject cardObj, final ApiCallback<Boolean> callback) {
@@ -3003,7 +3073,7 @@ public class YandexBooksApiClient {
                             if (putResp.isSuccessful()) {
                                 anyHttpSuccess = true;
                                 String rb = putResp.body() != null ? putResp.body().string() : "";
-                                if (isCardStateMatchingResponse(rb, apiState)) {
+                                if (rb.trim().isEmpty() || isCardStateMatchingResponse(rb, apiState)) {
                                     stateConfirmed = true;
                                 }
                             }
@@ -3024,7 +3094,7 @@ public class YandexBooksApiClient {
                                 if (patchResp.isSuccessful()) {
                                     anyHttpSuccess = true;
                                     String rb = patchResp.body() != null ? patchResp.body().string() : "";
-                                    if (isCardStateMatchingResponse(rb, apiState)) {
+                                    if (rb.trim().isEmpty() || isCardStateMatchingResponse(rb, apiState)) {
                                         stateConfirmed = true;
                                     }
                                 }
@@ -3036,8 +3106,9 @@ public class YandexBooksApiClient {
                             }
                         }
 
-                        // Если существующая карточка не сменила state через PUT/PATCH, пересоздаем карточку с нужным state
-                        if (!stateConfirmed) {
+                        // Пересоздаём карточку только при явном подтверждённом отказе сервера сменить state,
+                        // никогда не удаляя существующую карточку при сетевом сбое или пустом HTTP 204
+                        if (!stateConfirmed && anyHttpSuccess) {
                             Response delResp = null;
                             try {
                                 Request delReq = createAuthRequestBuilder(cardEndpoint).delete().build();

@@ -581,8 +581,16 @@ public class TextPaginator {
                         float padTop = currentLines.isEmpty() ? 0f : Math.max(4f, baseLineHeight * 0.22f);
                         float padBot = Math.max(4f, baseLineHeight * 0.22f);
                         float needed = padTop + destH + padBot;
-                        float antiOrphanReserve = (destH <= baseLineHeight * 2.5f && pIdx + 1 < paragraphs.length)
-                                ? (needed + baseLineHeight * 2.2f) : needed;
+                        float antiOrphanReserve = needed;
+                        if (destH <= baseLineHeight * 2.5f && pIdx + 1 < paragraphs.length) {
+                            EpubFormatting.ParsedBlockHeader nextHdr = EpubFormatting.parseBlockHeader(paragraphs[pIdx + 1]);
+                            boolean nextIsTitleFrame = (nextHdr.role >= '1' && nextHdr.role <= '6') || nextHdr.align == 'C';
+                            if (nextIsTitleFrame && pIdx + 2 < paragraphs.length && paragraphs[pIdx + 2].trim().startsWith("[IMG:")) {
+                                antiOrphanReserve = Math.min(availableHeight * 0.65f, needed * 2.0f + baseLineHeight * 3.0f);
+                            } else {
+                                antiOrphanReserve = needed + baseLineHeight * 2.2f;
+                            }
+                        }
                         if (!currentLines.isEmpty() && usedHeight + antiOrphanReserve > availableHeight) {
                             pages.add(new Page(pageIndex++, new ArrayList<>(currentLines), pageStartCharOffset, globalCharOffset));
                             if (maxPages > 0 && pages.size() >= maxPages) return pages;

@@ -1744,6 +1744,573 @@ public class EpubParser {
         }
     }
 
+    public static final class CfiDomLocation {
+        public final int spineIndex;
+        public final String opfItemId;
+        public final String blockSnippet;
+        public final String inlineSnippet;
+        public final int charOffsetInInline;
+        public final int charPrefixInBlock;
+
+        public CfiDomLocation(int spineIndex, String opfItemId, String blockSnippet,
+                              String inlineSnippet, int charOffsetInInline, int charPrefixInBlock) {
+            this.spineIndex = spineIndex;
+            this.opfItemId = opfItemId != null ? opfItemId : "";
+            this.blockSnippet = blockSnippet != null ? blockSnippet : "";
+            this.inlineSnippet = inlineSnippet != null ? inlineSnippet : "";
+            this.charOffsetInInline = Math.max(0, charOffsetInInline);
+            this.charPrefixInBlock = Math.max(0, charPrefixInBlock);
+        }
+
+        public boolean hasSnippet() {
+            return !blockSnippet.isEmpty() || !inlineSnippet.isEmpty();
+        }
+    }
+
+    public static final class DomBlockStep {
+        public final String cfiElemPath;
+        public final String normalizedPrefix;
+
+        public DomBlockStep(String cfiElemPath, String normalizedPrefix) {
+            this.cfiElemPath = cfiElemPath;
+            this.normalizedPrefix = normalizedPrefix;
+        }
+    }
+
+    private static boolean isHtmlVoidTag(String tagName) {
+        return "br".equals(tagName) || "hr".equals(tagName) || "img".equals(tagName)
+                || "meta".equals(tagName) || "link".equals(tagName) || "input".equals(tagName)
+                || "source".equals(tagName) || "wbr".equals(tagName) || "col".equals(tagName)
+                || "area".equals(tagName) || "base".equals(tagName) || "param".equals(tagName);
+    }
+
+    private static boolean isDomLeafBlockTag(String tagName) {
+        return "p".equals(tagName) || "blockquote".equals(tagName) || "li".equals(tagName)
+                || "dd".equals(tagName) || "dt".equals(tagName) || "pre".equals(tagName)
+                || (tagName.length() == 2 && tagName.charAt(0) == 'h' && tagName.charAt(1) >= '1' && tagName.charAt(1) <= '6');
+    }
+
+    private static String normalizeSnippetText(String raw) {
+        if (raw == null || raw.isEmpty()) return "";
+        String cleaned = cleanHtmlText(raw, "");
+        return cleaned.replaceAll("\\[IMG:[^\\]]+\\]", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private static int findBodyInnerStart(String html) {
+        Matcher m = Pattern.compile("(?is)<body\\b[^>]*>").matcher(html);
+        if (m.find()) return m.end();
+        return -1;
+    }
+
+    private static int findBodyInnerEnd(String html, int bodyStart) {
+        Matcher m = Pattern.compile("(?is)</body>").matcher(html);
+        if (m.find(Math.max(0, bodyStart))) return m.start();
+        return html.length();
+    }
+
+    private static int findMatchingCloseTagEnd(String html, int afterOpenGt, String tagName, int limitEnd) {
+        int depth = 1;
+        int len = Math.min(html.length(), limitEnd);
+        int cursor = afterOpenGt;
+        while (cursor < len) {
+            int lt = html.indexOf('<', cursor);
+            if (lt < 0 || lt >= len) break;
+            if (html.startsWith("<!--", lt)) {
+                int endCom = html.indexOf("-->", lt + 4);
+                cursor = (endCom >= 0) ? Math.min(len, endCom + 3) : len;
+                continue;
+            }
+            if (html.startsWith("<![CDATA[", lt)) {
+                int endC = html.indexOf("]]>", lt + 9);
+                cursor = (endC >= 0) ? Math.min(len, endC + 3) : len;
+                continue;
+            }
+            int gt = -1;
+            char q = '\0';
+            for (int k = lt + 1; k < len; k++) {
+                char c = html.charAt(k);
+                if (q != '\0') {
+                    if (c == q) q = '\0';
+                } else if (c == '"' || c == '\'') {
+                    q = c;
+                } else if (c == '>') {
+                    gt = k;
+                    break;
+                }
+            }
+            if (gt < 0) break;
+            String rawTag = html.substring(lt + 1, gt).trim();
+            if (rawTag.startsWith("!")) {
+                cursor = gt + 1;
+                continue;
+            }
+            boolean isClose = rawTag.startsWith("/");
+            boolean isSelfClose = rawTag.endsWith("/");
+            String inner = isClose ? rawTag.substring(1).trim() : rawTag;
+            if (isSelfClose && inner.endsWith("/")) inner = inner.substring(0, inner.length() - 1).trim();
+            int ws = -1;
+            for (int k = 0; k < inner.length(); k++) {
+                if (Character.isWhitespace(inner.charAt(k))) { ws = k; break; }
+            }
+            String nm = (ws > 0 ? inner.substring(0, ws) : inner).toLowerCase(java.util.Locale.US);
+            if (nm.equals(tagName)) {
+                if (isClose) {
+                    depth--;
+                    if (depth == 0) return lt;
+                } else if (!isSelfClose && !isHtmlVoidTag(nm)) {
+                    depth++;
+                }
+            }
+            cursor = gt + 1;
+        }
+        return len;
+    }
+
+    /**
+     * Разбирает EPUB 3 CFI относительно реального XHTML DOM внутри локального .epub,
+     * чтобы точно локализовать целевой абзац и символ даже при наличии обёрток (.section1, .titleblock)
+     * или вложенных тегов (&lt;em&gt;, &lt;a&gt;, &lt;span&gt;).
+     */
+    public static CfiDomLocation resolveCfiInEpub(File epubFile, String rawCfi) {
+        if (epubFile == null || !epubFile.exists() || rawCfi == null || rawCfi.trim().isEmpty()) {
+            return null;
+        }
+        ZipFile zip = null;
+        try {
+            String clean = rawCfi.trim();
+            String[] parts = clean.split("!", 2);
+            String spinePart = parts[0];
+            String elemPart = parts.length > 1 ? parts[1] : "";
+
+            int spineIndex = -1;
+            String opfItemId = "";
+            Matcher mSpine = Pattern.compile("/(\\d+)(?:\\[([^\\]]+)\\])?").matcher(spinePart);
+            int lastSpineNum = -1;
+            while (mSpine.find()) {
+                try {
+                    lastSpineNum = Integer.parseInt(mSpine.group(1));
+                    String idG = mSpine.group(2);
+                    if (idG != null && !idG.isEmpty()) opfItemId = idG;
+                } catch (Exception ignored) {}
+            }
+            if (lastSpineNum >= 2) {
+                spineIndex = (lastSpineNum / 2) - 1;
+            }
+            if (spineIndex < 0 && opfItemId.isEmpty()) return null;
+
+            zip = new ZipFile(epubFile);
+            String opfPath = findOpfPath(zip);
+            if (opfPath == null || opfPath.isEmpty()) return null;
+            String baseDir = opfPath.contains("/") ? opfPath.substring(0, opfPath.lastIndexOf('/') + 1) : "";
+            Map<String, String> manifestMap = new HashMap<>();
+            List<SpineItem> spineItems = parseOpfSpineDetailed(zip, opfPath, baseDir, manifestMap);
+            String targetHref = null;
+            if (!opfItemId.isEmpty()) {
+                for (SpineItem si : spineItems) {
+                    if (opfItemId.equals(si.idref)) {
+                        targetHref = si.href;
+                        if (spineIndex < 0) spineIndex = si.originalOpfSpineIndex;
+                        break;
+                    }
+                }
+                if (targetHref == null && manifestMap.containsKey(opfItemId)) {
+                    targetHref = resolveZipPath(baseDir, manifestMap.get(opfItemId));
+                }
+            }
+            if (targetHref == null && spineIndex >= 0) {
+                for (SpineItem si : spineItems) {
+                    if (si.originalOpfSpineIndex == spineIndex) {
+                        targetHref = si.href;
+                        if (opfItemId.isEmpty()) opfItemId = si.idref;
+                        break;
+                    }
+                }
+                if (targetHref == null && spineIndex < spineItems.size()) {
+                    targetHref = spineItems.get(spineIndex).href;
+                }
+            }
+            if (targetHref == null || elemPart.isEmpty()) return null;
+
+            String html = readEntryRawHtml(zip, targetHref);
+            if (html == null || html.isEmpty()) return null;
+
+            int charOff = 0;
+            String elemPath = elemPart;
+            int colonIdx = elemPart.indexOf(':');
+            if (colonIdx >= 0) {
+                elemPath = elemPart.substring(0, colonIdx);
+                String offDigits = elemPart.substring(colonIdx + 1).replaceAll("[^0-9]", "");
+                if (!offDigits.isEmpty()) {
+                    try { charOff = Integer.parseInt(offDigits); } catch (Exception ignored) {}
+                }
+            }
+
+            List<Integer> targetChildIndices = new ArrayList<>();
+            String lastIdAssertion = "";
+            Matcher mStep = Pattern.compile("/(\\d+)(?:\\[([^\\]]+)\\])?").matcher(elemPath);
+            boolean skippedBodyRoot = false;
+            while (mStep.find()) {
+                int stepNum = Integer.parseInt(mStep.group(1));
+                String stepId = mStep.group(2);
+                if (stepId != null && !stepId.isEmpty()) {
+                    lastIdAssertion = stepId;
+                }
+                if (!skippedBodyRoot && stepNum == 4) {
+                    skippedBodyRoot = true;
+                    continue;
+                }
+                skippedBodyRoot = true;
+                if (stepNum >= 2 && stepNum % 2 == 0) {
+                    targetChildIndices.add(stepNum / 2);
+                }
+            }
+
+            int bodyStart = findBodyInnerStart(html);
+            if (bodyStart < 0) return null;
+            int bodyEnd = findBodyInnerEnd(html, bodyStart);
+
+            // Если присутствует ID-утверждение ([anchor_id]) — пробуем прямое точное совпадение элемента
+            if (!lastIdAssertion.isEmpty()) {
+                int anchorStart = findAnchorOffset(html, lastIdAssertion);
+                if (anchorStart >= bodyStart && anchorStart < bodyEnd) {
+                    int openGt = html.indexOf('>', anchorStart);
+                    if (openGt > anchorStart) {
+                        int sp = anchorStart + 1;
+                        while (sp < openGt && !Character.isWhitespace(html.charAt(sp))) sp++;
+                        String tName = html.substring(anchorStart + 1, sp).toLowerCase(java.util.Locale.US);
+                        int closeLt = (openGt > 0 && html.charAt(openGt - 1) == '/') ? openGt : findMatchingCloseTagEnd(html, openGt + 1, tName, bodyEnd);
+                        String rawSlice = html.substring(anchorStart, Math.min(bodyEnd, Math.max(openGt + 1, closeLt)));
+                        String snip = normalizeSnippetText(rawSlice);
+                        if (!snip.isEmpty()) {
+                            return new CfiDomLocation(spineIndex, opfItemId, snip, snip, charOff, 0);
+                        }
+                    }
+                }
+            }
+
+            if (targetChildIndices.isEmpty()) return null;
+
+            int[] childCounters = new int[64];
+            String[] tagStack = new String[64];
+            int[] openStartStack = new int[64];
+            int[] innerStartStack = new int[64];
+            int depth = 0;
+            int cursor = bodyStart;
+            int targetMatchStart = -1;
+            int targetMatchInnerStart = -1;
+            int targetMatchEnd = -1;
+            int blockStart = -1;
+            int blockInnerStart = -1;
+            int blockEnd = -1;
+            int targetDepthNeeded = targetChildIndices.size() - 1;
+            boolean pathPrefixMatches = true;
+
+            while (cursor < bodyEnd) {
+                int lt = html.indexOf('<', cursor);
+                if (lt < 0 || lt >= bodyEnd) break;
+                if (html.startsWith("<!--", lt)) {
+                    int ec = html.indexOf("-->", lt + 4);
+                    cursor = (ec >= 0) ? Math.min(bodyEnd, ec + 3) : bodyEnd;
+                    continue;
+                }
+                if (html.startsWith("<![CDATA[", lt)) {
+                    int ec = html.indexOf("]]>", lt + 9);
+                    cursor = (ec >= 0) ? Math.min(bodyEnd, ec + 3) : bodyEnd;
+                    continue;
+                }
+                int gt = -1;
+                char q = '\0';
+                for (int k = lt + 1; k < bodyEnd; k++) {
+                    char c = html.charAt(k);
+                    if (q != '\0') { if (c == q) q = '\0'; }
+                    else if (c == '"' || c == '\'') q = c;
+                    else if (c == '>') { gt = k; break; }
+                }
+                if (gt < 0) break;
+
+                String rawTag = html.substring(lt + 1, gt).trim();
+                cursor = gt + 1;
+                if (rawTag.isEmpty() || rawTag.startsWith("!") || rawTag.startsWith("?")) continue;
+
+                boolean isClose = rawTag.startsWith("/");
+                boolean isSelfClose = rawTag.endsWith("/");
+                String inner = isClose ? rawTag.substring(1).trim() : rawTag;
+                if (isSelfClose && inner.endsWith("/")) inner = inner.substring(0, inner.length() - 1).trim();
+                int ws = -1;
+                for (int k = 0; k < inner.length(); k++) {
+                    if (Character.isWhitespace(inner.charAt(k))) { ws = k; break; }
+                }
+                String tagName = (ws > 0 ? inner.substring(0, ws) : inner).toLowerCase(java.util.Locale.US);
+
+                if (isClose) {
+                    if (depth > 0) {
+                        for (int s = depth - 1; s >= 0; s--) {
+                            if (tagName.equals(tagStack[s])) {
+                                depth = s;
+                                pathPrefixMatches = (depth <= targetDepthNeeded);
+                                break;
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                if ("script".equals(tagName) || "style".equals(tagName)) {
+                    if (!isSelfClose) {
+                        cursor = Math.min(bodyEnd, findMatchingCloseTagEnd(html, cursor, tagName, bodyEnd) + tagName.length() + 3);
+                    }
+                    continue;
+                }
+
+                if (depth < 64) {
+                    childCounters[depth]++;
+                    boolean stepMatches = pathPrefixMatches && depth <= targetDepthNeeded
+                            && childCounters[depth] == targetChildIndices.get(depth);
+
+                    if (stepMatches && depth == targetDepthNeeded) {
+                        targetMatchStart = lt;
+                        targetMatchInnerStart = cursor;
+                        targetMatchEnd = (isSelfClose || isHtmlVoidTag(tagName))
+                                ? cursor : findMatchingCloseTagEnd(html, cursor, tagName, bodyEnd);
+                        break;
+                    }
+
+                    if (!isSelfClose && !isHtmlVoidTag(tagName)) {
+                        tagStack[depth] = tagName;
+                        openStartStack[depth] = lt;
+                        innerStartStack[depth] = cursor;
+                        if (stepMatches && isDomLeafBlockTag(tagName)) {
+                            blockStart = lt;
+                            blockInnerStart = cursor;
+                            blockEnd = findMatchingCloseTagEnd(html, cursor, tagName, bodyEnd);
+                        }
+                        depth++;
+                        if (depth < 64) childCounters[depth] = 0;
+                        pathPrefixMatches = stepMatches;
+                    } else if (stepMatches) {
+                        // Шаг уперся в одиночный тег (<img/> и т.п.)
+                        targetMatchStart = lt;
+                        targetMatchInnerStart = cursor;
+                        targetMatchEnd = cursor;
+                        break;
+                    }
+                }
+            }
+
+            if (targetMatchStart >= 0 && targetMatchEnd >= targetMatchStart) {
+                String inlineSnip = normalizeSnippetText(html.substring(targetMatchStart, Math.min(bodyEnd, targetMatchEnd)));
+                String blockSnip = inlineSnip;
+                int prefixInBlock = 0;
+                if (blockStart >= 0 && blockEnd >= blockStart && targetMatchStart >= blockInnerStart && targetMatchStart <= blockEnd) {
+                    blockSnip = normalizeSnippetText(html.substring(blockStart, Math.min(bodyEnd, blockEnd)));
+                    prefixInBlock = normalizeSnippetText(html.substring(blockInnerStart, targetMatchStart)).length();
+                }
+                if (blockSnip.length() > 140) blockSnip = blockSnip.substring(0, 140);
+                if (inlineSnip.length() > 140) inlineSnip = inlineSnip.substring(0, 140);
+                return new CfiDomLocation(spineIndex, opfItemId, blockSnip, inlineSnip, charOff, prefixInBlock);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Error resolving CFI in EPUB DOM: " + rawCfi, t);
+        } finally {
+            if (zip != null) {
+                try { zip.close(); } catch (Exception ignored) {}
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Строит таблицу соответствия DOM-блоков XHTML-файла главы и их точных EPUB 3 CFI-путей
+     * (/4/..., включая вложенные обёртки .section1) для обратного сохранения позиции на сервер.
+     */
+    public static List<DomBlockStep> extractChapterDomBlocks(File epubFile, int opfSpineIndex, String opfItemId) {
+        List<DomBlockStep> blocks = new ArrayList<>();
+        if (epubFile == null || !epubFile.exists()) return blocks;
+        ZipFile zip = null;
+        try {
+            zip = new ZipFile(epubFile);
+            String opfPath = findOpfPath(zip);
+            if (opfPath == null || opfPath.isEmpty()) return blocks;
+            String baseDir = opfPath.contains("/") ? opfPath.substring(0, opfPath.lastIndexOf('/') + 1) : "";
+            Map<String, String> manifestMap = new HashMap<>();
+            List<SpineItem> spineItems = parseOpfSpineDetailed(zip, opfPath, baseDir, manifestMap);
+
+            String targetHref = null;
+            if (opfItemId != null && !opfItemId.isEmpty()) {
+                for (SpineItem si : spineItems) {
+                    if (opfItemId.equals(si.idref)) {
+                        targetHref = si.href;
+                        break;
+                    }
+                }
+                if (targetHref == null && manifestMap.containsKey(opfItemId)) {
+                    targetHref = resolveZipPath(baseDir, manifestMap.get(opfItemId));
+                }
+            }
+            if (targetHref == null && opfSpineIndex >= 0) {
+                for (SpineItem si : spineItems) {
+                    if (si.originalOpfSpineIndex == opfSpineIndex) {
+                        targetHref = si.href;
+                        break;
+                    }
+                }
+                if (targetHref == null && opfSpineIndex < spineItems.size()) {
+                    targetHref = spineItems.get(opfSpineIndex).href;
+                }
+            }
+            if (targetHref == null) return blocks;
+
+            String html = readEntryRawHtml(zip, targetHref);
+            if (html == null || html.isEmpty()) return blocks;
+            int bodyStart = findBodyInnerStart(html);
+            if (bodyStart < 0) return blocks;
+            int bodyEnd = findBodyInnerEnd(html, bodyStart);
+
+            int[] childCounters = new int[64];
+            String[] tagStack = new String[64];
+            int depth = 0;
+            int cursor = bodyStart;
+
+            while (cursor < bodyEnd) {
+                int lt = html.indexOf('<', cursor);
+                if (lt < 0 || lt >= bodyEnd) break;
+                if (html.startsWith("<!--", lt)) {
+                    int ec = html.indexOf("-->", lt + 4);
+                    cursor = (ec >= 0) ? Math.min(bodyEnd, ec + 3) : bodyEnd;
+                    continue;
+                }
+                if (html.startsWith("<![CDATA[", lt)) {
+                    int ec = html.indexOf("]]>", lt + 9);
+                    cursor = (ec >= 0) ? Math.min(bodyEnd, ec + 3) : bodyEnd;
+                    continue;
+                }
+                int gt = -1;
+                char q = '\0';
+                for (int k = lt + 1; k < bodyEnd; k++) {
+                    char c = html.charAt(k);
+                    if (q != '\0') { if (c == q) q = '\0'; }
+                    else if (c == '"' || c == '\'') q = c;
+                    else if (c == '>') { gt = k; break; }
+                }
+                if (gt < 0) break;
+
+                String rawTag = html.substring(lt + 1, gt).trim();
+                cursor = gt + 1;
+                if (rawTag.isEmpty() || rawTag.startsWith("!") || rawTag.startsWith("?")) continue;
+
+                boolean isClose = rawTag.startsWith("/");
+                boolean isSelfClose = rawTag.endsWith("/");
+                String inner = isClose ? rawTag.substring(1).trim() : rawTag;
+                if (isSelfClose && inner.endsWith("/")) inner = inner.substring(0, inner.length() - 1).trim();
+                int ws = -1;
+                for (int k = 0; k < inner.length(); k++) {
+                    if (Character.isWhitespace(inner.charAt(k))) { ws = k; break; }
+                }
+                String tagName = (ws > 0 ? inner.substring(0, ws) : inner).toLowerCase(java.util.Locale.US);
+
+                if (isClose) {
+                    if (depth > 0) {
+                        for (int s = depth - 1; s >= 0; s--) {
+                            if (tagName.equals(tagStack[s])) {
+                                depth = s;
+                                break;
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                if ("script".equals(tagName) || "style".equals(tagName)) {
+                    if (!isSelfClose) {
+                        cursor = Math.min(bodyEnd, findMatchingCloseTagEnd(html, cursor, tagName, bodyEnd) + tagName.length() + 3);
+                    }
+                    continue;
+                }
+
+                if (depth < 64) {
+                    childCounters[depth]++;
+                    if (!isSelfClose && !isHtmlVoidTag(tagName)) {
+                        if (isDomLeafBlockTag(tagName)) {
+                            int blockEnd = findMatchingCloseTagEnd(html, cursor, tagName, bodyEnd);
+                            String snip = normalizeSnippetText(html.substring(cursor, Math.min(bodyEnd, blockEnd)));
+                            if (!snip.isEmpty()) {
+                                StringBuilder pathSb = new StringBuilder("/4");
+                                for (int d = 0; d <= depth; d++) {
+                                    pathSb.append('/').append(childCounters[d] * 2);
+                                }
+                                String pref = snip.length() > 64 ? snip.substring(0, 64) : snip;
+                                blocks.add(new DomBlockStep(pathSb.toString(), pref));
+                            }
+                        }
+                        tagStack[depth] = tagName;
+                        depth++;
+                        if (depth < 64) childCounters[depth] = 0;
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Error extracting DOM blocks for CFI", t);
+        } finally {
+            if (zip != null) {
+                try { zip.close(); } catch (Exception ignored) {}
+            }
+        }
+        return blocks;
+    }
+
+    /**
+     * Находит точное смещение в отформатированном rawText главы по сниппету текста из DOM-узла CFI.
+     */
+    public static int findSnippetOffsetInRawText(String rawText, CfiDomLocation domLoc) {
+        if (rawText == null || rawText.isEmpty() || domLoc == null || !domLoc.hasSnippet()) {
+            return -1;
+        }
+        String probe = !domLoc.blockSnippet.isEmpty() ? domLoc.blockSnippet : domLoc.inlineSnippet;
+        String probeNorm = probe.replaceAll("\\s+", " ").trim();
+        if (probeNorm.length() < 4) return -1;
+        String probeHead = probeNorm.length() > 42 ? probeNorm.substring(0, 42).trim() : probeNorm;
+        String inlineNorm = domLoc.inlineSnippet != null ? domLoc.inlineSnippet.replaceAll("\\s+", " ").trim() : "";
+        String inlineHead = inlineNorm.length() > 32 ? inlineNorm.substring(0, 32).trim() : inlineNorm;
+
+        int pos = 0;
+        int len = rawText.length();
+        while (pos < len) {
+            int nl = rawText.indexOf('\n', pos);
+            int lineEnd = (nl >= 0) ? nl : len;
+            String rawLine = rawText.substring(pos, lineEnd);
+            String plainLine = EpubFormatting.stripFormattingTokens(rawLine).replaceAll("\\s+", " ").trim();
+            if (!plainLine.isEmpty()) {
+                boolean matchedBlock = plainLine.startsWith(probeHead)
+                        || probeHead.startsWith(plainLine) && plainLine.length() >= 12
+                        || (probeHead.length() >= 16 && plainLine.contains(probeHead));
+                boolean matchedInline = !matchedBlock && !inlineHead.isEmpty() && inlineHead.length() >= 12 && plainLine.contains(inlineHead);
+                if (matchedBlock || matchedInline) {
+                    int charInPara = 0;
+                    if (matchedBlock && domLoc.charPrefixInBlock > 0) {
+                        charInPara = domLoc.charPrefixInBlock + domLoc.charOffsetInInline;
+                    } else if (matchedInline && !inlineHead.isEmpty()) {
+                        int inIdx = plainLine.indexOf(inlineHead);
+                        charInPara = Math.max(0, inIdx) + domLoc.charOffsetInInline;
+                    } else {
+                        charInPara = domLoc.charOffsetInInline;
+                    }
+                    int blkPrefixLen = 0;
+                    if (!rawLine.isEmpty() && rawLine.charAt(0) == EpubFormatting.BLK_START) {
+                        int be = rawLine.indexOf(EpubFormatting.BLK_END);
+                        if (be >= 0) blkPrefixLen = be + 1;
+                    }
+                    int target = pos + blkPrefixLen + Math.min(Math.max(0, rawLine.length() - blkPrefixLen - 1), Math.max(0, charInPara));
+                    return Math.min(lineEnd, Math.max(pos, target));
+                }
+            }
+            if (nl < 0) break;
+            pos = nl + 1;
+        }
+        return -1;
+    }
+
     private static String readStreamToString(InputStream is) throws Exception {
         java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream(8192);
         byte[] buf = new byte[16384];

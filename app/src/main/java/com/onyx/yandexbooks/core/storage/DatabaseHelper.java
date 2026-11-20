@@ -356,6 +356,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             }
 
             // 2. Дополнительно сверяем с таблицей progress и очередью sync_queue
+            long bestProgressTs = (bestLocalPercent > 0.0 || bestLocalCh > 0) ? bestLocalTs : 0L;
             boolean isLocalProgressSynced = true;
             boolean hasUnsyncedQueue = false;
             Cursor pc = db.rawQuery("SELECT percent, timestamp, chapter_index, paragraph_index, is_synced FROM progress WHERE book_uuid = ?", new String[]{book.getUuid()});
@@ -370,13 +371,14 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
                     boolean progCorrupted = (progPercent >= 99.0 && progCh == 0);
                     if (!progCorrupted) {
-                        if (progTs > bestLocalTs || progPercent > bestLocalPercent) {
+                        if (progTs > bestProgressTs || progPercent > bestLocalPercent) {
                             bestLocalPercent = Math.max(bestLocalPercent, progPercent);
                             bestLocalTs = Math.max(bestLocalTs, progTs);
-                            if (progCh > 0 || (progCh == 0 && bestLocalCh == 0)) {
+                            if (progTs >= bestProgressTs) {
                                 bestLocalCh = progCh;
                                 bestLocalPar = progPar;
                             }
+                            bestProgressTs = Math.max(bestProgressTs, progTs);
                         }
                     }
                 }
@@ -396,9 +398,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             boolean serverIsNewerAndFurther = false;
 
             boolean savedInRecentSession = com.onyx.yandexbooks.core.sync.SyncManager.wasBookSavedRecently(book.getUuid(), 15000L);
+            boolean cloudStrictlyNewerThanRecent = savedInRecentSession && cloudTimestamp > 0 && bestProgressTs > 0 && cloudTimestamp > (bestProgressTs + 2000L);
             if (hasLocalProgress) {
                 // Серверный прогресс новее, если книга не была только что сброшена локально, и:
-                // 1) таймштамп сервера новее — пользователь читал на смартфоне позже, чем на ридере, ИЛИ
+                // 1) таймштамп сервера новее прогресса — пользователь читал на смартфоне позже, чем на ридере, ИЛИ
                 // 2) локальный прогресс равен 0 (книга открыта впервые на ридере), а в облаке есть прогресс, ИЛИ
                 // 3) локальный прогресс уже был синхронизирован с сервером (нет офлайн-очереди), а в облаке прогресс продвинулся вперед (процент, глава или абзац)
                 boolean percentAdvanced = book.getPercent() > bestLocalPercent + 0.01;
@@ -406,19 +409,19 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 boolean paragraphAdvanced = (book.getCurrentChapterIndex() == bestLocalCh && book.getCurrentParagraphIndex() > bestLocalPar);
                 boolean hasAnyCloudProgress = book.getPercent() > 0.01 || book.getCurrentChapterIndex() > 0 || (book.getCfi() != null && !book.getCfi().isEmpty());
 
-                serverIsNewerAndFurther = !wasJustResetLocally && !savedInRecentSession && cloudPercentValid && (
-                        (cloudTimestamp > bestLocalTs && cloudTimestamp > 0)
+                serverIsNewerAndFurther = !wasJustResetLocally && (!savedInRecentSession || cloudStrictlyNewerThanRecent) && cloudPercentValid && (
+                        (cloudTimestamp > bestProgressTs && cloudTimestamp > 0)
                         || (bestLocalPercent <= 0.0 && bestLocalCh == 0 && hasAnyCloudProgress)
-                        || (localFullySynced && (percentAdvanced || chapterAdvanced || paragraphAdvanced) && (cloudTimestamp <= 0 || cloudTimestamp >= bestLocalTs))
+                        || (localFullySynced && (percentAdvanced || chapterAdvanced || paragraphAdvanced) && (cloudTimestamp <= 0 || cloudTimestamp >= bestProgressTs))
                 );
 
                 if (serverIsNewerAndFurther) {
                     effectivePercent = book.getPercent();
-                    effectiveTimestamp = Math.max(bestLocalTs, effectiveTimestamp);
+                    effectiveTimestamp = Math.max(bestProgressTs, effectiveTimestamp);
                     if (book.getCurrentChapterIndex() > 0) {
                         effectiveChapter = book.getCurrentChapterIndex();
                         effectiveParagraph = book.getCurrentParagraphIndex();
-                    } else if (Math.abs(book.getPercent() - bestLocalPercent) <= 1.5) {
+                    } else if (Math.abs(book.getPercent() - bestLocalPercent) <= 1.5 && (book.getCfi() == null || book.getCfi().isEmpty())) {
                         effectiveChapter = bestLocalCh;
                         effectiveParagraph = bestLocalPar;
                     } else {
@@ -438,9 +441,9 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     // или локальная полка переведена в "reading" вразрез со старой облачной "to_read",
                     // гарантированно ставим его в очередь на синхронизацию в облако Яндекса!
                     boolean shelfPromotedLocally = ("reading".equals(localShelfType) && "to_read".equals(book.getShelfType()) && (bestLocalTs >= cloudTimestamp || cloudTimestamp <= 0));
-                    if ((bestLocalTs > 0 && bestLocalPercent > 0.0 && bestLocalPercent > (book.getPercent() + 0.01)) || shelfPromotedLocally) {
+                    if ((bestProgressTs > 0 && bestLocalPercent > 0.0 && bestLocalPercent > (book.getPercent() + 0.01)) || shelfPromotedLocally) {
                         double syncPct = Math.max(bestLocalPercent, 0.01);
-                        long syncTs = bestLocalTs > 0 ? bestLocalTs : System.currentTimeMillis();
+                        long syncTs = bestProgressTs > 0 ? bestProgressTs : (bestLocalTs > 0 ? bestLocalTs : System.currentTimeMillis());
                         ReadingProgress unsynced = new ReadingProgress(book.getUuid(), syncPct, bestLocalCh, bestLocalPar, 0, syncTs);
                         unsynced.setSyncedWithServer(false);
                         unsynced.setLibraryCardId(localCardId != null ? localCardId : book.getLibraryCardId());
@@ -561,6 +564,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 pCv.put("page_index", 0);
                 if (book.getCfi() != null && !book.getCfi().isEmpty()) {
                     pCv.put("cfi", book.getCfi());
+                } else if (forceCloudUpdate && book.getCurrentChapterIndex() == 0) {
+                    pCv.putNull("cfi");
                 }
                 pCv.put("timestamp", book.getLastReadTimestamp() > 0 ? book.getLastReadTimestamp() : System.currentTimeMillis());
                 pCv.put("is_synced", 1);
@@ -894,7 +899,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         bookCv.put("current_chapter", progress.getChapterIndex());
         bookCv.put("current_paragraph", progress.getParagraphIndex());
         bookCv.put("last_read_timestamp", progress.getTimestamp());
-        if (progress.getPercent() >= 99.0 && progress.getChapterIndex() > 0) {
+        if (progress.getPercent() >= 99.0 && (progress.getChapterIndex() > 0 || progress.getPercent() >= 99.9)) {
             bookCv.put("shelf_type", "done");
         } else {
             bookCv.put("shelf_type", "reading");
@@ -1039,15 +1044,33 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     p.setParagraphIndex(c.getInt(c.getColumnIndex("paragraph_index")));
                     p.setPageIndex(c.getInt(c.getColumnIndex("page_index")));
                     p.setTimestamp(c.getLong(c.getColumnIndex("timestamp")));
+                    int cfiCol = c.getColumnIndex("cfi");
+                    if (cfiCol >= 0) {
+                        String cfiVal = c.getString(cfiCol);
+                        if (cfiVal != null && !cfiVal.isEmpty()) p.setCfi(cfiVal);
+                    }
+                    int docCol = c.getColumnIndex("document_uuid");
+                    if (docCol >= 0) {
+                        String docVal = c.getString(docCol);
+                        if (docVal != null && !docVal.isEmpty()) p.setDocumentUuid(docVal);
+                    }
                     p.setSyncedWithServer(false);
 
                     try {
-                        Cursor bc = db.rawQuery("SELECT card_id FROM books WHERE uuid = ?", new String[]{uuid});
+                        Cursor bc = db.rawQuery("SELECT card_id, document_uuid, cfi FROM books WHERE uuid = ?", new String[]{uuid});
                         if (bc != null) {
                             if (bc.moveToFirst()) {
                                 String cardId = bc.getString(0);
                                 if (cardId != null && !cardId.isEmpty()) {
                                     p.setLibraryCardId(cardId);
+                                }
+                                if (p.getDocumentUuid() == null || p.getDocumentUuid().isEmpty()) {
+                                    String bDoc = bc.getString(1);
+                                    if (bDoc != null && !bDoc.isEmpty()) p.setDocumentUuid(bDoc);
+                                }
+                                if (p.getCfi() == null || p.getCfi().isEmpty()) {
+                                    String bCfi = bc.getString(2);
+                                    if (bCfi != null && !bCfi.isEmpty()) p.setCfi(bCfi);
                                 }
                             }
                             bc.close();
@@ -1075,13 +1098,31 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 p.setChapterIndex(c.getInt(c.getColumnIndex("chapter_index")));
                 p.setParagraphIndex(c.getInt(c.getColumnIndex("paragraph_index")));
                 p.setTimestamp(c.getLong(c.getColumnIndex("timestamp")));
+                int cfiCol = c.getColumnIndex("cfi");
+                if (cfiCol >= 0) {
+                    String cfiVal = c.getString(cfiCol);
+                    if (cfiVal != null && !cfiVal.isEmpty()) p.setCfi(cfiVal);
+                }
+                int docCol = c.getColumnIndex("document_uuid");
+                if (docCol >= 0) {
+                    String docVal = c.getString(docCol);
+                    if (docVal != null && !docVal.isEmpty()) p.setDocumentUuid(docVal);
+                }
                 try {
-                    Cursor bc = db.rawQuery("SELECT card_id FROM books WHERE uuid = ?", new String[]{p.getBookUuid()});
+                    Cursor bc = db.rawQuery("SELECT card_id, document_uuid, cfi FROM books WHERE uuid = ?", new String[]{p.getBookUuid()});
                     if (bc != null) {
                         if (bc.moveToFirst()) {
                             String cardId = bc.getString(0);
                             if (cardId != null && !cardId.isEmpty()) {
                                 p.setLibraryCardId(cardId);
+                            }
+                            if (p.getDocumentUuid() == null || p.getDocumentUuid().isEmpty()) {
+                                String bDoc = bc.getString(1);
+                                if (bDoc != null && !bDoc.isEmpty()) p.setDocumentUuid(bDoc);
+                            }
+                            if (p.getCfi() == null || p.getCfi().isEmpty()) {
+                                String bCfi = bc.getString(2);
+                                if (bCfi != null && !bCfi.isEmpty()) p.setCfi(bCfi);
                             }
                         }
                         bc.close();

@@ -29,6 +29,43 @@ public class SyncManager {
     private final YandexBooksApiClient apiClient;
     private static final java.util.concurrent.ConcurrentHashMap<String, Long> RECENT_LOCAL_SAVES_ELAPSED =
             new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.atomic.AtomicInteger ACTIVE_CLOUD_SYNCS =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+    private static final java.util.concurrent.ConcurrentLinkedQueue<Runnable> IDLE_WAITERS =
+            new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+    private static void onCloudSyncStarted() {
+        ACTIVE_CLOUD_SYNCS.incrementAndGet();
+    }
+
+    private static void onCloudSyncFinished() {
+        int rem = ACTIVE_CLOUD_SYNCS.decrementAndGet();
+        if (rem <= 0) {
+            ACTIVE_CLOUD_SYNCS.compareAndSet(rem, 0);
+            Runnable r;
+            while ((r = IDLE_WAITERS.poll()) != null) {
+                try {
+                    r.run();
+                } catch (Throwable ignored) {}
+            }
+        }
+    }
+
+    public void runWhenIdle(final Runnable callback) {
+        if (callback == null) return;
+        if (ACTIVE_CLOUD_SYNCS.get() <= 0) {
+            callback.run();
+            return;
+        }
+        IDLE_WAITERS.offer(callback);
+        if (ACTIVE_CLOUD_SYNCS.get() <= 0) {
+            Runnable r = IDLE_WAITERS.poll();
+            while (r != null) {
+                try { r.run(); } catch (Throwable ignored) {}
+                r = IDLE_WAITERS.poll();
+            }
+        }
+    }
 
     public static void markBookSavedRecently(String bookUuid) {
         if (bookUuid == null || bookUuid.isEmpty()) return;
@@ -89,22 +126,45 @@ public class SyncManager {
             }
 
             // Онлайн: отправляем на сервер
-            apiClient.sendReadingProgress(localProgress, new YandexBooksApiClient.ApiCallback<Boolean>() {
+            final ReadingProgress snapshot = new ReadingProgress(
+                    localProgress.getBookUuid(),
+                    localProgress.getPercent(),
+                    localProgress.getChapterIndex(),
+                    localProgress.getParagraphIndex(),
+                    localProgress.getPageIndex(),
+                    localProgress.getTimestamp()
+            );
+            snapshot.setLibraryCardId(localProgress.getLibraryCardId());
+            snapshot.setDocumentUuid(localProgress.getDocumentUuid());
+            snapshot.setCfi(localProgress.getCfi());
+
+            onCloudSyncStarted();
+            apiClient.sendReadingProgress(snapshot, new YandexBooksApiClient.ApiCallback<Boolean>() {
                 @Override
                 public void onSuccess(Boolean result) {
-                    localProgress.setSyncedWithServer(true);
-                    dbHelper.saveProgress(localProgress);
-                    dbHelper.removeFromSyncQueue(localProgress.getBookUuid());
-                    Log.d(TAG, "Progress successfully synced to Yandex cloud.");
-                    if (callback != null) {
-                        callback.onProgressUpdated(localProgress);
+                    try {
+                        dbHelper.markProgressSynced(snapshot.getBookUuid(), snapshot.getTimestamp());
+                        ReadingProgress latest = dbHelper.getProgress(snapshot.getBookUuid());
+                        if (latest == null || latest.getTimestamp() <= snapshot.getTimestamp()) {
+                            dbHelper.removeFromSyncQueue(snapshot.getBookUuid());
+                        }
+                        Log.d(TAG, "Progress successfully synced to Yandex cloud.");
+                        if (callback != null) {
+                            callback.onProgressUpdated(snapshot);
+                        }
+                    } finally {
+                        onCloudSyncFinished();
                     }
                 }
 
                 @Override
                 public void onError(String errorMessage) {
-                    Log.w(TAG, "Failed to send progress: " + errorMessage + ". Enqueuing.");
-                    dbHelper.enqueueOfflineProgress(localProgress);
+                    try {
+                        Log.w(TAG, "Failed to send progress: " + errorMessage + ". Enqueuing.");
+                        dbHelper.enqueueOfflineProgress(snapshot);
+                    } finally {
+                        onCloudSyncFinished();
+                    }
                 }
             });
         } catch (Throwable t) {
@@ -182,20 +242,31 @@ public class SyncManager {
                 } catch (Exception ignored) {}
             }
 
+            onCloudSyncStarted();
             apiClient.sendReadingProgress(p, new YandexBooksApiClient.ApiCallback<Boolean>() {
                 @Override
                 public void onSuccess(Boolean result) {
-                    p.setSyncedWithServer(true);
-                    dbHelper.saveProgress(p);
-                    dbHelper.removeFromSyncQueue(p.getBookUuid());
-                    syncedCount.incrementAndGet();
-                    checkDone();
+                    try {
+                        dbHelper.markProgressSynced(p.getBookUuid(), p.getTimestamp());
+                        ReadingProgress latest = dbHelper.getProgress(p.getBookUuid());
+                        if (latest == null || latest.getTimestamp() <= p.getTimestamp()) {
+                            dbHelper.removeFromSyncQueue(p.getBookUuid());
+                        }
+                        syncedCount.incrementAndGet();
+                        checkDone();
+                    } finally {
+                        onCloudSyncFinished();
+                    }
                 }
 
                 @Override
                 public void onError(String errorMessage) {
-                    Log.w(TAG, "Sync retry failed for book " + p.getBookUuid() + ": " + errorMessage + ". Will retry later.");
-                    checkDone();
+                    try {
+                        Log.w(TAG, "Sync retry failed for book " + p.getBookUuid() + ": " + errorMessage + ". Will retry later.");
+                        checkDone();
+                    } finally {
+                        onCloudSyncFinished();
+                    }
                 }
 
                 private void checkDone() {

@@ -100,6 +100,7 @@ public class MainActivity extends Activity {
     private List<Book> currentBooks = new ArrayList<>();
     private BooksAdapter adapter;
     private boolean isAuthLaunching = false;
+    private final java.util.concurrent.atomic.AtomicLong loadBooksSeqId = new java.util.concurrent.atomic.AtomicLong(0L);
 
     private TextView shelfFooterStatus;
     private Button btnShelfPrevPage;
@@ -487,25 +488,49 @@ public class MainActivity extends Activity {
                             "Нет подключения к интернету.\nВесь прогресс чтения сохранён локально и автоматически отправится в облако при подключении к Wi-Fi.");
                     return;
                 }
-                syncManager.flushOfflineQueue(new SyncManager.SyncCompleteCallback() {
+                syncManager.runWhenIdle(new Runnable() {
                     @Override
-                    public void onSyncFinished(final int count) {
-                        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                    public void run() {
+                        syncManager.flushOfflineQueue(new SyncManager.SyncCompleteCallback() {
                             @Override
-                            public void run() {
-                                if (isFinishing()) return;
-                                if (!"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
-                                    loadBooks(currentShelf);
-                                }
-                                if (count > 0) {
-                                    EinkNotice.show(MainActivity.this, "Синхронизация",
-                                            "Двусторонняя синхронизация выполнена.\nОтправлено обновлений в облако: " + count + ". Полки и прогресс обновлены с сервера.");
-                                } else {
-                                    EinkNotice.show(MainActivity.this, "Синхронизация",
-                                            "Двусторонняя синхронизация выполнена.\nПолки и прогресс чтения обновлены с сервера Яндекс Книг.");
-                                }
+                            public void onSyncFinished(final int count) {
+                                runOnUiThread(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        if (isFinishing()) return;
+                                        if (!"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
+                                            loadBooksWithCallback(currentShelf, new Runnable() {
+                                                @Override
+                                                public void run() {
+                                                    if (isFinishing()) return;
+                                                    if (count > 0) {
+                                                        EinkNotice.show(MainActivity.this, "Синхронизация",
+                                                                "Двусторонняя синхронизация выполнена.\nОтправлено обновлений в облако: " + count + ". Полки и прогресс обновлены с сервера.");
+                                                    } else {
+                                                        EinkNotice.show(MainActivity.this, "Синхронизация",
+                                                                "Двусторонняя синхронизация выполнена.\nПолки и прогресс чтения обновлены с сервера Яндекс Книг.");
+                                                    }
+                                                }
+                                            }, new Runnable() {
+                                                @Override
+                                                public void run() {
+                                                    if (isFinishing()) return;
+                                                    EinkNotice.show(MainActivity.this, "Синхронизация",
+                                                            count > 0
+                                                                    ? ("Локальная очередь отправлена (" + count + "), но не удалось обновить список полок с сервера.")
+                                                                    : "Не удалось получить обновления с сервера Яндекс Книг. Проверьте подключение к интернету.");
+                                                }
+                                            });
+                                        } else {
+                                            EinkNotice.show(MainActivity.this, "Синхронизация",
+                                                    count > 0
+                                                            ? ("Отправлено обновлений в облако: " + count + ".")
+                                                            : "Локальная очередь синхронизации пуста.");
+                                        }
+                                    }
+                                });
                             }
-                        }, count > 0 ? 450L : 100L);
+                        });
                     }
                 });
             }
@@ -2189,6 +2214,11 @@ public class MainActivity extends Activity {
     }
 
     private void loadBooks(final String shelf) {
+        loadBooksWithCallback(shelf, null, null);
+    }
+
+    private void loadBooksWithCallback(final String shelf, final Runnable onCloudSuccess, final Runnable onCloudError) {
+        final long reqSeq = loadBooksSeqId.incrementAndGet();
         // 1. Мгновенно отображаем книги из локальной БД SQLite
         currentBooks = dbHelper.getBooksByShelf(shelf);
         adapter.notifyDataSetChanged();
@@ -2210,18 +2240,28 @@ public class MainActivity extends Activity {
                     dbHelper.saveAllBooks(allBooks);
                     syncManager.flushOfflineQueue();
                 }
-                currentBooks = dbHelper.getBooksByShelf(currentShelf);
-                adapter.notifyDataSetChanged();
+                if (reqSeq == loadBooksSeqId.get() && !"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
+                    currentBooks = dbHelper.getBooksByShelf(currentShelf);
+                    adapter.notifyDataSetChanged();
+                    updateEmptyState();
+                    updateShelfFooter();
+                }
                 updateTabBadges();
-                updateEmptyState();
-                updateShelfFooter();
+                if (onCloudSuccess != null) {
+                    onCloudSuccess.run();
+                }
             }
 
             @Override
             public void onError(String errorMessage) {
                 loadingTextView.setVisibility(View.GONE);
-                updateEmptyState();
-                updateShelfFooter();
+                if (reqSeq == loadBooksSeqId.get()) {
+                    updateEmptyState();
+                    updateShelfFooter();
+                }
+                if (onCloudError != null) {
+                    onCloudError.run();
+                }
                 if (errorMessage != null && (errorMessage.contains("401") || errorMessage.contains("not_authenticated"))) {
                     tokenStorage.clear();
                     EinkNotice.show(MainActivity.this, "Сессия истекла", "Сессия авторизации истекла (401).\nПожалуйста, войдите снова.", "ОК", new Runnable() {
@@ -2230,7 +2270,7 @@ public class MainActivity extends Activity {
                             startActivityForResult(new Intent(MainActivity.this, AuthActivity.class), REQUEST_AUTH);
                         }
                     });
-                } else if (currentBooks.isEmpty()) {
+                } else if (onCloudError == null && currentBooks.isEmpty()) {
                     EinkNotice.show(MainActivity.this, "Ошибка сети", "Не удалось загрузить книги: " + errorMessage);
                 }
             }
@@ -2248,19 +2288,30 @@ public class MainActivity extends Activity {
             }
             updateTabBadges();
             updateShelfFooter();
-            // Сначала дожидаемся отправки локального/офлайн-прогресса в облако,
+            // Сначала дожидаемся завершения активных и отложенных отправок прогресса в облако,
             // и только затем подтягиваем полки с сервера, чтобы исключить гонку старого процента
-            syncManager.flushOfflineQueue(new SyncManager.SyncCompleteCallback() {
+            syncManager.runWhenIdle(new Runnable() {
                 @Override
-                public void onSyncFinished(final int syncedCount) {
-                    new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                public void run() {
+                    runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            if (!isFinishing() && !"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
-                                loadBooks(currentShelf);
-                            }
+                            if (isFinishing()) return;
+                            syncManager.flushOfflineQueue(new SyncManager.SyncCompleteCallback() {
+                                @Override
+                                public void onSyncFinished(final int syncedCount) {
+                                    new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            if (!isFinishing() && !"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
+                                                loadBooks(currentShelf);
+                                            }
+                                        }
+                                    }, syncedCount > 0 ? 450L : 200L);
+                                }
+                            });
                         }
-                    }, syncedCount > 0 ? 500L : 350L);
+                    });
                 }
             });
 
@@ -2473,9 +2524,10 @@ public class MainActivity extends Activity {
         ensureBookOnReadingShelf(book, new Runnable() {
             @Override
             public void run() {
-                // При открытии книги автоматически переводим активный раздел на "Читаю",
-                // чтобы по возвращении из ридера пользователь видел список читаемых книг с актуальным прогрессом
-                currentShelf = "reading";
+                // Для книг с полки "Читаю"/"В планах" показываем "Читаю", но не сбрасываем "Прочитано"/"Мои файлы"
+                if (!"done".equals(book.getShelfType()) && !"user_books".equals(book.getShelfType())) {
+                    currentShelf = "reading";
+                }
                 if (appSettings.isOnyxReaderPreferred()) {
                     openInOnyxReader(book);
                 } else {
@@ -2516,45 +2568,51 @@ public class MainActivity extends Activity {
     private void ensureBookOnReadingShelf(final Book book, final Runnable onReady) {
         dbHelper.unhideBook(book.getUuid());
         Book existing = dbHelper.getBookByUuid(book.getUuid());
-        long nowTs = System.currentTimeMillis();
+        String existingShelf = (existing != null && existing.getShelfType() != null)
+                ? existing.getShelfType() : book.getShelfType();
+        boolean needsPromotionToReading = (existing == null)
+                || "to_read".equals(existingShelf)
+                || "catalog".equals(existingShelf)
+                || "search".equals(existingShelf)
+                || existingShelf == null
+                || existingShelf.isEmpty();
 
-        book.setShelfType("reading");
-        book.setLastReadTimestamp(nowTs);
         if (existing != null && (book.getLibraryCardId() == null || book.getLibraryCardId().isEmpty())) {
             book.setLibraryCardId(existing.getLibraryCardId());
         }
-        if (existing == null) {
-            dbHelper.saveBooks(java.util.Collections.singletonList(book), "reading");
-        } else {
-            dbHelper.updateBookShelf(book.getUuid(), "reading");
-        }
 
-        // Немедленно переключаем активную вкладку и список книг на раздел «Читаю»,
-        // чтобы книга отображалась в «Читаю» при любом способе открытия (из списка или из карточки «О книге»)
-        currentShelf = "reading";
-        updateTabStyles();
-        updateTabBadges();
-        currentBooks = dbHelper.getBooksByShelf(currentShelf);
-        adapter.notifyDataSetChanged();
-        updateEmptyState();
-        updateShelfFooter();
+        if (needsPromotionToReading) {
+            book.setShelfType("reading");
+            if (existing == null) {
+                dbHelper.saveBooks(java.util.Collections.singletonList(book), "reading");
+            } else {
+                dbHelper.updateBookShelf(book.getUuid(), "reading");
+            }
+
+            currentShelf = "reading";
+            updateTabStyles();
+            updateTabBadges();
+            currentBooks = dbHelper.getBooksByShelf(currentShelf);
+            adapter.notifyDataSetChanged();
+            updateEmptyState();
+            updateShelfFooter();
+
+            apiClient.updateBookShelfState(book.getUuid(), book.getLibraryCardId(), "reading", new YandexBooksApiClient.ApiCallback<Boolean>() {
+                @Override
+                public void onSuccess(Boolean result) {}
+
+                @Override
+                public void onError(String errorMessage) {}
+            });
+        } else {
+            book.setShelfType(existingShelf);
+        }
 
         // Автоматическая полусинхронизация: если есть облачный прогресс, гарантируем создание закладки
         if (book.getPercent() > 0.0 && book.getPercent() < 99.0) {
             dbHelper.ensureCloudSyncBookmark(book.getUuid(), book.getCurrentChapterIndex(), 0, book.getPercent());
         }
 
-        apiClient.updateBookShelfState(book.getUuid(), book.getLibraryCardId(), "reading", new YandexBooksApiClient.ApiCallback<Boolean>() {
-            @Override
-            public void onSuccess(Boolean result) {
-                // Полка на сервере успешно синхронизирована в фоне
-            }
-
-            @Override
-            public void onError(String errorMessage) {
-                // Локальное состояние уже сохранено в SQLite, сбой сети не блокирует чтение
-            }
-        });
         if (onReady != null) {
             onReady.run();
         }
