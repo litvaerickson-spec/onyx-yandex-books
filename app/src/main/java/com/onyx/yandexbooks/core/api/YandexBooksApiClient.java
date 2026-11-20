@@ -142,6 +142,7 @@ public class YandexBooksApiClient {
         if (gqlBody == null) return null;
         String jsonStr = gqlBody.toString();
         String[] endpoints = new String[]{PRIMARY_GRAPHQL_URL, GRAPHQL_URL};
+        String fallbackBody = null;
         for (int i = 0; i < endpoints.length; i++) {
             Response resp = null;
             try {
@@ -154,7 +155,26 @@ public class YandexBooksApiClient {
                     if (body != null) {
                         String trimmed = body.trim();
                         if (trimmed.startsWith("{")) {
-                            return trimmed;
+                            JSONObject rj = new JSONObject(trimmed);
+                            JSONArray errs = rj.optJSONArray("errors");
+                            boolean hasErrors = (errs != null && errs.length() > 0);
+                            JSONObject data = rj.optJSONObject("data");
+                            if (!hasErrors && data != null) {
+                                // Проверяем, не вернул ли шлюз пустую заглушку data: {textBook: null} / {progressUpdated: null}
+                                boolean allNull = data.length() == 0;
+                                if (!allNull && data.length() == 1) {
+                                    String onlyKey = String.valueOf(data.keys().next());
+                                    if (data.isNull(onlyKey)) {
+                                        allNull = true;
+                                    }
+                                }
+                                if (!allNull) {
+                                    return trimmed;
+                                }
+                            }
+                            if (fallbackBody == null) {
+                                fallbackBody = trimmed;
+                            }
                         }
                     }
                 }
@@ -165,7 +185,7 @@ public class YandexBooksApiClient {
                 }
             }
         }
-        return null;
+        return fallbackBody;
     }
 
     /**
@@ -2040,7 +2060,17 @@ public class YandexBooksApiClient {
                         startCfi = generateCfi(progress.getChapterIndex(), progress.getParagraphIndex());
                         progress.setCfi(startCfi);
                     }
-                    String endCfi = generateCfiEnd(progress.getChapterIndex(), progress.getParagraphIndex());
+                    String endCfi;
+                    if (startCfi.startsWith("epubcfi(")) {
+                        CfiPosition parsedStart = parseCfiPosition(startCfi);
+                        int cIdx = (parsedStart != null && parsedStart.chapterIndex >= 0) ? parsedStart.chapterIndex : progress.getChapterIndex();
+                        String itemId = (parsedStart != null) ? parsedStart.opfItemId : "";
+                        int pIdx = (parsedStart != null) ? parsedStart.paragraphIndex : progress.getParagraphIndex();
+                        int chOff = (parsedStart != null) ? parsedStart.charOffset : 0;
+                        endCfi = buildCanonicalCfiEnd(cIdx, itemId, pIdx, chOff);
+                    } else {
+                        endCfi = generateCfiEnd(progress.getChapterIndex(), progress.getParagraphIndex());
+                    }
 
                     try {
                         JSONObject gqlBody = new JSONObject();
@@ -2073,10 +2103,13 @@ public class YandexBooksApiClient {
                         String respStr = executeGraphQLWithFallbackSync(gqlBody);
                         if (respStr != null) {
                             JSONObject rj = new JSONObject(respStr);
-                            if (rj.has("data") && !rj.isNull("data")) {
+                            JSONArray errs = rj.optJSONArray("errors");
+                            boolean hasErr = (errs != null && errs.length() > 0);
+                            JSONObject dataObj = rj.optJSONObject("data");
+                            if (!hasErr && dataObj != null && !dataObj.isNull("progressUpdated")) {
                                 anySuccess = true;
-                            } else if (rj.has("errors")) {
-                                Log.w(TAG, "GraphQL ProgressUpdated returned errors: " + rj.optJSONArray("errors"));
+                            } else if (hasErr) {
+                                Log.w(TAG, "GraphQL ProgressUpdated returned errors: " + errs);
                             }
                         }
                     } catch (Exception ignored) {}

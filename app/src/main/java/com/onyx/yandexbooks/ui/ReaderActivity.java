@@ -3776,6 +3776,7 @@ public class ReaderActivity extends Activity {
 
         double intentPercent = getIntent().getDoubleExtra("book_percent", 0.0);
         int intentChapter = getIntent().getIntExtra("book_chapter", -1);
+        int intentParagraph = getIntent().getIntExtra("book_paragraph", 0);
 
         if (p != null) {
             percent = p.getPercent();
@@ -3797,7 +3798,9 @@ public class ReaderActivity extends Activity {
             Book b = dbHelper.getBookByUuid(bookUuid);
             if (b != null) {
                 percent = b.getPercent();
-                targetChapter = spineIndexToChapterIndex(b.getCurrentChapterIndex());
+                targetChapter = (b.getCurrentChapterIndex() > 0 || percent <= 1.0)
+                        ? spineIndexToChapterIndex(b.getCurrentChapterIndex()) : -1;
+                targetParagraph = Math.max(0, b.getCurrentParagraphIndex());
                 targetPage = 0;
                 if (b.getCfi() != null && !b.getCfi().isEmpty()) {
                     YandexBooksApiClient.CfiPosition cfiPos = YandexBooksApiClient.parseCfiPosition(b.getCfi());
@@ -3815,24 +3818,26 @@ public class ReaderActivity extends Activity {
 
         if ((p == null || p.isSyncedWithServer()) && intentPercent > percent) {
             percent = intentPercent;
-            if (intentChapter >= 0) {
+            if (intentChapter > 0 || (intentChapter == 0 && percent <= 1.0)) {
                 targetChapter = spineIndexToChapterIndex(intentChapter);
+                targetParagraph = Math.max(0, intentParagraph);
             } else {
                 // Серверный процент выше локального, но номер главы не передан:
                 // сбрасываем устаревший локальный targetChapter/targetParagraph, чтобы открыть книгу строго по percent
                 targetChapter = -1;
+                targetParagraph = 0;
             }
             targetPage = 0;
-            targetParagraph = 0;
         } else if (percent <= 0.0 && intentPercent > 0.0) {
             percent = intentPercent;
-            if (intentChapter >= 0) {
+            if (intentChapter > 0 || (intentChapter == 0 && percent <= 1.0)) {
                 targetChapter = spineIndexToChapterIndex(intentChapter);
+                targetParagraph = Math.max(0, intentParagraph);
             } else {
                 targetChapter = -1;
+                targetParagraph = 0;
             }
             targetPage = 0;
-            targetParagraph = 0;
         }
 
         // Защита от ложного 100% (когда глава 0 или книга только открыта)
@@ -3884,8 +3889,12 @@ public class ReaderActivity extends Activity {
                         currentPageIndex = targetPage;
                         loadChapter(currentChapterIndex, currentPageIndex);
                     } else {
+                        long tcAcc = 0L;
+                        for (int ci = 0; ci < targetChapter; ci++) {
+                            tcAcc += chapterLengths[ci];
+                        }
                         long tcLen = chapterLengths[targetChapter];
-                        long tcOffset = targetGlobalOffset - acc;
+                        long tcOffset = Math.max(0L, targetGlobalOffset - tcAcc);
                         double tcFrac = (tcLen > 0) ? Math.max(0.0, Math.min(1.0, (double) tcOffset / (double) tcLen)) : 0.0;
                         loadChapterWithFraction(targetChapter, tcFrac);
                     }
@@ -4424,7 +4433,8 @@ public class ReaderActivity extends Activity {
             int opfIdx = curCh.getOriginalOpfSpineIndex();
             String opfId = curCh.getOpfItemId();
             if (opfIdx >= 0 && opfId != null && !opfId.isEmpty()) {
-                q.cfi = YandexBooksApiClient.buildCanonicalCfi(opfIdx, opfId, parIdx, q.startOffset);
+                int localOffset = calculateLocalOffsetInParagraph(q.startOffset);
+                q.cfi = YandexBooksApiClient.buildCanonicalCfi(opfIdx, opfId, parIdx, localOffset);
             } else {
                 q.cfi = YandexBooksApiClient.generateCfi(chapterIndexToSpineIndex(currentChapterIndex), parIdx);
             }
@@ -5289,7 +5299,7 @@ public class ReaderActivity extends Activity {
                 String opfItemId = (chapters != null && currentChapterIndex >= 0 && currentChapterIndex < chapters.size())
                         ? chapters.get(currentChapterIndex).getOpfItemId() : "";
                 int pageCharOffset = (currentPages != null && currentPageIndex >= 0 && currentPageIndex < currentPages.size())
-                        ? Math.max(0, currentPages.get(currentPageIndex).startCharOffset) : 0;
+                        ? calculateLocalOffsetInParagraph(Math.max(0, currentPages.get(currentPageIndex).startCharOffset)) : 0;
                 String cfi = (opfItemId != null && !opfItemId.isEmpty())
                         ? YandexBooksApiClient.buildCanonicalCfi(spineIndex, opfItemId, parIndex, pageCharOffset)
                         : YandexBooksApiClient.generateCfi(spineIndex, parIndex);
@@ -5386,6 +5396,29 @@ public class ReaderActivity extends Activity {
         }
     }
 
+    private int calculateLocalOffsetInParagraph(int chapterCharOffset) {
+        try {
+            if (chapterCharOffset <= 0) return 0;
+            String rawText = chapterTextMemoryCache.get(currentChapterIndex);
+            if (rawText == null || rawText.isEmpty()) return 0;
+            int safeOff = Math.min(chapterCharOffset, rawText.length());
+            int paraStart = rawText.lastIndexOf('\n', Math.max(0, safeOff - 1)) + 1;
+            if (safeOff <= paraStart) return 0;
+            String slice = rawText.substring(paraStart, safeOff);
+            if (!slice.isEmpty() && slice.charAt(0) == EpubFormatting.BLK_START) {
+                int blkEnd = slice.indexOf(EpubFormatting.BLK_END);
+                if (blkEnd >= 0) {
+                    slice = slice.substring(blkEnd + 1);
+                } else {
+                    return 0;
+                }
+            }
+            return Math.max(0, EpubFormatting.stripFormattingTokens(slice).length());
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
     private void saveProgress() {
         try {
             double percent = calculateCurrentGlobalPercent();
@@ -5395,7 +5428,7 @@ public class ReaderActivity extends Activity {
             String opfItemId = (chapters != null && currentChapterIndex >= 0 && currentChapterIndex < chapters.size())
                     ? chapters.get(currentChapterIndex).getOpfItemId() : "";
             int pageCharOffset = (currentPages != null && currentPageIndex >= 0 && currentPageIndex < currentPages.size())
-                    ? Math.max(0, currentPages.get(currentPageIndex).startCharOffset) : 0;
+                    ? calculateLocalOffsetInParagraph(Math.max(0, currentPages.get(currentPageIndex).startCharOffset)) : 0;
             String cfi = (opfItemId != null && !opfItemId.isEmpty())
                     ? YandexBooksApiClient.buildCanonicalCfi(spineIndex, opfItemId, parIndex, pageCharOffset)
                     : YandexBooksApiClient.generateCfi(spineIndex, parIndex);

@@ -627,7 +627,7 @@ public class TextPaginator {
             float fontScale = resolveFontScale(role);
             int baseBlockStyle = STYLE_NORMAL;
             if (header.blockBold || isHeading) baseBlockStyle |= STYLE_BOLD;
-            if (header.blockItalic || isEpigraph) baseBlockStyle |= STYLE_ITALIC;
+            if (header.blockItalic) baseBlockStyle |= STYLE_ITALIC;
 
             float leftInsetPx = 0f;
             if (isQuote) {

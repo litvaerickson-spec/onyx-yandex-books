@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.5] - 2026-11-20
+
+**СТАБИЛЬНЫЙ РЕЛИЗ:** Доработка сквозной двусторонней синхронизации по итогам сверки архитектуры с `v1.6.0`, закрытие отложенного пункта аудита CSS для эпиграфов и оптимизация E-Ink форматирования окна уведомлений (проверено автотестами ядра, на проблемных EPUB и на 5 эмуляторах Android `4.2.2–9.0`; на физических устройствах с Android 10–14 рекомендуется контрольная проверка).
+
+### Fixed
+- **Сквозная синхронизация GraphQL CFI после перехода на платформу v1.7+/v2.0 (`YandexBooksApiClient`, `ReaderActivity`, `DatabaseHelper`)**:
+  - В [`executeGraphQLWithFallbackSync`](app/src/main/java/com/onyx/yandexbooks/core/api/YandexBooksApiClient.java) при получении JSON `errors` или пустого `data` (`textBook: null` / `progressUpdated: null`) с `api-gateway.bookmate.yandex.net` выполняется автоматический fallback на резервный веб-шлюз `books.yandex.ru`, работавший в `v1.6.0`.
+  - В [`sendReadingProgress`](app/src/main/java/com/onyx/yandexbooks/core/api/YandexBooksApiClient.java) для `epubcfi(...)` теперь формируется согласованная каноническая граница `endCfi` через `buildCanonicalCfiEnd(...)` вместо старого `generateCfiEnd(...)`, а успех GraphQL-мутации засчитывается только при отсутствии `errors` и ненулевом `progressUpdated`.
+  - В [`ReaderActivity`](app/src/main/java/com/onyx/yandexbooks/ui/ReaderActivity.java) добавлен расчёт смещения символов строго относительно начала текущего абзаца (`calculateLocalOffsetInParagraph`) для `saveProgress`, `markBookCompletedAtEnd` и `saveSelectedQuote` вместо передачи смещения от начала всей главы внутрь `/1:<offset>`.
+  - В [`resolveInitialPositionAndOpen`](app/src/main/java/com/onyx/yandexbooks/ui/ReaderActivity.java) добавлено чтение `book_paragraph` из Intent, исправлено смещение расчёта фракции смежной главы (`tcAcc`), а `intentChapter == 0` при `percent > 1.0` не блокирует процентное позиционирование; в [`DatabaseHelper.syncInitialCloudProgress`](app/src/main/java/com/onyx/yandexbooks/core/storage/DatabaseHelper.java) сохраняется поле `cfi`.
+- **Явный `font-style: normal` внутри блоков-эпиграфов (`EpubFormatting`, `TextPaginator`, `CacheManager`)**: курсив эпиграфов/посвящений перенесён из безусловного `|| isEpigraph` в `TextPaginator` под управление `BlockStyle.italic` и `css.italic`, что позволяет CSS-правилу `font-style: normal` отменять курсив внутри блока `'E'`; флаг переиндексации кэша обновлён до `format_v205.flag`.
+- **Форматирование уведомлений на E-Ink (`RELEASE_NOTES.md`, `version.json`)**: убраны символы меню-иконки (`☰`, превращавшейся в пустые скобки `()` в `stripEmojiChars`) и треугольников/разделителей, выровнены вложенные списки.
+- **Совместимость отката:** авторизация и настройки сохраняются; при откате на версию `1.6.0` Android удаляет книги во внутреннем кэше.
+
 ## [v2.0.4] - 2026-11-20
 
 **СТАБИЛЬНЫЙ РЕЛИЗ:** Полное устранение причин смещения оглавления и ссылок, лишних страниц под декоративные виньетки заголовков, задержек пересчёта страниц и сбоев двусторонней синхронизации по отзывам к `2.0.3-beta` (проверено автотестами ядра, на проблемных EPUB из отзывов и на 5 эмуляторах Android `4.2.2–9.0`; на физических устройствах с Android 10–14 рекомендуется контрольная проверка).

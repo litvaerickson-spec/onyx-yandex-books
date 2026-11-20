@@ -992,15 +992,17 @@ public class EpubFormatting {
                 f.blockStyle = inherited;
                 f.setAttrs(idAttr, classAttr);
 
-                // Вычисляем инлайн-дельты от блока/CSS
+                // Вычисляем инлайн-дельты от блока/CSS (с поддержкой сброса normal внутри унаследованного italic/bold)
                 boolean targetBold = Boolean.TRUE.equals(css.bold) || isHeadingTag(tagName);
                 boolean targetItalic = Boolean.TRUE.equals(css.italic) || "blockquote".equals(tagName);
                 boolean targetUnderline = Boolean.TRUE.equals(css.underline);
                 boolean targetStrike = Boolean.TRUE.equals(css.strike);
                 boolean targetMono = Boolean.TRUE.equals(css.mono) || "pre".equals(tagName);
 
-                if (targetBold && !bold) { f.boldDelta = true; bold = true; }
-                if (targetItalic && !italic) { f.italicDelta = true; italic = true; }
+                if (Boolean.FALSE.equals(css.bold) && bold && !isHeadingTag(tagName)) { f.boldDelta = true; bold = false; }
+                else if (targetBold && !bold) { f.boldDelta = true; bold = true; }
+                if (Boolean.FALSE.equals(css.italic) && italic && !"blockquote".equals(tagName)) { f.italicDelta = true; italic = false; }
+                else if (targetItalic && !italic) { f.italicDelta = true; italic = true; }
                 if (targetUnderline && !underline) { f.underlineDelta = true; underline = true; }
                 if (targetStrike && !strike) { f.strikeDelta = true; strike = true; }
                 if (targetMono && !mono) { f.monoDelta = true; mono = true; }
@@ -1057,8 +1059,10 @@ public class EpubFormatting {
             boolean addMono = ("code".equals(tagName) || "tt".equals(tagName) || "kbd".equals(tagName)
                     || "samp".equals(tagName) || Boolean.TRUE.equals(css.mono));
 
-            if (addBold && !bold) { f.boldDelta = true; bold = true; }
-            if (addItalic && !italic) { f.italicDelta = true; italic = true; }
+            if (Boolean.FALSE.equals(css.bold) && bold && !"b".equals(tagName) && !"strong".equals(tagName)) { f.boldDelta = true; bold = false; }
+            else if (addBold && !bold) { f.boldDelta = true; bold = true; }
+            if (Boolean.FALSE.equals(css.italic) && italic && !"i".equals(tagName) && !"em".equals(tagName) && !"cite".equals(tagName)) { f.italicDelta = true; italic = false; }
+            else if (addItalic && !italic) { f.italicDelta = true; italic = true; }
             if (addUnderline && !underline) { f.underlineDelta = true; underline = true; }
             if (addStrike && !strike) { f.strikeDelta = true; strike = true; }
             if (addMono && !mono) { f.monoDelta = true; mono = true; }
@@ -1247,6 +1251,7 @@ public class EpubFormatting {
             style.role = 'N';
         } else if (lowerCls.contains("epigraph") || lowerCls.contains("dedication")) {
             style.role = 'E';
+            style.italic = true;
             style.spaceTop = true;
             style.spaceBottom = true;
         } else if (!isContainer && (lowerCls.contains("footnote") || lowerCls.contains("endnote"))) {
@@ -1269,6 +1274,9 @@ public class EpubFormatting {
 
         if (css != null) {
             if (css.align != '\0') style.align = css.align;
+            if (css.italic != null && (!isContainer || Boolean.FALSE.equals(css.italic))) {
+                style.italic = css.italic;
+            }
             // Не переводим обычный абзац <p> с text-indent:0 в роль 'N' (сноска), чтобы сохранялись пользовательские отступ и выравнивание по ширине
             if (Boolean.TRUE.equals(css.quote) && !isContainer) style.role = 'Q';
             if (Boolean.TRUE.equals(css.spaceTop) && !isContainer) style.spaceTop = true;

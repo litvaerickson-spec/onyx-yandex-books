@@ -559,6 +559,9 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 pCv.put("chapter_index", book.getCurrentChapterIndex());
                 pCv.put("paragraph_index", book.getCurrentParagraphIndex());
                 pCv.put("page_index", 0);
+                if (book.getCfi() != null && !book.getCfi().isEmpty()) {
+                    pCv.put("cfi", book.getCfi());
+                }
                 pCv.put("timestamp", book.getLastReadTimestamp() > 0 ? book.getLastReadTimestamp() : System.currentTimeMillis());
                 pCv.put("is_synced", 1);
                 db.insertWithOnConflict("progress", null, pCv, SQLiteDatabase.CONFLICT_REPLACE);
