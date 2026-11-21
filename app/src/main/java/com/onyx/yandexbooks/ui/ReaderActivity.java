@@ -83,6 +83,8 @@ public class ReaderActivity extends Activity {
     private View readerTopBar;
     private View readerTopDivider;
     private View readerBottomBar;
+    private View readerChapterRow;
+    private View readerSeekbarRow;
     private View readerFormatPanel;
     private View readerFormatScroll;
 
@@ -263,6 +265,8 @@ public class ReaderActivity extends Activity {
         readerTopBar = findViewById(R.id.reader_top_bar);
         readerTopDivider = findViewById(R.id.reader_top_divider);
         readerBottomBar = findViewById(R.id.reader_bottom_bar);
+        readerChapterRow = findViewById(R.id.reader_chapter_row);
+        readerSeekbarRow = findViewById(R.id.reader_seekbar_row);
         readerFormatPanel = findViewById(R.id.reader_format_panel);
         readerFormatScroll = findViewById(R.id.reader_format_scroll);
 
@@ -558,6 +562,15 @@ public class ReaderActivity extends Activity {
             btnTabFormat.setBackgroundResource(formatOpen ? R.drawable.btn_eink_primary : R.drawable.btn_eink);
             btnTabFormat.setTextColor(Color.BLACK);
             btnTabFormat.setTypeface(null, Typeface.BOLD);
+        }
+        // Когда открыта панель «Формат», временно скрываем строку главы и ползунок страниц,
+        // чтобы освободить максимум живого текста книги для визуального подбора размера и отступов.
+        int navVisibility = formatOpen ? View.GONE : View.VISIBLE;
+        if (readerChapterRow != null) {
+            readerChapterRow.setVisibility(navVisibility);
+        }
+        if (readerSeekbarRow != null) {
+            readerSeekbarRow.setVisibility(navVisibility);
         }
     }
 
@@ -1203,17 +1216,18 @@ public class ReaderActivity extends Activity {
         int topBarH = (readerTopBar != null && readerTopBar.getHeight() > 0)
                 ? readerTopBar.getHeight()
                 : Math.round(52 * density);
-        // Гарантируем видимый зазор текста книги между верхней и нижней панелями (>= 22% экрана и >= 88dp),
-        // чтобы панель «Формат» никогда не наезжала на верхнюю панель и закрывалась касанием текста/кнопкой X.
-        int minVisibleCanvasPx = Math.max(Math.round(88 * density), Math.round(rootH * 0.22f));
-        int bottomNonScrollChromePx = Math.round(218 * density);
-        int availForScrollPx = rootH - topBarH - minVisibleCanvasPx - bottomNonScrollChromePx;
+        boolean navHidden = (readerChapterRow != null && readerChapterRow.getVisibility() == View.GONE);
+        // Гарантируем большую видимую область текста книги над панелью «Формат» (>= 28% экрана и >= 110dp),
+        // чтобы при смене размера шрифта, гарнитуры и отступов результат был сразу виден на странице.
+        int minVisibleCanvasPx = Math.max(Math.round(110 * density), Math.round(rootH * 0.28f));
+        int bottomNonScrollChromePx = Math.round((navHidden ? 136 : 218) * density);
+        int availForScrollPx = Math.max(Math.round(48 * density), rootH - topBarH - minVisibleCanvasPx - bottomNonScrollChromePx);
         int maxCapPx = Math.min(availForScrollPx, Math.round(rootH * 0.44f));
         int naturalContentPx = Math.round(310 * density);
         ViewGroup.LayoutParams lp = readerFormatScroll.getLayoutParams();
         if (lp != null) {
             int targetHeight = (maxCapPx < naturalContentPx)
-                    ? Math.max(Math.round(84 * density), maxCapPx)
+                    ? maxCapPx
                     : ViewGroup.LayoutParams.WRAP_CONTENT;
             if (lp.height != targetHeight) {
                 lp.height = targetHeight;

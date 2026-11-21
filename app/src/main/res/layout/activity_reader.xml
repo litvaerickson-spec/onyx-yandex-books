@@ -35,6 +35,7 @@
 
         <!-- Строка 1: Текущая глава слева + кнопки перехода к предыдущей/следующей главе -->
         <LinearLayout
+            android:id="@+id/reader_chapter_row"
             android:layout_width="match_parent"
             android:layout_height="40dp"
             android:orientation="horizontal"
@@ -82,6 +83,7 @@
 
         <!-- Строка 2: Слайдер прогресса по страницам (точно как в NeoReader!) -->
         <LinearLayout
+            android:id="@+id/reader_seekbar_row"
             android:layout_width="match_parent"
             android:layout_height="40dp"
             android:orientation="horizontal"

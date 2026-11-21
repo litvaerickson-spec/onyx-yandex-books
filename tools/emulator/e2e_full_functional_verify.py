@@ -1222,7 +1222,8 @@ def step_5_reader_links_footnotes_toc_bookmarks_quotes(args):
     print("[quotes] Forward + Reverse selection, export & delete CRUD verified: OK")
     tap_node(find_node(dump_ui(), text_equals="Закрыть", clickable_only=True), "Close Quotes dialog")
 
-    # Test Format rows: verify non-overlapping layout (Bug 1), indent, edge brightness, audio sync, close button (✕)
+    # Test Format rows: verify non-overlapping layout (Bug 1), collapsed chapter/seekbar rows for maximum live text preview,
+    # live font size increase, indent, edge brightness, audio sync, and close button (✕)
     tap_node(find_node(dump_ui(), res_id_contains="btn_tab_format"), "Tab Формат")
     root_fmt, fmt_row = wait_for_node(res_id_contains="row_toggle_indent", timeout=6)
     back_node_fmt = find_node(root_fmt, res_id_contains="btn_reader_back")
@@ -1236,11 +1237,15 @@ def step_5_reader_links_footnotes_toc_bookmarks_quotes(args):
     if r_top_btn and r_close_fmt:
         visible_canvas_gap = r_close_fmt[1] - r_top_btn[3]
         print(f"[format_layout] top_bar_bottom={r_top_btn[3]}px, format_subtabs_top={r_close_fmt[1]}px, visible_canvas_gap={visible_canvas_gap}px")
-        if visible_canvas_gap < 40:
+        if visible_canvas_gap < int(SCREEN_H * 0.24):
             raise AssertionError(
-                f"Format panel overlapped or left no visible canvas! gap={visible_canvas_gap}px "
-                f"(top_bottom={r_top_btn[3]}, format_top={r_close_fmt[1]})"
+                f"Format panel left too little visible book canvas! gap={visible_canvas_gap}px "
+                f"(screen_h={SCREEN_H}, top_bottom={r_top_btn[3]}, format_top={r_close_fmt[1]})"
             )
+    btn_font_inc = find_node(root_fmt, res_id_contains="btn_font_increase") or find_node(root_fmt, text_equals="+", clickable_only=True)
+    if btn_font_inc:
+        tap_node(btn_font_inc, "Live font size increase (+) inside Format")
+        time.sleep(0.4)
     tap_node(fmt_row, "Toggle Indent")
     tap_node(wait_for_node(res_id_contains="row_toggle_edge_brightness", timeout=6)[1], "Toggle Edge Brightness OFF")
     time.sleep(0.5)
