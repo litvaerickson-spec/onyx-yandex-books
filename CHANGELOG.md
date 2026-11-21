@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.0.7] - 2026-11-21
+
+**СТАБИЛЬНЫЙ РЕЛИЗ (исправления по реальным устройствам):** Устранены 4 проблемы, выявленные на физических E-Ink ридерах в `v2.0.6`: перекрытие экрана панелью «Формат», самопроизвольный возврат сброшенных книг на 100% в «Прочитано», зависание и долгая подготовка при загрузке/отмене книги, а также потеря позиции после короткого чтения и повторного открытия книги.
+
+### Fixed
+- **Панель «Формат» не перекрывает весь экран и всегда закрывается без аппаратной кнопки «Назад» (`activity_reader.xml`, `ReaderActivity`)**:
+  - В [`activity_reader.xml`](app/src/main/res/layout/activity_reader.xml) верхняя панель (`reader_top_bar` + `reader_top_divider`) перенесена выше `reader_bottom_bar` по Z-порядку, чтобы нижнее меню «Формат» физически не могло наехать на шапку с кнопками `<`, «Сброс» и `X`.
+  - В строку подвкладок «Формат» (`[ Вид ] [ Формат ] [ Между строк ]`) добавлена отдельная кнопка сворачивания `btn_close_format_panel` (`✕`, `Свернуть формат`).
+  - В [`ReaderActivity.adjustFormatPanelHeight`](app/src/main/java/com/onyx/yandexbooks/ui/ReaderActivity.java) расчёт высоты скролла строится от реальных замеренных габаритов экрана и верхней панели с обязательным сохранением не менее 22% (минимум 88 dp) видимого текста книги над панелью и перерасчётом после раскладки `readerFormatScroll.post(...)`.
+- **Устранение самопроизвольного возврата книг на 100% в «Прочитано» (`DatabaseHelper`, `MainActivity`, `YandexBooksApiClient`, `ReaderActivity`)**:
+  - В [`DatabaseHelper`](app/src/main/java/com/onyx/yandexbooks/core/storage/DatabaseHelper.java) добавлена постоянная таблица `book_reset_overrides`, которая фиксирует ручной сброс прогресса (`resetReadingProgress`) и перенос книги из «Прочитано» в «В планах» или «Читаю» (`updateBookShelf`), и снимается только при реальном прочтении до конца на устройстве или ручном выборе «Прочитано».
+  - В `DatabaseHelper.saveOrUpdateBookInternal` устранено безусловное принудительное переключение в `"done"` при облачном ответе, блокируется перезапись локального чтения/планов устаревшим облачным `100%` / `"done"` (`cloudDoneBlockedByReset`, `cloudStaleFullOverLocal`).
+  - В [`MainActivity.resetBookProgressAndMoveToPlans`](app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java) при сбросе прогресса дополнительно отправляется обнуление позиции (`percent = 0.0`, начало книги) в облако Яндекса и фиксируется защита недавнего локального сохранения (`SyncManager.markBookSavedRecently`).
+  - В [`YandexBooksApiClient.parseBookFromCard`](app/src/main/java/com/onyx/yandexbooks/core/api/YandexBooksApiClient.java) карточки с явным статусом `want_to_read` / `reading` больше не переводятся автоматически в `"done"` из-за остаточного поля `percent >= 99.5`.
+- **Быстрая и отменяемая загрузка и подготовка книг (`YandexBooksApiClient`, `CacheManager`, `MainActivity`)**:
+  - В [`YandexBooksApiClient`](app/src/main/java/com/onyx/yandexbooks/core/api/YandexBooksApiClient.java) добавлены отдельный HTTP-клиент загрузок с жёсткими таймаутами (`connect 15s / read 25s / write 20s`), тегирование всех запросов книги (`dl:<uuid>`) и метод `cancelBookDownloads(bookUuid)`; при сетевом таймауте пропущен лишний каскадный вызов `addBookToLibrary`, а отменённые запросы завершаются немедленно.
+  - В [`MainActivity`](app/src/main/java/com/onyx/yandexbooks/ui/MainActivity.java) диалог загрузки `showEinkLoadingDialog` принимает колбэк отмены, кнопка «Отмена» и таймаут реально прерывают загрузку OkHttp и игнорируют устаревшие колбэки.
+  - В [`CacheManager`](app/src/main/java/com/onyx/yandexbooks/core/storage/CacheManager.java) добавлены дедупликация параллельных запросов на подготовку одной книги (`inFlightPrep`), выделенный пул потоков `bookPrepExecutor` (без конкуренции с загрузкой обложек) и асинхронный экспорт копии в `/sdcard/Books/YandexBooks/` уже после открытия книги во встроенном режиме.
+- **Точное сохранение и восстановление позиции после короткого чтения (`ReaderActivity`, `MainActivity`)**:
+  - В [`ReaderActivity.resolveInitialPositionAndOpen`](app/src/main/java/com/onyx/yandexbooks/ui/ReaderActivity.java) при наличии локально сохранённой страницы (`targetPage > 0`) приоритетно открывается именно она (без перезаписи индексом DOM-узла из CFI и без потери первой главы `chapter == 0`), а при быстром повторном открытии блокируются устаревшие `intentPercent` и ранний сетевой ответ `getReadingProgress` (через `syncManager.runWhenIdle` и проверку `SyncManager.wasBookSavedRecently`).
+  - В `ReaderActivity.applyCloudProgressIfNewer` локальный прогресс с `pageIndex > 0` при `percent <= 0.5%` больше не считается пустым, а в `MainActivity.launchReader` перед запуском всегда подчитывается свежая запись книги из SQLite.
+
 ## [v2.0.6] - 2026-11-21
 
 **СТАБИЛЬНЫЙ РЕЛИЗ:** Комплексная стабилизация всех модулей (сеть и авторизация, SQLite и кэш, парсинг EPUB/CSS/CFI, пагинация и выделение текста, E-Ink рендер и OTA) + устранение сбоев двусторонней синхронизации и занижения процентов прочитанного из `2.0.4` (проверено 63 автотестами ядра, проблемными EPUB, на 5 эмуляторах Android `4.2.2–9.0` и углублённым E2E-прогоном).
