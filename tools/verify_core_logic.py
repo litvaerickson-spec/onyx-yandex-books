@@ -4896,7 +4896,7 @@ def test_v206_deep_stabilization_audit():
     # 2. Этап 2: SQLite v11, транзакции, CacheManager, SyncManager, API
     db = rd("core/storage/DatabaseHelper.java")
     assert "DATABASE_VERSION = 11" in db
-    for k in ("linked_audio_uuid", "audio_percent", "audio_updated_at", "edge_frontlight_cold", "edge_frontlight_warm", "beginTransaction"):
+    for k in ("linked_audio_uuid", "audio_percent", "audio_updated_at", "edge_frontlight_cold", "edge_frontlight_warm", "beginTransaction", "PRAGMA wal_checkpoint(TRUNCATE)"):
         assert k in db, f"Отсутствует {k} в DatabaseHelper.java"
     cm = rd("core/storage/CacheManager.java")
     assert "length() > 500" in cm and "footnotes.json" in cm
@@ -4909,7 +4909,7 @@ def test_v206_deep_stabilization_audit():
     ep = rd("core/epub/EpubParser.java")
     assert "resolveZipPath" in ep and "rawHtmlStartOffset" in ep
     ef = rd("core/epub/EpubFormatting.java")
-    assert "stripAtRulesWithBraces" in ef and "Character.toChars" in ef
+    assert "stripAtRulesWithBraces" in ef and "Character.toChars" in ef and "filePart.isEmpty() && !anchorPart.isEmpty()" in ef
 
     # 4. Этап 4: FontHelper, TextPaginator, ReaderCanvasView, ReaderActivity
     fh = rd("core/typography/FontHelper.java")
@@ -4937,12 +4937,18 @@ def test_v206_deep_stabilization_audit():
     lfp = rd("core/update/LocalFileProvider.java")
     assert "appendPath(file.getName())" in lfp
     ma = rd("ui/MainActivity.java")
-    for k in ("BookRowViewHolder", "downloadedStatusCache", "activeDialogs", "shouldAllowFocusedEditNavigation", "updateTabAccessoryBars"):
+    for k in ("BookRowViewHolder", "downloadedStatusCache", "activeDialogs", "shouldAllowFocusedEditNavigation", "updateTabAccessoryBars", "allFitOnSinglePage", "avgPitch"):
         assert k in ma, f"Отсутствует {k} в MainActivity.java"
 
     # 6. Поведенческая проверка SemVer 2.0.0 pre-release & CSS brace balancing
-    # Имитация проверки запрещённой подстроки во всех изменённых документах
-    for doc_name in ("CHANGELOG.md", "RELEASE_NOTES.md", "version.json"):
+    # Имитация проверки запрещённой подстроки во всех изменённых документах и E2E-скриптах
+    for doc_name in (
+        "CHANGELOG.md",
+        "RELEASE_NOTES.md",
+        "version.json",
+        "tools/emulator/DeviceRuntimeHarness.java",
+        "tools/emulator/e2e_full_functional_verify.py",
+    ):
         doc_text = open(os.path.join(PROJECT_DIR, doc_name), "r", encoding="utf-8").read().lower()
         assert "читалк" not in doc_text, f"Обнаружена запрещённая подстрока в {doc_name}"
 
