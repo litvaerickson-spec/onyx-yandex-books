@@ -44,4 +44,11 @@ AVD_NAME=onyx_darwin7_api28 bash tools/emulator/run_emulator_e2e.sh
 5. Сидирует настройки (`restorecon -RF` для SELinux на API 23+) и запускает сценарий отката в UI: `MainActivity` -> Меню -> «Архив версий и откат ПО» -> `1.6.1-beta` -> «Сохранить копию и скачать» -> «Показать в Загрузках».
 6. Проверяет запись в `DownloadProvider`, бэкап в `/sdcard/Books/YandexBooks/backup/` и визуально через `uiautomator dump` подтверждает, что в системном окне «Загрузки» (`DocumentsUI` / `DownloadList`) отображается APK (а не «Ничего нет»), сохраняя скриншоты в `docs/emulator_verify/<avd>/`.
 
+## Полная сквозная проверка всех функций и среды ART/Dalvik (`v2.0.6+`)
+
+В дополнение к базовой матрице [`e2e_verify.py`](e2e_verify.py) доступны углублённые сценарии:
+- **[`e2e_full_functional_verify.py`](e2e_full_functional_verify.py)** — проверяет кнопки `AuthActivity` и `AuthWebViewActivity`, все 6 вкладок `MainActivity`, поиск с `DPAD`, пагинацию полки, аппаратные клавиши без `VolumePanel`, сброс прогресса и перенос полок, масштабирование ОС (`100% -> 180% -> книга -> возврат -> 100%`), сноски `[12]`, локальные якоря `#anchor`, внешние ссылки, переходы по главам, иерархическое оглавление, полный CRUD закладок и цитат (прямое/обратное выделение и экспорт `.md`), настройки формата и очистку SQLite WAL при выходе на `Android 4.2.2` (`API 17`, `758x1024`) и `Android 9.0` (`API 28`, `1072x1448`).
+- **[`DeviceRuntimeHarness.java`](DeviceRuntimeHarness.java)** — запускается на реальном ART/Dalvik через `app_process` (`Step 7`), проверяет UTF-8 декодирование и таймауты сокетов `LocalAuthServer`, SemVer 2.0.0 в `AppUpdateManager`, `EpubParser` (DOM CFI `[id]`, OPF), `EpubFormatting` (`@media`, `<li><p>`, `#anchor`, суррогатные сущности), `TeXHyphenator` и CFI-утилиты `YandexBooksApiClient`.
+- **[`e2e_reader_deep_verify.py`](e2e_reader_deep_verify.py)** — углублённый тест вёрстки EPUB, ночного режима (по пиксельной яркости), сетки тап-зон `3×3` и ландшафтной ориентации.
+
 Подробное руководство для ИИ-агента: [`.agents/skills/onyx-emulator-testing/SKILL.md`](../../.agents/skills/onyx-emulator-testing/SKILL.md).
