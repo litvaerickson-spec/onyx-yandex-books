@@ -213,6 +213,8 @@ public class TextPaginator {
         final StringBuilder plain = new StringBuilder();
         float cachedWidth = -1f;
         float cachedScale = -1f;
+        int rawStart = -1;
+        int rawEnd = -1;
 
         void addPiece(String txt, int style, String linkTarget, String linkLabel) {
             if (txt == null || txt.isEmpty()) return;
@@ -242,6 +244,9 @@ public class TextPaginator {
     public static final class StyleMeasurer implements TeXHyphenator.TextWidthMeasurer {
         private final Paint workPaint;
         private final Typeface baseTypeface;
+        private final Typeface explicitBoldTf;
+        private final Typeface explicitItalicTf;
+        private final Typeface explicitBoldItalicTf;
         private final float baseTextSize;
         private final boolean baseFakeBold;
         private final Typeface[] derivedCache = new Typeface[8];
@@ -251,6 +256,10 @@ public class TextPaginator {
         private float cachedSpaceWidth = -1f;
 
         public StyleMeasurer(Paint templatePaint) {
+            this(templatePaint, null, null, null);
+        }
+
+        public StyleMeasurer(Paint templatePaint, Typeface boldTf, Typeface italicTf, Typeface boldItalicTf) {
             this.workPaint = new Paint(templatePaint);
             this.baseTextSize = templatePaint.getTextSize();
             this.baseFakeBold = templatePaint.isFakeBoldText();
@@ -260,6 +269,9 @@ public class TextPaginator {
                 tf = templatePaint.getTypeface();
             } catch (Throwable ignored) {}
             this.baseTypeface = tf;
+            this.explicitBoldTf = boldTf;
+            this.explicitItalicTf = italicTf;
+            this.explicitBoldItalicTf = boldItalicTf;
         }
 
         private Typeface getCachedTypeface(boolean bold, boolean italic, boolean mono) {
@@ -268,22 +280,28 @@ public class TextPaginator {
             if (cached != null) {
                 return cached;
             }
-            Typeface resolved;
+            Typeface resolved = null;
             if (mono) {
                 int tfStyle = (bold && italic) ? Typeface.BOLD_ITALIC : (bold ? Typeface.BOLD : (italic ? Typeface.ITALIC : Typeface.NORMAL));
                 resolved = Typeface.create(Typeface.MONOSPACE, tfStyle);
-            } else if (baseTypeface != null) {
-                int wantStyle = baseTypeface.getStyle();
-                if (bold) wantStyle |= Typeface.BOLD;
-                if (italic) wantStyle |= Typeface.ITALIC;
-                if (wantStyle != baseTypeface.getStyle()) {
-                    resolved = Typeface.create(baseTypeface, wantStyle);
-                } else {
-                    resolved = baseTypeface;
-                }
             } else {
-                int tfStyle = (bold && italic) ? Typeface.BOLD_ITALIC : (bold ? Typeface.BOLD : (italic ? Typeface.ITALIC : Typeface.NORMAL));
-                resolved = Typeface.defaultFromStyle(tfStyle);
+                if (bold && italic && explicitBoldItalicTf != null) resolved = explicitBoldItalicTf;
+                else if (bold && explicitBoldTf != null) resolved = explicitBoldTf;
+                else if (italic && explicitItalicTf != null) resolved = explicitItalicTf;
+
+                if (resolved == null && baseTypeface != null) {
+                    int wantStyle = baseTypeface.getStyle();
+                    if (bold) wantStyle |= Typeface.BOLD;
+                    if (italic) wantStyle |= Typeface.ITALIC;
+                    if (wantStyle != baseTypeface.getStyle()) {
+                        resolved = Typeface.create(baseTypeface, wantStyle);
+                    } else {
+                        resolved = baseTypeface;
+                    }
+                } else if (resolved == null) {
+                    int tfStyle = (bold && italic) ? Typeface.BOLD_ITALIC : (bold ? Typeface.BOLD : (italic ? Typeface.ITALIC : Typeface.NORMAL));
+                    resolved = Typeface.defaultFromStyle(tfStyle);
+                }
             }
             derivedCache[slot] = resolved;
             return resolved;
@@ -402,6 +420,12 @@ public class TextPaginator {
     public List<Page> paginateCancellable(String fullText, int screenWidth, int screenHeight, Paint paint, TypographyConfig config,
                                           AtomicLong taskIdRef, long expectedTaskId) {
         return paginateInternal(fullText, screenWidth, screenHeight, paint, null, config, 0, -1, taskIdRef, expectedTaskId, false);
+    }
+
+    public List<Page> paginateCancellable(String fullText, int screenWidth, int screenHeight, Paint paint,
+                                          StyleMeasurer sharedMeasurer, TypographyConfig config,
+                                          AtomicLong taskIdRef, long expectedTaskId) {
+        return paginateInternal(fullText, screenWidth, screenHeight, paint, sharedMeasurer, config, 0, -1, taskIdRef, expectedTaskId, false);
     }
 
     /**
@@ -663,7 +687,12 @@ public class TextPaginator {
                 }
             }
 
-            List<WordToken> words = tokenizeStyledWords(header.bodyText, baseBlockStyle);
+            int bodyOffsetInParagraph = 0;
+            if (header.bodyText != null && !header.bodyText.isEmpty()) {
+                int idxBody = rawParagraph.indexOf(header.bodyText);
+                if (idxBody >= 0) bodyOffsetInParagraph = idxBody;
+            }
+            List<WordToken> words = tokenizeStyledWords(header.bodyText, baseBlockStyle, globalCharOffset + bodyOffsetInParagraph);
             if (words.isEmpty()) {
                 globalCharOffset += rawParagraph.length() + 1;
                 continue;
@@ -694,9 +723,16 @@ public class TextPaginator {
                             float spaceLeft = effectiveAvailableWidth - currentLineWidth;
                             String[] split = hyphenator.splitWordForWidth(single.text, spaceLeft, measurer);
                             if (split != null) {
+                                int baseStart = token.rawStart >= 0 ? token.rawStart : globalCharOffset;
+                                int origSpan = Math.max(1, (token.rawEnd > baseStart) ? (token.rawEnd - baseStart) : single.text.length());
+                                int consumedChars = Math.min(origSpan, Math.max(1, split[0].endsWith("-") ? split[0].length() - 1 : split[0].length()));
                                 splitFirst = new WordToken();
+                                splitFirst.rawStart = baseStart;
+                                splitFirst.rawEnd = baseStart + consumedChars;
                                 splitFirst.addPiece(split[0], single.style, single.linkTarget, single.linkLabel);
                                 splitRest = new WordToken();
+                                splitRest.rawStart = splitFirst.rawEnd;
+                                splitRest.rawEnd = Math.max(splitRest.rawStart, baseStart + origSpan);
                                 splitRest.addPiece(split[1], single.style, single.linkTarget, single.linkLabel);
                             }
                         }
@@ -725,10 +761,14 @@ public class TextPaginator {
                             WordPiece single = token.pieces.get(0);
                             measurer.prepare(single.style, fontScale);
                             String remText = single.text;
+                            int remRawCursor = token.rawStart >= 0 ? token.rawStart : globalCharOffset;
+                            int tokRawEnd = token.rawEnd > remRawCursor ? token.rawEnd : (remRawCursor + single.text.length());
                             while (!remText.isEmpty()) {
                                 float maxPartW = Math.max(12f, effectiveAvailableWidth - currentLineWidth);
                                 if (measurer.measureWidth(remText) <= maxPartW) {
                                     WordToken tailTok = new WordToken();
+                                    tailTok.rawStart = remRawCursor;
+                                    tailTok.rawEnd = tokRawEnd;
                                     tailTok.addPiece(remText, single.style, single.linkTarget, single.linkLabel);
                                     lineWords.add(tailTok);
                                     currentLineWidth += measurer.measureWidth(remText);
@@ -739,6 +779,8 @@ public class TextPaginator {
                                     cut--;
                                 }
                                 WordToken chunkTok = new WordToken();
+                                chunkTok.rawStart = remRawCursor;
+                                chunkTok.rawEnd = Math.min(tokRawEnd, remRawCursor + cut);
                                 chunkTok.addPiece(remText.substring(0, cut), single.style, single.linkTarget, single.linkLabel);
                                 float topGap = (isFirstLineOfParagraph && !currentLines.isEmpty()) ? extraTopPx : 0f;
                                 if (!currentLines.isEmpty() && usedHeight + topGap + thisLineHeight > availableHeight) {
@@ -758,6 +800,7 @@ public class TextPaginator {
                                 isFirstLineOfParagraph = false;
                                 lineWords.clear();
                                 currentLineWidth = 0f;
+                                remRawCursor = chunkTok.rawEnd;
                                 remText = remText.substring(cut);
                             }
                         } else {
@@ -779,10 +822,17 @@ public class TextPaginator {
                                 measurer.prepare(single.style, fontScale);
                                 String[] split = hyphenator.splitWordForWidth(single.text, spaceLeft, measurer);
                                 if (split != null) {
+                                    int baseStart = token.rawStart >= 0 ? token.rawStart : globalCharOffset;
+                                    int origSpan = Math.max(1, (token.rawEnd > baseStart) ? (token.rawEnd - baseStart) : single.text.length());
+                                    int consumedChars = Math.min(origSpan, Math.max(1, split[0].endsWith("-") ? split[0].length() - 1 : split[0].length()));
                                     WordToken headTok = new WordToken();
+                                    headTok.rawStart = baseStart;
+                                    headTok.rawEnd = baseStart + consumedChars;
                                     headTok.addPiece(split[0], single.style, single.linkTarget, single.linkLabel);
                                     lineWords.add(headTok);
                                     remainderWord = new WordToken();
+                                    remainderWord.rawStart = headTok.rawEnd;
+                                    remainderWord.rawEnd = Math.max(remainderWord.rawStart, baseStart + origSpan);
                                     remainderWord.addPiece(split[1], single.style, single.linkTarget, single.linkLabel);
                                 }
                             }
@@ -974,8 +1024,8 @@ public class TextPaginator {
             float wStart = xCursor;
             float wEnd = wStart + wordWidths[i];
             String wordText = wt.getPlainText();
-            int cStart = Math.min(paraEndOffset, paraCharCursor[0]);
-            int cEnd = Math.min(paraEndOffset, cStart + wordText.length());
+            int cStart = (wt.rawStart >= 0) ? wt.rawStart : Math.min(paraEndOffset, paraCharCursor[0]);
+            int cEnd = (wt.rawEnd > cStart) ? wt.rawEnd : Math.min(paraEndOffset, cStart + wordText.length());
             paraCharCursor[0] = Math.min(paraEndOffset, cEnd + 1);
             wordBoxes.add(new WordBox(wStart, wEnd, cStart, cEnd, wordText));
             xCursor = wEnd;
@@ -998,7 +1048,7 @@ public class TextPaginator {
         runs.add(new LineRun(text, style, linkTarget, linkLabel));
     }
 
-    private List<WordToken> tokenizeStyledWords(String bodyText, int baseBlockStyle) {
+    private List<WordToken> tokenizeStyledWords(String bodyText, int baseBlockStyle, int bodyBaseRawOffset) {
         List<WordToken> tokens = new ArrayList<>();
         if (bodyText == null || bodyText.isEmpty()) return tokens;
 
@@ -1061,6 +1111,10 @@ public class TextPaginator {
                     currentToken = new WordToken();
                 }
             } else {
+                if (currentToken.rawStart < 0) {
+                    currentToken.rawStart = bodyBaseRawOffset + i;
+                }
+                currentToken.rawEnd = bodyBaseRawOffset + i + 1;
                 segBuf.append(c);
             }
         }
@@ -1094,6 +1148,8 @@ public class TextPaginator {
             Matcher m = BARE_URL_PATTERN.matcher(plain);
             if (m.find()) {
                 WordToken enriched = new WordToken();
+                enriched.rawStart = rawToken.rawStart;
+                enriched.rawEnd = rawToken.rawEnd;
                 int pos = 0;
                 int style = !rawToken.pieces.isEmpty() ? rawToken.pieces.get(0).style : STYLE_NORMAL;
                 m.reset();

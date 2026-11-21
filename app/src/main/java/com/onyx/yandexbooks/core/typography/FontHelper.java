@@ -56,7 +56,11 @@ public class FontHelper {
     }
 
     private static final List<FontItem> AVAILABLE_FONTS = new ArrayList<>();
-    private static final Map<String, Typeface> TYPEFACE_CACHE = new HashMap<>();
+    private static final Map<String, Typeface> TYPEFACE_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static String customPathCacheKey(String path) {
+        return "custom_path:" + (path != null ? path.trim() : "");
+    }
 
     static {
         AVAILABLE_FONTS.add(new FontItem("literata", "Literata", "Специальный книжный шрифт от Google для E-Ink", "В чащах юга жил-был цитрус? Да! 12345", "fonts/literata.ttf"));
@@ -339,7 +343,7 @@ public class FontHelper {
                 Typeface test = Typeface.createFromFile(dst);
                 if (test != null) {
                     String id = CUSTOM_PREFIX + dst.getAbsolutePath();
-                    TYPEFACE_CACHE.put(id.toLowerCase(Locale.US).trim(), test);
+                    TYPEFACE_CACHE.put(customPathCacheKey(dst.getAbsolutePath()), test);
                     return id;
                 }
             }
@@ -398,9 +402,10 @@ public class FontHelper {
         String trimmed = fontId.trim();
         if (trimmed.startsWith(CUSTOM_PREFIX)) {
             String path = trimmed.substring(CUSTOM_PREFIX.length());
-            String cacheKey = "custom_path:" + path;
-            if (TYPEFACE_CACHE.containsKey(cacheKey)) {
-                return TYPEFACE_CACHE.get(cacheKey);
+            String cacheKey = customPathCacheKey(path);
+            Typeface cachedCustom = TYPEFACE_CACHE.get(cacheKey);
+            if (cachedCustom != null) {
+                return cachedCustom;
             }
             try {
                 File f = new File(path);

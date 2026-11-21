@@ -4319,7 +4319,7 @@ def test_v204_stable_toc_vignettes_speed_sync():
     assert "setOnItemLongClickListener" in ra and "setSelectionFromTop" in ra and "openTocNode" in ra
     assert "findTocNodeByHrefPass" in ra and "loadBookFootnotesAsync()" in ra
     assert "prepaginationExecutor.execute" in ra and "bgPaginator.countPagesOnlyCancellable" in ra
-    assert "paginateCancellable(\n                                        text, w, h, paint, cfg, paginationTaskId, preloadTaskId)" in ra
+    assert "paginator.paginateCancellable(" in ra and "paginationTaskId, preloadTaskId)" in ra
     assert "rawText.length() > 8000 && targetPage != -999" in ra
 
     # 4. Баг 5: Двусторонняя синхронизация, глубокие CFI, отсутствие фальшивого timestamp и защита от гонки

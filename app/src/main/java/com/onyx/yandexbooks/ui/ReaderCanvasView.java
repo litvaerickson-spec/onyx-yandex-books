@@ -140,6 +140,8 @@ public class ReaderCanvasView extends View {
     private boolean isSelectingText = false;
     private int selectionAnchorOffset = -1;
     private int selectionFocusOffset = -1;
+    private int anchorWordStart = -1;
+    private int anchorWordEnd = -1;
     private final Paint selectionFillPaint = new Paint();
     private final Paint savedQuoteFillPaint = new Paint();
     private final Paint inlineImagePaint = new Paint(Paint.FILTER_BITMAP_FLAG);
@@ -152,6 +154,8 @@ public class ReaderCanvasView extends View {
             RenderedWordBox hit = findWordBoxAtOrNear(touchDownX, touchDownY, dpToPx(20f));
             if (hit != null) {
                 isSelectingText = true;
+                anchorWordStart = hit.startOffset;
+                anchorWordEnd = hit.endOffset;
                 selectionAnchorOffset = hit.startOffset;
                 selectionFocusOffset = hit.endOffset;
                 try {
@@ -294,6 +298,32 @@ public class ReaderCanvasView extends View {
         return p;
     }
 
+    public int getRequiredFooterReservedHeightPx() {
+        if (footerPaint == null) return Math.round(dpToPx(24f));
+        Paint.FontMetrics ffm = footerPaint.getFontMetrics();
+        float textH = Math.max(0f, ffm.bottom) - ffm.top;
+        return Math.max(24, (int) Math.ceil(textH + dpToPx(8f)));
+    }
+
+    public TextPaginator.StyleMeasurer createStyleMeasurerForConfig(TypographyConfig cfg, Paint paint) {
+        Paint basePaint = paint != null ? paint : buildPaintForConfig(cfg);
+        if (cfg != null && cfg.isUseEpubFonts() && epubRegularTf != null) {
+            return new TextPaginator.StyleMeasurer(basePaint, epubBoldTf, epubItalicTf, epubBoldItalicTf);
+        }
+        String ff = cfg != null ? cfg.getFontFamily() : null;
+        if (ff != null && ff.startsWith(FontHelper.CUSTOM_PREFIX)) {
+            if (!ff.equals(customFontsSignature)) {
+                customFontsSignature = ff;
+                Map<String, String> sibs = FontHelper.resolveCustomFontFamilyPaths(ff);
+                customBoldTf = loadTypefaceFromPath(sibs.get("bold"));
+                customItalicTf = loadTypefaceFromPath(sibs.get("italic"));
+                customBoldItalicTf = loadTypefaceFromPath(sibs.get("bold_italic"));
+            }
+            return new TextPaginator.StyleMeasurer(basePaint, customBoldTf, customItalicTf, customBoldItalicTf);
+        }
+        return new TextPaginator.StyleMeasurer(basePaint);
+    }
+
     public void setInteractionListener(OnReaderInteractionListener listener) {
         this.interactionListener = listener;
     }
@@ -389,6 +419,8 @@ public class ReaderCanvasView extends View {
         isSelectingText = false;
         selectionAnchorOffset = -1;
         selectionFocusOffset = -1;
+        anchorWordStart = -1;
+        anchorWordEnd = -1;
         invalidate();
     }
 
@@ -543,12 +575,22 @@ public class ReaderCanvasView extends View {
         if (isImagePage && imgPath != null) {
             float availW = getWidth() - config.getPaddingLeftPx() - config.getPaddingRightPx();
             float availH = getHeight() - config.getPaddingTopPx() - config.getHeaderReservedHeightPx() - config.getPaddingBottomPx() - config.getFooterReservedHeightPx();
-            Bitmap bmp = (imageLoader != null) ? imageLoader.loadImage(imgPath, (int) availW, (int) availH) : null;
+            boolean isCoverImage = (currentChapterIndex == 0 && globalPageIndex <= 1)
+                    || imgPath.toLowerCase(java.util.Locale.US).contains("cover");
+            Bitmap bmp = null;
+            if (imageLoader != null) {
+                if (isCoverImage) {
+                    bmp = imageLoader.loadCover((int) availW, (int) availH);
+                }
+                if (bmp == null) {
+                    bmp = imageLoader.loadImage(imgPath, (int) availW, (int) availH);
+                }
+            }
             if (bmp != null && !bmp.isRecycled()) {
                 float bw = bmp.getWidth();
                 float bh = bmp.getHeight();
                 float scale = Math.min(availW / bw, availH / bh);
-                if (scale > 1.0f) scale = 1.0f; // Не масштабируем мелкие иконки больше 100%
+                if (!isCoverImage && scale > 1.0f) scale = 1.0f; // Не масштабируем мелкие иконки больше 100%, но обложку растягиваем под экран
                 float destW = bw * scale;
                 float destH = bh * scale;
                 float destX = config.getPaddingLeftPx() + (availW - destW) / 2f;
@@ -992,7 +1034,7 @@ public class ReaderCanvasView extends View {
                 dragStartLightLevel = touchStartedInLeftEdge ? warmLightLevel : coldLightLevel;
                 lastDispatchedLightLevel = -1;
                 removeCallbacks(longPressRunnable);
-                if (textSelectionListener != null && !renderedWordBoxes.isEmpty() && !touchStartedInLeftEdge && !touchStartedInRightEdge) {
+                if (textSelectionListener != null && !renderedWordBoxes.isEmpty()) {
                     postDelayed(longPressRunnable, 480L);
                 }
                 return true;
@@ -1001,8 +1043,19 @@ public class ReaderCanvasView extends View {
                 if (isSelectingText) {
                     RenderedWordBox hovered = findWordBoxAtOrNear(event.getX(), event.getY(), dpToPx(32f));
                     if (hovered != null) {
-                        int newFocus = hovered.startOffset >= selectionAnchorOffset ? hovered.endOffset : hovered.startOffset;
-                        if (newFocus != selectionFocusOffset) {
+                        int baseStart = anchorWordStart >= 0 ? anchorWordStart : selectionAnchorOffset;
+                        int baseEnd = anchorWordEnd >= 0 ? anchorWordEnd : selectionFocusOffset;
+                        int newAnchor;
+                        int newFocus;
+                        if (hovered.startOffset >= baseStart) {
+                            newAnchor = baseStart;
+                            newFocus = Math.max(baseEnd, hovered.endOffset);
+                        } else {
+                            newAnchor = baseEnd;
+                            newFocus = hovered.startOffset;
+                        }
+                        if (newAnchor != selectionAnchorOffset || newFocus != selectionFocusOffset) {
+                            selectionAnchorOffset = newAnchor;
                             selectionFocusOffset = newFocus;
                             invalidate();
                         }

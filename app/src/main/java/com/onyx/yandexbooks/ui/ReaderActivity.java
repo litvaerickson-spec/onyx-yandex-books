@@ -199,6 +199,8 @@ public class ReaderActivity extends Activity {
     private volatile double sessionOpenLocalPct = 0.0;
     private volatile String pendingInitialCfiForLocalOpen = null;
     private volatile String lastSavedCloudSignature = "";
+    private volatile ReadingProgress pendingCloudProgress = null;
+    private volatile boolean pendingDeferredSave = false;
 
     private TypographyConfig typographyConfig;
     private TextPaginator paginator;
@@ -215,7 +217,7 @@ public class ReaderActivity extends Activity {
         @Override
         public void run() {
             try {
-                if (userHasInteracted) {
+                if (userHasInteracted && !isPaginating && !isInitialLoading) {
                     saveProgress();
                 }
             } catch (Throwable t) {
@@ -563,8 +565,11 @@ public class ReaderActivity extends Activity {
             btnReaderBack.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    saveProgress();
-                    syncManager.flushOfflineQueue();
+                    autoSaveHandler.removeCallbacks(autoSaveRunnable);
+                    if (userHasInteracted && !isPaginating) {
+                        saveProgress();
+                        syncManager.flushOfflineQueue();
+                    }
                     finish();
                 }
             });
@@ -688,12 +693,13 @@ public class ReaderActivity extends Activity {
                         isInitialLoading = false;
                         userHasInteracted = true;
                         if (targetCh == currentChapterIndex) {
-                            currentPageIndex = Math.min(targetP, (currentPages != null && !currentPages.isEmpty()) ? currentPages.size() - 1 : 0);
+                            int maxIdx = (currentPages != null && !currentPages.isEmpty()) ? currentPages.size() - 1 : 0;
+                            currentPageIndex = Math.max(0, Math.min(targetP, maxIdx));
                             renderCurrentPage();
                         } else {
                             currentChapterIndex = targetCh;
-                            currentPageIndex = targetP;
-                            loadChapter(targetCh, targetP);
+                            currentPageIndex = Math.max(0, targetP);
+                            loadChapter(targetCh, currentPageIndex);
                         }
                         EpdController.requestFullRefresh(ReaderActivity.this, readerCanvas);
                     }
@@ -832,7 +838,7 @@ public class ReaderActivity extends Activity {
                         typographyConfig.setFontSizeSp(next);
                         appSettings.setFontSizeSp(next);
                         if (fontSizeLabel != null) fontSizeLabel.setText(String.valueOf(next));
-                        if (seekbarFontSize != null) seekbarFontSize.setProgress(next - 12);
+                        if (seekbarFontSize != null) seekbarFontSize.setProgress(Math.max(0, Math.min(48, next - 12)));
                         scheduleDebouncedRepaginate();
                     }
                 }
@@ -2044,7 +2050,9 @@ public class ReaderActivity extends Activity {
         float density = getResources().getDisplayMetrics().density;
         int offsetPx = Math.round(offsetDp * density);
         typographyConfig.setPaddingBottomPx(Math.max(typographyConfig.getPaddingBottomPx(), offsetPx));
-        typographyConfig.setFooterReservedHeightPx(Math.max(26, Math.round(22 * density)));
+        int fallbackReserve = Math.max(26, Math.round(24 * density));
+        int canvasReserve = readerCanvas != null ? readerCanvas.getRequiredFooterReservedHeightPx() : fallbackReserve;
+        typographyConfig.setFooterReservedHeightPx(Math.max(fallbackReserve, canvasReserve));
     }
 
     private void updateFooterOffsetButtonText() {
@@ -2569,6 +2577,8 @@ public class ReaderActivity extends Activity {
 
                     Button btnDel = new Button(ReaderActivity.this);
                     btnDel.setTag("delete");
+                    btnDel.setFocusable(false);
+                    btnDel.setFocusableInTouchMode(false);
                     btnDel.setText("X");
                     btnDel.setTextSize(13);
                     btnDel.setTypeface(null, Typeface.BOLD);
@@ -2790,6 +2800,8 @@ public class ReaderActivity extends Activity {
 
                     Button btnDelQ = new Button(ReaderActivity.this);
                     btnDelQ.setTag("qdel");
+                    btnDelQ.setFocusable(false);
+                    btnDelQ.setFocusableInTouchMode(false);
                     btnDelQ.setText("X");
                     btnDelQ.setTextSize(13);
                     btnDelQ.setTypeface(null, Typeface.BOLD);
@@ -3793,6 +3805,11 @@ public class ReaderActivity extends Activity {
                     });
                     if (!chapters.isEmpty()) {
                         resolveInitialPositionAndOpen();
+                        ReadingProgress queued = pendingCloudProgress;
+                        pendingCloudProgress = null;
+                        if (queued != null) {
+                            dispatchCloudProgressSync(queued);
+                        }
                     } else {
                         EinkNotice.show(ReaderActivity.this, "Ошибка книги", "Главы книги не найдены.");
                     }
@@ -3805,6 +3822,11 @@ public class ReaderActivity extends Activity {
                     cachedTocTree = cacheManager.loadTocTree(bookUuid);
                     if (chapters != null && !chapters.isEmpty()) {
                         resolveInitialPositionAndOpen();
+                        ReadingProgress queued = pendingCloudProgress;
+                        pendingCloudProgress = null;
+                        if (queued != null) {
+                            dispatchCloudProgressSync(queued);
+                        }
                     } else {
                         EinkNotice.show(ReaderActivity.this, "Ошибка книги", "Книга не готова к чтению:\n" + errorMessage);
                     }
@@ -3831,40 +3853,51 @@ public class ReaderActivity extends Activity {
                         }
                     });
                 }
-                if (cloudProgress.getPercent() <= 0 && (cloudProgress.getCfi() == null || cloudProgress.getCfi().isEmpty()) && cloudProgress.getParagraphIndex() <= 0) {
-                    if (audioAvailable && cloudProgress.getAudioPercent() > 0.0) {
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                offerAudioSyncIfNewer(cloudProgress);
-                            }
-                        });
-                    }
+                if (chapters == null || chapters.isEmpty()) {
+                    pendingCloudProgress = cloudProgress;
                     return;
                 }
-                paginationExecutor.execute(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (cloudProgress.getCfi() != null && !cloudProgress.getCfi().isEmpty()) {
-                            resolveCloudCfiTargetSync(cloudProgress.getCfi(), cloudProgress.getChapterIndex(), cloudProgress.getParagraphIndex());
-                        }
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                if (isFinishing()) return;
-                                applyCloudProgressIfNewer(cloudProgress);
-                                if (audioAvailable && cloudProgress.getAudioPercent() > 0.0) {
-                                    offerAudioSyncIfNewer(cloudProgress);
-                                }
-                            }
-                        });
-                    }
-                });
+                dispatchCloudProgressSync(cloudProgress);
             }
 
             @Override
             public void onError(String errorMessage) {
                 // Офлайн или сбой сети - остаемся на локальном месте
+            }
+        });
+    }
+
+    private void dispatchCloudProgressSync(final ReadingProgress cloudProgress) {
+        if (cloudProgress == null || isFinishing()) return;
+        final boolean audioAvailable = cloudProgress.getLinkedAudioUuid() != null
+                && !cloudProgress.getLinkedAudioUuid().isEmpty();
+        if (cloudProgress.getPercent() <= 0 && (cloudProgress.getCfi() == null || cloudProgress.getCfi().isEmpty()) && cloudProgress.getParagraphIndex() <= 0) {
+            if (audioAvailable && cloudProgress.getAudioPercent() > 0.0) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        offerAudioSyncIfNewer(cloudProgress);
+                    }
+                });
+            }
+            return;
+        }
+        paginationExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                if (cloudProgress.getCfi() != null && !cloudProgress.getCfi().isEmpty()) {
+                    resolveCloudCfiTargetSync(cloudProgress.getCfi(), cloudProgress.getChapterIndex(), cloudProgress.getParagraphIndex());
+                }
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (isFinishing()) return;
+                        applyCloudProgressIfNewer(cloudProgress);
+                        if (audioAvailable && cloudProgress.getAudioPercent() > 0.0) {
+                            offerAudioSyncIfNewer(cloudProgress);
+                        }
+                    }
+                });
             }
         });
     }
@@ -4808,10 +4841,16 @@ public class ReaderActivity extends Activity {
                     sb.append("**Заметка:** ").append(q.note.trim()).append("\n\n");
                 }
             }
-            java.io.FileOutputStream fos = new java.io.FileOutputStream(outFile);
-            fos.write(sb.toString().getBytes("UTF-8"));
-            fos.flush();
-            fos.close();
+            java.io.FileOutputStream fos = null;
+            try {
+                fos = new java.io.FileOutputStream(outFile);
+                fos.write(sb.toString().getBytes("UTF-8"));
+                fos.flush();
+            } finally {
+                if (fos != null) {
+                    try { fos.close(); } catch (Throwable ignored) {}
+                }
+            }
 
             EinkNotice.show(this, "Экспорт цитат", "Сохранено в файл:\n" + outFile.getAbsolutePath());
         } catch (Throwable t) {
@@ -4860,7 +4899,23 @@ public class ReaderActivity extends Activity {
                 new Runnable() {
                     @Override
                     public void run() {
-                        navigateToResolvedProgress(cloudProgress, -1, 0, audioPct);
+                        ReadingProgress audioJump = new ReadingProgress(
+                                cloudProgress.getBookUuid(),
+                                audioPct,
+                                -1,
+                                0,
+                                0,
+                                cloudProgress.getAudioUpdatedAt() > 0 ? cloudProgress.getAudioUpdatedAt() : System.currentTimeMillis()
+                        );
+                        audioJump.setLibraryCardId(cloudProgress.getLibraryCardId());
+                        audioJump.setDocumentUuid(cloudProgress.getDocumentUuid());
+                        audioJump.setLinkedAudioUuid(cloudProgress.getLinkedAudioUuid());
+                        audioJump.setAudioPercent(audioPct);
+                        audioJump.setAudioUpdatedAt(cloudProgress.getAudioUpdatedAt());
+                        audioJump.setCfi(null);
+                        userHasInteracted = true;
+                        pendingDeferredSave = true;
+                        navigateToResolvedProgress(audioJump, -1, 0, audioPct);
                     }
                 },
                 null);
@@ -4879,7 +4934,6 @@ public class ReaderActivity extends Activity {
     }
 
     private void loadChapterAtCharOffset(final int index, final int targetCharOffset) {
-        userHasInteracted = true;
         loadChapterInternal(index, -1.0, 0, targetCharOffset);
     }
 
@@ -4919,6 +4973,7 @@ public class ReaderActivity extends Activity {
             final List<TextPaginator.Page> cachedPages = chapterPagesMemoryCache.get(index);
             final String cachedText = chapterTextMemoryCache.get(index);
             if (cachedPages != null && !cachedPages.isEmpty()) {
+                paginationTaskId.incrementAndGet();
                 isPaginating = false;
                 hideLoadingOverlay();
                 currentPages = cachedPages;
@@ -4942,6 +4997,11 @@ public class ReaderActivity extends Activity {
                 renderCurrentPage();
                 updateMenuControls();
                 isInitialLoading = false;
+                if (pendingDeferredSave && userHasInteracted) {
+                    pendingDeferredSave = false;
+                    saveLocalProgressOnly();
+                    scheduleAutoSaveProgress();
+                }
                 preloadAdjacentChapters(index);
                 return;
             }
@@ -4955,6 +5015,7 @@ public class ReaderActivity extends Activity {
 
         final TypographyConfig configCopy = cloneTypographyConfig(typographyConfig);
         final Paint paint = readerCanvas.buildPaintForConfig(configCopy);
+        final TextPaginator.StyleMeasurer styleMeasurer = readerCanvas.createStyleMeasurerForConfig(configCopy, paint);
 
         int w = readerCanvas.getWidth();
         int h = readerCanvas.getHeight();
@@ -5087,6 +5148,7 @@ public class ReaderActivity extends Activity {
                             screenWidth,
                             screenHeight,
                             paint,
+                            styleMeasurer,
                             configCopy,
                             paginationTaskId,
                             taskId
@@ -5133,6 +5195,11 @@ public class ReaderActivity extends Activity {
                             renderCurrentPage();
                             updateMenuControls();
                             isInitialLoading = false;
+                            if (pendingDeferredSave && userHasInteracted) {
+                                pendingDeferredSave = false;
+                                saveLocalProgressOnly();
+                                scheduleAutoSaveProgress();
+                            }
                             preloadAdjacentChapters(index);
                         }
                     });
@@ -5196,22 +5263,39 @@ public class ReaderActivity extends Activity {
                 }
             }
             currentPageIndex = resolvedP;
-        } else if (targetPage >= 0 && targetPage < currentPages.size()) {
-            currentPageIndex = targetPage;
+        } else if (targetPage >= 0) {
+            currentPageIndex = Math.min(targetPage, currentPages.size() - 1);
         } else if (currentPageIndex >= currentPages.size()) {
             currentPageIndex = Math.max(0, currentPages.size() - 1);
         }
+        if (currentPageIndex < 0) currentPageIndex = 0;
+        if (currentPageIndex >= currentPages.size()) currentPageIndex = Math.max(0, currentPages.size() - 1);
     }
 
     private void preloadAdjacentChapters(final int curIndex) {
+        if (chapters == null || chapters.isEmpty() || readerCanvas == null) return;
         final long preloadTaskId = paginationTaskId.get();
+        final TypographyConfig cfgSnapshot = cloneTypographyConfig(typographyConfig);
+        final Paint paintSnapshot = readerCanvas.buildPaintForConfig(cfgSnapshot);
+        final TextPaginator.StyleMeasurer measurerSnapshot = readerCanvas.createStyleMeasurerForConfig(cfgSnapshot, paintSnapshot);
+        int wInit = lastPaginatedWidth > 0 ? lastPaginatedWidth : readerCanvas.getWidth();
+        int hInit = lastPaginatedHeight > 0 ? lastPaginatedHeight : readerCanvas.getHeight();
+        if (wInit <= 0 || hInit <= 0) {
+            wInit = getResources().getDisplayMetrics().widthPixels;
+            hInit = getResources().getDisplayMetrics().heightPixels;
+        }
+        final int snapW = wInit;
+        final int snapH = hInit;
+        final int chaptersSizeSnap = chapters.size();
         final int[] adj = new int[]{curIndex + 1, curIndex - 1};
         for (final int targetIdx : adj) {
-            if (targetIdx >= 0 && chapters != null && targetIdx < chapters.size()) {
+            if (targetIdx >= 0 && targetIdx < chaptersSizeSnap) {
                 if (!chapterPagesMemoryCache.containsKey(targetIdx)) {
                     final Chapter ch = chapters.get(targetIdx);
                     final String chId = ch.getId();
                     final String chTitle = ch.getTitle();
+                    final int opfSpine = ch.getOriginalOpfSpineIndex();
+                    final String opfItemId = ch.getOpfItemId();
                     paginationExecutor.execute(new Runnable() {
                         @Override
                         public void run() {
@@ -5223,17 +5307,9 @@ public class ReaderActivity extends Activity {
                                 if (text == null || text.trim().isEmpty()) {
                                     text = (chTitle != null && !chTitle.startsWith("ch_")) ? chTitle : "";
                                 }
-                                TypographyConfig cfg = cloneTypographyConfig(typographyConfig);
-                                Paint paint = readerCanvas.buildPaintForConfig(cfg);
-                                int w = lastPaginatedWidth > 0 ? lastPaginatedWidth : readerCanvas.getWidth();
-                                int h = lastPaginatedHeight > 0 ? lastPaginatedHeight : readerCanvas.getHeight();
-                                if (w <= 0 || h <= 0) {
-                                    w = getResources().getDisplayMetrics().widthPixels;
-                                    h = getResources().getDisplayMetrics().heightPixels;
-                                }
 
-                                List<TextPaginator.Page> pages = paginator.paginateCancellable(
-                                        text, w, h, paint, cfg, paginationTaskId, preloadTaskId);
+                                final List<TextPaginator.Page> pages = paginator.paginateCancellable(
+                                        text, snapW, snapH, paintSnapshot, measurerSnapshot, cfgSnapshot, paginationTaskId, preloadTaskId);
                                 if (pages != null && !pages.isEmpty() && preloadTaskId == paginationTaskId.get()) {
                                     chapterPagesMemoryCache.put(targetIdx, pages);
                                     chapterTextMemoryCache.put(targetIdx, text);
@@ -5242,19 +5318,25 @@ public class ReaderActivity extends Activity {
                                             File epubFile = cacheManager.getEpubFile(bookUuid);
                                             if (epubFile != null && epubFile.exists() && epubFile.length() > 0) {
                                                 List<EpubParser.DomBlockStep> domBlocks = EpubParser.extractChapterDomBlocks(
-                                                        epubFile, ch.getOriginalOpfSpineIndex(), ch.getOpfItemId());
+                                                        epubFile, opfSpine, opfItemId);
                                                 if (domBlocks != null && !domBlocks.isEmpty()) {
                                                     chapterDomBlocksMemoryCache.put(targetIdx, domBlocks);
                                                 }
                                             }
                                         } catch (Throwable ignored) {}
                                     }
-                                    if (chapterPageCounts != null && targetIdx < chapterPageCounts.length) {
-                                        chapterPageCounts[targetIdx] = pages.size();
-                                    }
-                                    if (chapterPageExact != null && targetIdx < chapterPageExact.length) {
-                                        chapterPageExact[targetIdx] = true;
-                                    }
+                                    runOnUiThread(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            if (preloadTaskId != paginationTaskId.get() || isFinishing()) return;
+                                            if (chapterPageCounts != null && targetIdx < chapterPageCounts.length) {
+                                                chapterPageCounts[targetIdx] = pages.size();
+                                            }
+                                            if (chapterPageExact != null && targetIdx < chapterPageExact.length) {
+                                                chapterPageExact[targetIdx] = true;
+                                            }
+                                        }
+                                    });
                                 }
                             } catch (Throwable ignored) {}
                         }
@@ -5659,8 +5741,8 @@ public class ReaderActivity extends Activity {
             } else if (currentChapterIndex + 1 < chapters.size()) {
                 currentChapterIndex++;
                 currentPageIndex = 0;
+                pendingDeferredSave = true;
                 loadChapter(currentChapterIndex, 0);
-                scheduleAutoSaveProgress();
             } else {
                 markBookCompletedAtEnd();
             }
@@ -5753,8 +5835,8 @@ public class ReaderActivity extends Activity {
                 scheduleAutoSaveProgress();
             } else if (chapters != null && currentChapterIndex > 0) {
                 currentChapterIndex--;
+                pendingDeferredSave = true;
                 loadChapter(currentChapterIndex, -999);
-                scheduleAutoSaveProgress();
             } else {
                 EinkNotice.show(this, "Чтение", "Начало книги.");
             }
@@ -5900,6 +5982,18 @@ public class ReaderActivity extends Activity {
             float wanted = appSettings.getUiScale();
             com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(getApplicationContext(), wanted);
             com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, wanted);
+            if (readerCanvas != null) {
+                readerCanvas.setEdgeBrightnessEnabled(appSettings.isEdgeBrightnessSwipeEnabled());
+                int[] freshFl = EpdController.readFrontlightPercent(this);
+                if (freshFl != null && freshFl.length >= 2) {
+                    appSettings.setEdgeFrontlightCold(freshFl[0]);
+                    appSettings.setEdgeFrontlightWarm(freshFl[1]);
+                }
+                readerCanvas.setInitialFrontlightLevels(
+                        appSettings.getEdgeFrontlightCold(),
+                        appSettings.getEdgeFrontlightWarm()
+                );
+            }
         }
         EpdController.enableRegalMode(readerCanvas);
         forceEpdRefresh();
