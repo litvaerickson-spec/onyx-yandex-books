@@ -1606,6 +1606,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     db.delete(tbl, null, null);
                 } catch (Throwable ignored) {}
             }
+            try {
+                Cursor wc = db.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null);
+                if (wc != null) wc.close();
+            } catch (Throwable ignored) {}
         } catch (Throwable t) {
             android.util.Log.w("DatabaseHelper", "Failed to clear DB on logout", t);
         }

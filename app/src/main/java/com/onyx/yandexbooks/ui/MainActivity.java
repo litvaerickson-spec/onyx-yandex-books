@@ -2272,26 +2272,46 @@ public class MainActivity extends Activity {
         if (currentBooks.isEmpty() || booksListView == null) {
             shelfPageIndicator.setText(" 0/0 ");
         } else {
+            int totalItems = currentBooks.size();
             int firstPos = Math.max(0, booksListView.getFirstVisiblePosition());
-            int childCount = booksListView.getChildCount();
-            int perPage = 3;
-            if (childCount > 0) {
-                int listBottom = booksListView.getHeight() - booksListView.getPaddingBottom();
-                View lastChild = booksListView.getChildAt(childCount - 1);
-                boolean lastClipped = (lastChild != null && listBottom > 0 && lastChild.getBottom() > listBottom && childCount > 1);
-                perPage = Math.max(1, childCount - (lastClipped ? 1 : 0));
-            }
-            int totalPages = Math.max(1, (int) Math.ceil((double) currentBooks.size() / (double) perPage));
-            int currentPage = Math.min(totalPages, (firstPos / perPage) + 1);
             int lastPos = booksListView.getLastVisiblePosition();
-            if (lastPos >= currentBooks.size() - 1) {
-                int listBottom = booksListView.getHeight() - booksListView.getPaddingBottom();
-                View lastChild = childCount > 0 ? booksListView.getChildAt(childCount - 1) : null;
-                if (lastChild == null || lastChild.getBottom() <= listBottom) {
-                    currentPage = totalPages;
+            int childCount = booksListView.getChildCount();
+            int listTop = booksListView.getPaddingTop();
+            int listBottom = booksListView.getHeight() - booksListView.getPaddingBottom();
+            View firstChild = childCount > 0 ? booksListView.getChildAt(0) : null;
+            View lastChild = childCount > 0 ? booksListView.getChildAt(childCount - 1) : null;
+
+            boolean allFitOnSinglePage = (childCount > 0 && firstPos == 0 && lastPos >= totalItems - 1
+                    && firstChild != null && firstChild.getTop() >= listTop
+                    && lastChild != null && lastChild.getBottom() <= listBottom);
+
+            if (allFitOnSinglePage) {
+                shelfPageIndicator.setText(" 1/1 ");
+            } else {
+                int perPage = 3;
+                int vpH = Math.max(1, listBottom - listTop);
+                if (childCount > 0 && firstChild != null && lastChild != null && listBottom > listTop) {
+                    int span = Math.max(1, (lastChild.getBottom() - firstChild.getTop()) + booksListView.getDividerHeight());
+                    int avgPitch = Math.max(1, span / childCount);
+                    perPage = Math.max(1, vpH / avgPitch);
+                    if (perPage >= totalItems) {
+                        perPage = Math.max(1, totalItems - 1);
+                    }
                 }
+                int totalPages = Math.max(2, (int) Math.ceil((double) totalItems / (double) perPage));
+                int currentPage;
+                boolean atTop = (firstPos == 0 && (firstChild == null || firstChild.getTop() >= listTop));
+                boolean atBottom = (lastPos >= totalItems - 1 && (lastChild == null || lastChild.getBottom() <= listBottom));
+                if (atTop) {
+                    currentPage = 1;
+                } else if (atBottom) {
+                    currentPage = totalPages;
+                } else {
+                    int effFirst = firstPos + ((firstChild != null && firstChild.getTop() < listTop) ? 1 : 0);
+                    currentPage = Math.min(totalPages, Math.max(1, (effFirst / perPage) + 1));
+                }
+                shelfPageIndicator.setText(" " + currentPage + "/" + totalPages + " ");
             }
-            shelfPageIndicator.setText(" " + currentPage + "/" + totalPages + " ");
         }
     }
 

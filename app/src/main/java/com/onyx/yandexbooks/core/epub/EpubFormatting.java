@@ -1728,7 +1728,7 @@ public class EpubFormatting {
                 anchorPart = URLDecoder.decode(anchorPart, "UTF-8");
             } catch (Exception ignored) {}
 
-            String html = readZipEntryText(zip, filePart);
+            String html = !filePart.isEmpty() ? readZipEntryText(zip, filePart) : null;
             if ((html == null || html.isEmpty()) && !filePart.isEmpty()) {
                 // Пробуем поиск по суффиксу пути в архиве
                 Enumeration<? extends ZipEntry> all = zip.entries();
@@ -1739,6 +1739,24 @@ public class EpubFormatting {
                         html = readZipEntryText(zip, ze.getName());
                         filePart = ze.getName();
                         break;
+                    }
+                }
+            }
+            if ((html == null || html.isEmpty()) && filePart.isEmpty() && !anchorPart.isEmpty()) {
+                // Локальная ссылка вида #anchor без имени файла: ищем элемент по id в XHTML/HTML главах архива
+                String q1 = "id=\"" + anchorPart + "\"";
+                String q2 = "id='" + anchorPart + "'";
+                Enumeration<? extends ZipEntry> all = zip.entries();
+                while (all.hasMoreElements()) {
+                    ZipEntry ze = all.nextElement();
+                    String zn = ze.getName().toLowerCase(Locale.US);
+                    if (!ze.isDirectory() && (zn.endsWith(".xhtml") || zn.endsWith(".html") || zn.endsWith(".htm"))) {
+                        String cand = readZipEntryText(zip, ze.getName());
+                        if (cand != null && (cand.contains(q1) || cand.contains(q2))) {
+                            html = cand;
+                            filePart = ze.getName();
+                            break;
+                        }
                     }
                 }
             }
