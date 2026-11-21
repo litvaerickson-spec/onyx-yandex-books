@@ -1,16 +1,27 @@
 package com.onyx.yandexbooks.core.network;
 
+import android.content.Context;
 import android.util.Log;
 
+import com.onyx.yandexbooks.R;
+import com.onyx.yandexbooks.YandexBooksApp;
+
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.security.KeyStore;
 import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import javax.net.ssl.SSLContext;
@@ -33,6 +44,7 @@ public class HttpClientFactory {
 
     private static final String TAG = "HttpClientFactory";
     private static OkHttpClient sharedClient;
+    private static X509TrustManager sharedTrustManager;
 
     public static synchronized OkHttpClient getClient() {
         if (sharedClient == null) {
@@ -74,17 +86,56 @@ public class HttpClientFactory {
         return builder.build();
     }
 
-    public static X509TrustManager getSharedTrustManager() {
-        try {
-            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-            tmf.init((KeyStore) null);
-            for (TrustManager tm : tmf.getTrustManagers()) {
-                if (tm instanceof X509TrustManager) {
-                    return (X509TrustManager) tm;
+    public static synchronized X509TrustManager getSharedTrustManager() {
+        if (sharedTrustManager != null) {
+            return sharedTrustManager;
+        }
+        final X509TrustManager systemTm = loadSystemTrustManager();
+        final X509TrustManager bundledTm = loadBundledTrustManager(YandexBooksApp.getInstance());
+
+        if (systemTm != null && bundledTm != null) {
+            sharedTrustManager = new X509TrustManager() {
+                @Override
+                public void checkClientTrusted(X509Certificate[] chain, String authType) throws CertificateException {
+                    try {
+                        systemTm.checkClientTrusted(chain, authType);
+                    } catch (CertificateException sysErr) {
+                        bundledTm.checkClientTrusted(chain, authType);
+                    }
                 }
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to obtain default X509TrustManager", e);
+
+                @Override
+                public void checkServerTrusted(X509Certificate[] chain, String authType) throws CertificateException {
+                    try {
+                        systemTm.checkServerTrusted(chain, authType);
+                    } catch (CertificateException sysErr) {
+                        try {
+                            bundledTm.checkServerTrusted(chain, authType);
+                        } catch (CertificateException bundledErr) {
+                            throw sysErr;
+                        }
+                    }
+                }
+
+                @Override
+                public X509Certificate[] getAcceptedIssuers() {
+                    Set<X509Certificate> merged = new LinkedHashSet<>();
+                    X509Certificate[] sysIssuers = systemTm.getAcceptedIssuers();
+                    if (sysIssuers != null) merged.addAll(Arrays.asList(sysIssuers));
+                    X509Certificate[] bundledIssuers = bundledTm.getAcceptedIssuers();
+                    if (bundledIssuers != null) merged.addAll(Arrays.asList(bundledIssuers));
+                    return merged.toArray(new X509Certificate[0]);
+                }
+            };
+            return sharedTrustManager;
+        }
+        if (systemTm != null) {
+            sharedTrustManager = systemTm;
+            return sharedTrustManager;
+        }
+        if (bundledTm != null) {
+            sharedTrustManager = bundledTm;
+            return sharedTrustManager;
         }
         return new X509TrustManager() {
             @Override
@@ -102,6 +153,76 @@ public class HttpClientFactory {
                 return new X509Certificate[0];
             }
         };
+    }
+
+    private static X509TrustManager loadSystemTrustManager() {
+        try {
+            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            tmf.init((KeyStore) null);
+            for (TrustManager tm : tmf.getTrustManagers()) {
+                if (tm instanceof X509TrustManager) {
+                    return (X509TrustManager) tm;
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to obtain default X509TrustManager", e);
+        }
+        return null;
+    }
+
+    private static X509TrustManager loadBundledTrustManager(Context context) {
+        if (context == null) return null;
+        InputStream raw = null;
+        BufferedReader reader = null;
+        try {
+            raw = context.getResources().openRawResource(R.raw.ca_roots);
+            reader = new BufferedReader(new InputStreamReader(raw, "US-ASCII"));
+            CertificateFactory cf = CertificateFactory.getInstance("X.509");
+            KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
+            ks.load(null, null);
+
+            StringBuilder pemBlock = null;
+            int idx = 0;
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String trimmed = line.trim();
+                if ("-----BEGIN CERTIFICATE-----".equals(trimmed)) {
+                    pemBlock = new StringBuilder();
+                    pemBlock.append(trimmed).append('\n');
+                } else if (pemBlock != null) {
+                    pemBlock.append(trimmed).append('\n');
+                    if ("-----END CERTIFICATE-----".equals(trimmed)) {
+                        try {
+                            byte[] certBytes = pemBlock.toString().getBytes("US-ASCII");
+                            X509Certificate cert = (X509Certificate) cf.generateCertificate(new ByteArrayInputStream(certBytes));
+                            if (cert != null) {
+                                ks.setCertificateEntry("ca_" + (idx++), cert);
+                            }
+                        } catch (Throwable ignored) {
+                            // Отдельный корневой сертификат не поддерживается старым парсером — пропускаем
+                        }
+                        pemBlock = null;
+                    }
+                }
+            }
+            if (idx == 0) {
+                return null;
+            }
+            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            tmf.init(ks);
+            for (TrustManager tm : tmf.getTrustManagers()) {
+                if (tm instanceof X509TrustManager) {
+                    Log.i(TAG, "Bundled CA TrustManager initialized (" + idx + " root certificates)");
+                    return (X509TrustManager) tm;
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Failed to load bundled CA roots", t);
+        } finally {
+            if (reader != null) try { reader.close(); } catch (Throwable ignored) {}
+            if (raw != null) try { raw.close(); } catch (Throwable ignored) {}
+        }
+        return null;
     }
 
     private static class Tls12SocketFactory extends SSLSocketFactory {
