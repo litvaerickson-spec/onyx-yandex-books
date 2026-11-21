@@ -72,8 +72,18 @@ public class UiScaleHelper {
             }
 
             if (cfg != null) {
-                cfg.fontScale = sBaseFontScale * effective;
+                if (android.os.Build.VERSION.SDK_INT >= 17) {
+                    cfg.densityDpi = Math.round(sBaseDensityDpi * effective);
+                    cfg.fontScale = sBaseFontScale;
+                } else {
+                    cfg.fontScale = sBaseFontScale * effective;
+                }
                 res.updateConfiguration(cfg, dm);
+                if (dm != null) {
+                    dm.density = sBaseDensity * effective;
+                    dm.scaledDensity = sBaseScaledDensity * effective;
+                    dm.densityDpi = Math.round(sBaseDensityDpi * effective);
+                }
             }
         } catch (Exception e) {
             Log.e(TAG, "Failed to update configuration scale: " + e.getMessage());
@@ -86,6 +96,53 @@ public class UiScaleHelper {
 
     public static float getBaseFontScale() {
         return sBaseFontScale > 0 ? sBaseFontScale : 1.0f;
+    }
+
+    /**
+     * Обёртка базового контекста (API 17+) для Activity, чтобы система Android
+     * не сбрасывала DisplayMetrics/fontScale на 100% при возврате из другой Activity.
+     */
+    public static Context wrapBaseContext(Context newBase, float scaleFactor) {
+        if (newBase == null) return null;
+        init(newBase);
+        float effective = sanitizeScale(scaleFactor);
+        if (Math.abs(effective - 1.0f) < 0.04f) {
+            return newBase;
+        }
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 17 && sBaseDensityDpi > 0) {
+                Resources res = newBase.getResources();
+                if (res != null) {
+                    Configuration cfg = new Configuration(res.getConfiguration());
+                    cfg.densityDpi = Math.round(sBaseDensityDpi * effective);
+                    cfg.fontScale = sBaseFontScale;
+                    return newBase.createConfigurationContext(cfg);
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "wrapBaseContext fallback: " + t.getMessage());
+        }
+        return newBase;
+    }
+
+    /**
+     * Проверяет, откатила ли система применённый масштаб обратно к эталонным 100%.
+     */
+    public static boolean hasScaleDrifted(Context context, float targetScale) {
+        if (context == null || sBaseDensity <= 0) return false;
+        float effective = sanitizeScale(targetScale);
+        if (Math.abs(effective - 1.0f) < 0.04f) return false;
+        try {
+            Resources res = context.getResources();
+            if (res == null) return false;
+            DisplayMetrics dm = res.getDisplayMetrics();
+            float expectedDensity = sBaseDensity * effective;
+            boolean densityDrifted = dm != null && Math.abs(dm.density - expectedDensity) > (0.06f * sBaseDensity);
+            boolean scaledDrifted = dm != null && Math.abs(dm.scaledDensity - (sBaseScaledDensity * effective)) > (0.08f * sBaseScaledDensity);
+            return densityDrifted || scaledDrifted;
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     /**

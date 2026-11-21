@@ -109,9 +109,19 @@ public class MainActivity extends Activity {
 
     private static boolean sUpdateNotifiedThisSession = false;
     private static boolean sUpdateCheckedSuccessfully = false;
+    private static long sLastScaleRecreateMs = 0L;
     private boolean waitingStoragePermissionForRestore = false;
     private long lastAutoBackupMs = 0L;
     private BroadcastReceiver networkReceiver;
+
+    @Override
+    protected void attachBaseContext(Context newBase) {
+        float uiScale = 1.0f;
+        try {
+            uiScale = new com.onyx.yandexbooks.core.storage.AppSettings(newBase).getUiScale();
+        } catch (Throwable ignored) {}
+        super.attachBaseContext(com.onyx.yandexbooks.core.ui.UiScaleHelper.wrapBaseContext(newBase, uiScale));
+    }
 
     @Override
     protected void onStart() {
@@ -2278,8 +2288,35 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        if (appSettings != null) {
+            float wanted = appSettings.getUiScale();
+            com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(getApplicationContext(), wanted);
+            com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, wanted);
+        }
+        if (booksListView != null) {
+            EpdController.requestFullRefresh(this, booksListView);
+        }
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
+        if (appSettings != null) {
+            float wantedScale = appSettings.getUiScale();
+            boolean drifted = com.onyx.yandexbooks.core.ui.UiScaleHelper.hasScaleDrifted(this, wantedScale);
+            com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(getApplicationContext(), wantedScale);
+            com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, wantedScale);
+            long nowElapsed = android.os.SystemClock.elapsedRealtime();
+            if (drifted && (nowElapsed - sLastScaleRecreateMs) > 3000L) {
+                sLastScaleRecreateMs = nowElapsed;
+                if (android.os.Build.VERSION.SDK_INT >= 11) {
+                    recreate();
+                    return;
+                }
+            }
+        }
         if (tokenStorage.isAuthorized()) {
             // Перезагружаем прогресс после возврата из ридера (не затирая результаты поиска и каталога)
             if (!"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {

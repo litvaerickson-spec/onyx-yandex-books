@@ -2314,7 +2314,7 @@ def test_v1511_beta_ui_scaling_and_offline_reading_cloud_sync():
     assert "sanitizeScale" in helper_code, "UiScaleHelper обязан содержать sanitizeScale!"
     assert "applyScale" in helper_code, "UiScaleHelper обязан содержать applyScale!"
     assert "dm.density = sBaseDensity * effective" in helper_code, "Масштабирование density обязательно!"
-    assert "cfg.fontScale = sBaseFontScale * effective" in helper_code, "Масштабирование fontScale обязательно!"
+    assert ("cfg.fontScale = sBaseFontScale * effective" in helper_code or "cfg.densityDpi = Math.round(sBaseDensityDpi * effective)" in helper_code), "Масштабирование fontScale/densityDpi обязательно!"
 
     # Математическая проверка диапазона масштабирования
     def sanitize(scale):
@@ -4532,7 +4532,7 @@ def test_v205_sync_parity_epigraph_normal_and_clean_notice():
     db = rd(jb + "core/storage/DatabaseHelper.java")
     assert "String fallbackBody = null;" in api and "boolean hasErrors = (errs != null && errs.length() > 0);" in api
     assert "onlyKey = String.valueOf(data.keys().next());" in api
-    assert "buildCanonicalCfiEnd(cIdx, itemId, pIdx, chOff)" in api
+    assert ("buildCanonicalCfiEnd(cIdx, itemId, pIdx, chOff)" in api or "buildCanonicalCfiEndFromStart(startCfi, cIdx, itemId, pIdx, chOff)" in api)
     assert '!hasErr && dataObj != null && !dataObj.isNull("progressUpdated")' in api
     assert "calculateLocalOffsetInParagraph(" in ra
     assert ra.count("calculateLocalOffsetInParagraph(") >= 3
@@ -4695,23 +4695,28 @@ def test_v206_sync_cfi_percent_stability():
 
     for k in ("class CfiDomLocation", "class DomBlockStep", "resolveCfiInEpub", "extractChapterDomBlocks", "findSnippetOffsetInRawText"):
         assert k in ep, f"Отсутствует {k} в EpubParser.java"
-    for k in ("PROGRESS_SYNC_EXECUTOR", "Executors.newSingleThreadExecutor()", "buildCanonicalCfiWithDomPath", "extractPositivePercentFromJson", "rb.trim().isEmpty()"):
+    for k in ("PROGRESS_SYNC_EXECUTOR", "Executors.newSingleThreadExecutor()", "buildCanonicalCfiWithDomPath", "buildCanonicalCfiEndFromStart", "extractPositivePercentFromJson", "rb.trim().isEmpty()"):
         assert k in api, f"Отсутствует {k} в YandexBooksApiClient.java"
+    assert api.index('obj.has("reading_progress")') < api.index('"progress_percent"')
     assert 'optString("added_at"' not in api, \
         "added_at не должен подставляться в качестве времени чтения в extractProgress!"
-    for k in ("bestProgressTs", "cloudStrictlyNewerThanRecent", 'pCv.putNull("cfi")', "markProgressSynced", "removeFromSyncQueue"):
+    for k in ("bestProgressTs", "cloudStrictlyNewerThanRecent", "cloudProbablyEchoOfLocal", "keepExistingAnchor", 'pCv.putNull("cfi")', "markProgressSynced", "removeFromSyncQueue"):
         assert k in db, f"Отсутствует {k} в DatabaseHelper.java"
     assert '"done"' in db.split("private void internalSaveProgress(ReadingProgress progress)", 1)[1]
     assert 'p.setCfi(' in db.split("public synchronized List<ReadingProgress> getUnsyncedProgressList()", 1)[1].split("public synchronized List<ReadingProgress> getPendingSyncQueue()", 1)[0]
     assert 'p.setCfi(' in db.split("public synchronized List<ReadingProgress> getPendingSyncQueue()", 1)[1]
     for k in ("ACTIVE_CLOUD_SYNCS", "runWhenIdle", "markProgressSynced"):
         assert k in sm, f"Отсутствует {k} в SyncManager.java"
-    for k in ("loadBooksSeqId", "loadBooksWithCallback", "runWhenIdle", "ensureBookOnReadingShelf"):
+    ui_sc = rd(jb + "core/ui/UiScaleHelper.java")
+    for k in ("wrapBaseContext", "hasScaleDrifted"):
+        assert k in ui_sc, f"Отсутствует {k} в UiScaleHelper.java"
+    for k in ("loadBooksSeqId", "loadBooksWithCallback", "runWhenIdle", "ensureBookOnReadingShelf", "attachBaseContext", "hasScaleDrifted", "onConfigurationChanged"):
         assert k in ma, f"Отсутствует {k} в MainActivity.java"
-    for k in ("updateCalibratedAvgCharsPerPage", "resolveCloudCfiTargetSync", "buildOutgoingCfiForOffset", "applyCloudProgressIfNewer", "listQuotesView", "EinkNotice.showConfirm"):
+    for k in ("updateCalibratedAvgCharsPerPage", "syncPrepagCacheForRealCanvasDimsIfNeeded", "resolveCloudCfiTargetSync", "buildOutgoingCfiForOffset", "applyCloudProgressIfNewer", "allowIntentOverride", "samePageByOffset", "findActiveTocNode", "expandAncestorsOfNode", "initialActiveTocPos", "setSelectionFromTop", "listQuotesView", "EinkNotice.showConfirm", "attachBaseContext"):
         assert k in ra, f"Отсутствует {k} в ReaderActivity.java"
     assert "chapterPageExact[targetIdx] = true;" in ra
     assert "antiOrphanReserve" in tp
+    assert "mapCleanFractionToRawOffset" in rd(jb + "core/epub/EpubFormatting.java")
 
     # Проверка 0 запрещённых слов ("читалк*") по всем исходникам
     for dirpath, _, filenames in os.walk(os.path.join(PROJECT_DIR, "app/src")):
@@ -4790,6 +4795,13 @@ public class DomCfiProbe {
         if (rtLoc == null || !rtLoc.hasSnippet()) throw new AssertionError("rtLoc failed");
         int rtOff = EpubParser.findSnippetOffsetInRawText(ch0.textContent, rtLoc);
         if (rtOff < 10) throw new AssertionError("rtOff too small: " + rtOff);
+
+        // Проверка mapCleanFractionToRawOffset с токенами разметки и ссылками
+        String richSample = EpubFormatting.BLK_START + "P:L:P:00" + EpubFormatting.BLK_END + "01234"
+                + EpubFormatting.LINK_START + "ch2.xhtml#n1" + EpubFormatting.LINK_SEP + "56789" + EpubFormatting.LINK_END + "ABCDE";
+        int mappedMid = EpubFormatting.mapCleanFractionToRawOffset(richSample, 0.5);
+        int expectedChar7Idx = richSample.indexOf('7');
+        if (Math.abs(mappedMid - expectedChar7Idx) > 1) throw new AssertionError("mapCleanFraction fail: mappedMid=" + mappedMid + " expected=" + expectedChar7Idx);
 
         // Проверка реального EPUB с .titleblock и виньетками
         int crystalBlocks = 0, crystalRtOff = -1;

@@ -564,7 +564,7 @@ def _run_tests(args):
     wait_for_node(text_contains="Внешний вид и интерфейс ПО", timeout=8)
     screencap(os.path.join(args.artifacts, f"{args.tag}_deep_03_uiscale_200_menu.png"))
     tap_node(find_node(dump_ui(), text_contains="Внешний вид и интерфейс ПО"), "Open Appearance at 200%")
-    wait_for_node(text_contains="Общий масштаб", timeout=8)
+    wait_for_node(text_contains="1. Панели и кнопки", timeout=8)
     for _ in range(3):
         if find_node(dump_ui(), text_contains="Масштаб ОС:"):
             break

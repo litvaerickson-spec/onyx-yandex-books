@@ -734,6 +734,55 @@ public class EpubFormatting {
         return sb.toString();
     }
 
+    public static int mapCleanFractionToRawOffset(String richText, double fraction) {
+        if (richText == null || richText.isEmpty()) return 0;
+        double clamped = Math.max(0.0, Math.min(1.0, fraction));
+        int len = richText.length();
+        if (clamped <= 0.0) return 0;
+        if (clamped >= 1.0) return len;
+        int totalClean = stripFormattingTokens(richText).length();
+        if (totalClean <= 0) return (int) Math.round(clamped * len);
+        int targetClean = (int) Math.round(clamped * totalClean);
+        if (targetClean <= 0) return 0;
+
+        int cleanSeen = 0;
+        int i = 0;
+        while (i < len) {
+            char c = richText.charAt(i);
+            if (c == BLK_START) {
+                int end = richText.indexOf(BLK_END, i + 1);
+                if (end >= 0 && end - i <= 24) {
+                    i = end + 1;
+                    continue;
+                }
+            } else if (c == BLK_END || c == PAGE_BREAK_CHAR || (c >= '\uE010' && c <= '\uE019')) {
+                i++;
+                continue;
+            } else if (c == LINK_START) {
+                int sep = richText.indexOf(LINK_SEP, i + 1);
+                int end = richText.indexOf(LINK_END, i + 1);
+                if (sep > i && end > sep) {
+                    int labelLen = end - (sep + 1);
+                    if (cleanSeen + labelLen >= targetClean) {
+                        return Math.min(len, sep + 1 + Math.max(0, targetClean - cleanSeen));
+                    }
+                    cleanSeen += labelLen;
+                    i = end + 1;
+                    continue;
+                }
+            } else if (c == LINK_SEP || c == LINK_END) {
+                i++;
+                continue;
+            }
+            if (cleanSeen >= targetClean) {
+                return i;
+            }
+            cleanSeen++;
+            i++;
+        }
+        return len;
+    }
+
     private static String replaceImagesWithTokens(String html, String baseDir) {
         if (html == null || (!html.contains("<img") && !html.contains("<IMG") && !html.contains("<image") && !html.contains("<IMAGE"))) {
             return html;

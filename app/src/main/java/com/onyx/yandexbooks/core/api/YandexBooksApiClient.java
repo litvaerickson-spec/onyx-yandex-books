@@ -431,6 +431,21 @@ public class YandexBooksApiClient {
         return buildCanonicalCfi(originalOpfSpineIndex, opfItemId, paragraphDomIndex, Math.max(0, charOffset) + 100);
     }
 
+    public static String buildCanonicalCfiEndFromStart(String startCfi, int fallbackSpine, String fallbackItemId, int fallbackPar, int fallbackOffset) {
+        if (startCfi != null && startCfi.startsWith("epubcfi(") && startCfi.endsWith(")")) {
+            int bang = startCfi.indexOf('!');
+            int colon = startCfi.lastIndexOf(':');
+            if (bang > 0 && colon > bang && colon < startCfi.length() - 1) {
+                String numPart = startCfi.substring(colon + 1, startCfi.length() - 1).trim();
+                try {
+                    int baseOff = Math.max(0, Integer.parseInt(numPart));
+                    return startCfi.substring(0, colon + 1) + (baseOff + 100) + ")";
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+        return buildCanonicalCfiEnd(fallbackSpine, fallbackItemId, fallbackPar, fallbackOffset);
+    }
+
     public static String generateCfi(int chapterIndex, int paragraphIndex) {
         int itemNum = Math.max(2, (chapterIndex + 1) * 2);
         int pNum = Math.max(2, (paragraphIndex + 1) * 2);
@@ -538,14 +553,32 @@ public class YandexBooksApiClient {
 
     private static double extractPositivePercentFromJson(JSONObject obj, String state, boolean allowPercentageKey) {
         if (obj == null) return 0.0;
+        if (obj.has("reading_progress") && !obj.isNull("reading_progress")) {
+            double rp = obj.optDouble("reading_progress", -1.0);
+            if (!Double.isNaN(rp) && rp > 0.0) {
+                if (rp < 1.0) {
+                    return rp * 100.0;
+                } else if (rp == 1.0) {
+                    if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state)
+                            || "completed".equalsIgnoreCase(state) || "done".equalsIgnoreCase(state)) {
+                        return 100.0;
+                    }
+                    return 1.0;
+                }
+                return Math.min(100.0, rp);
+            }
+        }
         String[] keys = allowPercentageKey
-                ? new String[] { "percent", "reading_progress", "progress_percent", "percentage", "progress" }
-                : new String[] { "percent", "reading_progress", "progress_percent", "progress" };
+                ? new String[] { "percent", "progress_percent", "percentage", "progress" }
+                : new String[] { "percent", "progress_percent", "progress" };
         for (String key : keys) {
             if (!obj.has(key) || obj.isNull(key)) continue;
             double p = obj.optDouble(key, -1.0);
             if (Double.isNaN(p) || p <= 0.0) continue;
             if (p < 1.0) {
+                if (obj.has("reading_progress")) {
+                    return p;
+                }
                 return p * 100.0;
             } else if (p == 1.0) {
                 if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state)
@@ -2137,7 +2170,7 @@ public class YandexBooksApiClient {
                         String itemId = (parsedStart != null) ? parsedStart.opfItemId : "";
                         int pIdx = (parsedStart != null) ? parsedStart.paragraphIndex : progress.getParagraphIndex();
                         int chOff = (parsedStart != null) ? parsedStart.charOffset : 0;
-                        endCfi = buildCanonicalCfiEnd(cIdx, itemId, pIdx, chOff);
+                        endCfi = buildCanonicalCfiEndFromStart(startCfi, cIdx, itemId, pIdx, chOff);
                     } else {
                         endCfi = generateCfiEnd(progress.getChapterIndex(), progress.getParagraphIndex());
                     }

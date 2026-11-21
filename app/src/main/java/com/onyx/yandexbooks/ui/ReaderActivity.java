@@ -230,8 +230,18 @@ public class ReaderActivity extends Activity {
     }
 
     @Override
+    protected void attachBaseContext(android.content.Context newBase) {
+        float uiScale = 1.0f;
+        try {
+            uiScale = new com.onyx.yandexbooks.core.storage.AppSettings(newBase).getUiScale();
+        } catch (Throwable ignored) {}
+        super.attachBaseContext(com.onyx.yandexbooks.core.ui.UiScaleHelper.wrapBaseContext(newBase, uiScale));
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         com.onyx.yandexbooks.core.storage.AppSettings settings = new com.onyx.yandexbooks.core.storage.AppSettings(this);
+        com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(getApplicationContext(), settings.getUiScale());
         com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, settings.getUiScale());
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_reader);
@@ -2109,6 +2119,11 @@ public class ReaderActivity extends Activity {
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        if (appSettings != null) {
+            float wanted = appSettings.getUiScale();
+            com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(getApplicationContext(), wanted);
+            com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, wanted);
+        }
         updateOrientationButtonText();
         adjustFormatPanelHeight();
         if (readerCanvas != null) {
@@ -2258,8 +2273,25 @@ public class ReaderActivity extends Activity {
         calculateTocPageNumbers(rawTree);
 
         final List<EpubParser.TocNode> tocTree = rawTree;
+        int curCharOffForToc = (currentPages != null && currentPageIndex >= 0 && currentPageIndex < currentPages.size())
+                ? Math.max(0, currentPages.get(currentPageIndex).startCharOffset) : 0;
+        final EpubParser.TocNode activeTocNode = findActiveTocNode(tocTree, currentChapterIndex, curCharOffForToc);
+        if (activeTocNode != null) {
+            expandAncestorsOfNode(tocTree, activeTocNode);
+        }
         final List<EpubParser.TocNode> visibleTocNodes = new ArrayList<>();
         flattenVisibleNodes(tocTree, visibleTocNodes);
+        int foundActivePos = -1;
+        for (int ti = 0; ti < visibleTocNodes.size(); ti++) {
+            if (visibleTocNodes.get(ti) == activeTocNode) {
+                foundActivePos = ti;
+                break;
+            }
+            if (foundActivePos < 0 && visibleTocNodes.get(ti).spineIndex == currentChapterIndex) {
+                foundActivePos = ti;
+            }
+        }
+        final int initialActiveTocPos = foundActivePos;
 
         final Button btnTabChapters = new Button(this);
         btnTabChapters.setText("Оглавление (" + visibleTocNodes.size() + ")");
@@ -2389,12 +2421,19 @@ public class ReaderActivity extends Activity {
                 }
 
                 String title = (node.title != null && !node.title.isEmpty()) ? node.title : ("Глава " + (node.spineIndex + 1));
-                if (node.spineIndex == currentChapterIndex) {
+                boolean isCurrentToc = (activeTocNode != null)
+                        ? (node == activeTocNode)
+                        : (node.spineIndex == currentChapterIndex);
+                if (isCurrentToc) {
+                    rowLayout.setBackgroundColor(Color.rgb(228, 228, 228));
                     tvTitle.setText(title + " (читается)");
                     tvTitle.setTypeface(null, Typeface.BOLD);
+                    tvTitle.setTextColor(Color.BLACK);
                 } else {
+                    rowLayout.setBackgroundColor(Color.TRANSPARENT);
                     tvTitle.setText(title);
                     tvTitle.setTypeface(null, Typeface.NORMAL);
+                    tvTitle.setTextColor(Color.BLACK);
                 }
 
                 tvPage.setText(String.valueOf(node.pageNumber));
@@ -2912,6 +2951,16 @@ public class ReaderActivity extends Activity {
                     dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.WHITE));
                     dialog.getWindow().setLayout(targetW, targetH);
                 }
+                if (initialActiveTocPos >= 0 && initialActiveTocPos < visibleTocNodes.size()) {
+                    listChaptersView.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (initialActiveTocPos >= 0 && initialActiveTocPos < visibleTocNodes.size()) {
+                                listChaptersView.setSelectionFromTop(initialActiveTocPos, Math.round(72 * density));
+                            }
+                        }
+                    });
+                }
                 EpdController.requestFullRefresh(ReaderActivity.this, root);
             }
         });
@@ -3238,6 +3287,44 @@ public class ReaderActivity extends Activity {
             scheduleDelayedPrepagination(dims[0], dims[1], sig, 1200L);
         }
         recalculateTotalBookPages();
+    }
+
+    private void syncPrepagCacheForRealCanvasDimsIfNeeded() {
+        if (readerCanvas == null || chapters == null || chapters.isEmpty() || cacheManager == null || bookUuid == null) {
+            return;
+        }
+        int rw = readerCanvas.getWidth();
+        int rh = readerCanvas.getHeight();
+        if (rw <= 0 || rh <= 0) return;
+        String realSig = buildPrepagSignature(rw, rh, typographyConfig);
+        if (realSig.equals(currentPrepagConfigSig)) return;
+
+        currentPrepagConfigSig = realSig;
+        int[] cachedCounts = cacheManager.loadPageCountsCache(bookUuid, realSig, chapters.size());
+        if (cachedCounts != null && cachedCounts.length == chapters.size()) {
+            prepaginationTaskId.incrementAndGet();
+            if (pendingPrepagRunnable != null) {
+                autoSaveHandler.removeCallbacks(pendingPrepagRunnable);
+                pendingPrepagRunnable = null;
+            }
+            if (chapterPageCounts == null || chapterPageCounts.length != chapters.size()) {
+                chapterPageCounts = new int[chapters.size()];
+            }
+            if (chapterPageExact == null || chapterPageExact.length != chapters.size()) {
+                chapterPageExact = new boolean[chapters.size()];
+            }
+            for (int i = 0; i < chapters.size(); i++) {
+                if (i == currentChapterIndex && chapterPageExact[i] && chapterPageCounts[i] > 0) {
+                    continue;
+                }
+                chapterPageCounts[i] = Math.max(1, cachedCounts[i]);
+                chapterPageExact[i] = true;
+            }
+            updateCalibratedAvgCharsPerPage();
+            recalculateTotalBookPages();
+        } else {
+            scheduleDelayedPrepagination(rw, rh, realSig, 1200L);
+        }
     }
 
     private void scheduleDelayedPrepagination(final int screenW, final int screenH, final String sig, long delayMs) {
@@ -3990,16 +4077,26 @@ public class ReaderActivity extends Activity {
             }
         }
 
-        if ((p == null || p.isSyncedWithServer()) && intentPercent > percent) {
+        boolean localHasExactPos = (p != null) && (
+                (p.getCfi() != null && !p.getCfi().isEmpty())
+                || p.getPageIndex() > 0
+                || p.getChapterIndex() > 0
+                || p.getParagraphIndex() > 0
+        );
+        boolean allowIntentOverride = (p == null || !localHasExactPos
+                || (p.isSyncedWithServer() && (intentPercent > percent + 3.5 || intentChapter > 0 || intentParagraph > 0)));
+
+        if ((p == null || p.isSyncedWithServer()) && intentPercent > percent && allowIntentOverride) {
             percent = intentPercent;
             if (intentChapter > 0 || (intentChapter == 0 && percent <= 1.0)) {
                 targetChapter = spineIndexToChapterIndex(intentChapter);
                 targetParagraph = Math.max(0, intentParagraph);
             } else {
-                // Серверный процент выше локального, но номер главы не передан:
-                // сбрасываем устаревший локальный targetChapter/targetParagraph, чтобы открыть книгу строго по percent
+                // Серверный процент заметно выше локального, но номер главы не передан:
+                // сбрасываем устаревший локальный targetChapter/targetParagraph/CFI, чтобы открыть книгу строго по percent
                 targetChapter = -1;
                 targetParagraph = 0;
+                pendingInitialCfiForLocalOpen = null;
             }
             targetPage = 0;
         } else if (percent <= 0.0 && intentPercent > 0.0) {
@@ -4010,6 +4107,7 @@ public class ReaderActivity extends Activity {
             } else {
                 targetChapter = -1;
                 targetParagraph = 0;
+                pendingInitialCfiForLocalOpen = null;
             }
             targetPage = 0;
         }
@@ -4215,6 +4313,29 @@ public class ReaderActivity extends Activity {
         long localTs = (local != null) ? local.getTimestamp() : 0L;
         long cloudTs = cloudProgress.getTimestamp();
         int curPar = calculateCurrentParagraphIndex();
+        int curPageStartOff = (currentPages != null && currentPageIndex >= 0 && currentPageIndex < currentPages.size())
+                ? Math.max(0, currentPages.get(currentPageIndex).startCharOffset) : -1;
+        int curPageEndOff = (currentPages != null && currentPageIndex >= 0 && currentPageIndex < currentPages.size())
+                ? Math.max(curPageStartOff, currentPages.get(currentPageIndex).endCharOffset) : -1;
+
+        boolean samePageByOffset = (targetChapter == currentChapterIndex && finalCharOff >= 0
+                && curPageStartOff >= 0 && finalCharOff >= curPageStartOff && finalCharOff <= curPageEndOff + 80);
+        boolean sameCfiString = (local != null && local.getCfi() != null && !local.getCfi().isEmpty()
+                && cloudProgress.getCfi() != null && cloudProgress.getCfi().equals(local.getCfi()));
+        boolean cloudHasNoAnchor = (cloudProgress.getCfi() == null || cloudProgress.getCfi().isEmpty()) && targetChapter < 0;
+        boolean localExactSynced = (local != null && local.isSyncedWithServer()
+                && ((local.getCfi() != null && !local.getCfi().isEmpty()) || local.getPageIndex() > 0 || currentChapterIndex > 0));
+
+        // Если облако указывает на ту же страницу / тот же CFI, что уже открыт у читателя,
+        // не прыгаем из-за расхождения расчёта процентов между ЯК и ЯКЛ!
+        if (samePageByOffset || sameCfiString) {
+            return;
+        }
+        if (cloudHasNoAnchor && localExactSynced
+                && Math.abs(cloudPercent - curPercent) <= 3.5
+                && (cloudTs <= 0 || localTs <= 0 || Math.abs(cloudTs - localTs) <= 120000L)) {
+            return;
+        }
 
         // Подавляем ложное срабатывание при минимальной разнице позиций (< 1.5% в той же главе)
         if (Math.abs(cloudPercent - curPercent) < 1.5
@@ -4807,6 +4928,7 @@ public class ReaderActivity extends Activity {
                 if (chapterPageExact != null && index < chapterPageExact.length) {
                     chapterPageExact[index] = true;
                 }
+                syncPrepagCacheForRealCanvasDimsIfNeeded();
                 updateCalibratedAvgCharsPerPage();
                 recalculateTotalBookPages();
                 int effectiveCharOffset = targetCharOffset;
@@ -4918,7 +5040,7 @@ public class ReaderActivity extends Activity {
                         } else if (targetParagraph > 0) {
                             quickOffset = findParagraphOffset(rawText, targetParagraph);
                         } else if (anchorFraction >= 0.0 && anchorFraction <= 1.0) {
-                            quickOffset = (int) Math.round(rawText.length() * anchorFraction);
+                            quickOffset = mapCleanFractionToRawOffset(rawText, anchorFraction);
                         } else if (targetPage == 0) {
                             quickOffset = 0;
                         }
@@ -4995,6 +5117,7 @@ public class ReaderActivity extends Activity {
                                 if (chapterPageExact != null && currentChapterIndex < chapterPageExact.length) {
                                     chapterPageExact[currentChapterIndex] = true;
                                 }
+                                syncPrepagCacheForRealCanvasDimsIfNeeded();
                                 updateCalibratedAvgCharsPerPage();
                                 recalculateTotalBookPages();
                                 int resolvedCharOff = effectiveTargetCharOffset;
@@ -5054,7 +5177,7 @@ public class ReaderActivity extends Activity {
             }
             currentPageIndex = resolvedP;
         } else if (anchorFraction >= 0.0 && rawText != null && rawText.length() > 0) {
-            int charOff = (int) Math.round(anchorFraction * rawText.length());
+            int charOff = mapCleanFractionToRawOffset(rawText, anchorFraction);
             int resolvedP = 0;
             boolean found = false;
             for (int i = 0; i < currentPages.size(); i++) {
@@ -5215,9 +5338,8 @@ public class ReaderActivity extends Activity {
                             if (chapterPageExact != null && currentChapterIndex < chapterPageExact.length) {
                                 chapterPageExact[currentChapterIndex] = true;
                             }
-                            if (rawText != null && rawText.length() > 3000) {
-                                avgCharsPerPage = (double) EpubFormatting.stripFormattingTokens(rawText).length() / (double) currentPages.size();
-                            }
+                            syncPrepagCacheForRealCanvasDimsIfNeeded();
+                            updateCalibratedAvgCharsPerPage();
                             recalculateTotalBookPages();
 
                             if (targetPage == -999) {
@@ -5242,7 +5364,7 @@ public class ReaderActivity extends Activity {
                                 }
                                 currentPageIndex = resolvedP;
                             } else if (anchorFraction >= 0.0) {
-                                int charOff = (int) Math.round(anchorFraction * rawText.length());
+                                int charOff = EpubFormatting.mapCleanFractionToRawOffset(rawText, anchorFraction);
                                 int resolvedP = 0;
                                 boolean found = false;
                                 for (int i = 0; i < currentPages.size(); i++) {
@@ -5410,6 +5532,10 @@ public class ReaderActivity extends Activity {
         return Math.min(100.0, Math.max(0.0, p));
     }
 
+    private int mapCleanFractionToRawOffset(String rawText, double anchorFraction) {
+        return EpubFormatting.mapCleanFractionToRawOffset(rawText, anchorFraction);
+    }
+
     private String getActiveChapterTitle() {
         if (cachedTocTree != null && !cachedTocTree.isEmpty() && currentChapterIndex >= 0) {
             int currentOffset = (currentPages != null && currentPageIndex < currentPages.size())
@@ -5429,6 +5555,11 @@ public class ReaderActivity extends Activity {
     }
 
     private String findActiveTocTitle(List<EpubParser.TocNode> nodes, int curSpineIndex, int curCharOffset) {
+        EpubParser.TocNode best = findActiveTocNode(nodes, curSpineIndex, curCharOffset);
+        return best != null ? best.title : null;
+    }
+
+    private EpubParser.TocNode findActiveTocNode(List<EpubParser.TocNode> nodes, int curSpineIndex, int curCharOffset) {
         List<EpubParser.TocNode> flat = new ArrayList<>();
         flattenAllTocNodes(nodes, flat);
         EpubParser.TocNode best = null;
@@ -5443,7 +5574,21 @@ public class ReaderActivity extends Activity {
                 best = node;
             }
         }
-        return best != null ? best.title : null;
+        return best;
+    }
+
+    private boolean expandAncestorsOfNode(List<EpubParser.TocNode> nodes, EpubParser.TocNode target) {
+        if (nodes == null || target == null) return false;
+        for (EpubParser.TocNode node : nodes) {
+            if (node == target) return true;
+            if (node.children != null && !node.children.isEmpty()) {
+                if (expandAncestorsOfNode(node.children, target)) {
+                    node.isExpanded = true;
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private void flattenAllTocNodes(List<EpubParser.TocNode> nodes, List<EpubParser.TocNode> out) {
@@ -5751,6 +5896,11 @@ public class ReaderActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (appSettings != null) {
+            float wanted = appSettings.getUiScale();
+            com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(getApplicationContext(), wanted);
+            com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, wanted);
+        }
         EpdController.enableRegalMode(readerCanvas);
         forceEpdRefresh();
     }
