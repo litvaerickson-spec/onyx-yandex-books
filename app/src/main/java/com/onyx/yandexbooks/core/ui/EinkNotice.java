@@ -57,6 +57,45 @@ public final class EinkNotice {
 
     private EinkNotice() {}
 
+    private static boolean isActivityAlive(Activity activity) {
+        if (activity == null || activity.isFinishing()) {
+            return false;
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 17 && activity.isDestroyed()) {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean handleNoticeDialogKey(final Dialog dialog, final EinkScrollView scrollView,
+                                                 final Runnable onConfirm, final Runnable onCancel,
+                                                 int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+                || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0 && scrollView != null) {
+                boolean down = (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN);
+                scrollView.pageScrollEink(down);
+            }
+            return true;
+        }
+        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            if (keyCode == KeyEvent.KEYCODE_BACK) {
+                try { dialog.dismiss(); } catch (Exception ignored) {}
+                if (onCancel != null) {
+                    try { onCancel.run(); } catch (Exception ignored) {}
+                }
+                return true;
+            } else if (keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_DPAD_CENTER) {
+                try { dialog.dismiss(); } catch (Exception ignored) {}
+                if (onConfirm != null) {
+                    try { onConfirm.run(); } catch (Exception ignored) {}
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Форматирует текст уведомлений для E-Ink экрана через единый парсер:
      * преобразует **выделения** и заголовки в жирный шрифт и убирает сырые символы Markdown и эмодзи.
@@ -122,13 +161,15 @@ public final class EinkNotice {
         }
 
         final Activity activity = findActivity(context);
-        if (activity == null || activity.isFinishing()) {
+        if (!isActivityAlive(activity)) {
             return;
         }
 
-        if (sCurrentDialog != null && sCurrentDialog.isShowing()) {
+        if (sCurrentDialog != null) {
             try {
-                sCurrentDialog.dismiss();
+                if (sCurrentDialog.isShowing()) {
+                    sCurrentDialog.dismiss();
+                }
             } catch (Exception ignored) {}
             sCurrentDialog = null;
         }
@@ -170,7 +211,7 @@ public final class EinkNotice {
             root.addView(divider, divLp);
 
             final int maxScrollH = (int) (dm.heightPixels * 0.62);
-            EinkScrollView scrollView = new MaxHeightScrollView(activity, maxScrollH);
+            final EinkScrollView scrollView = new MaxHeightScrollView(activity, maxScrollH);
             scrollView.setFadingEdgeLength(0);
             scrollView.setOverScrollMode(View.OVER_SCROLL_NEVER);
             root.addView(scrollView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -238,32 +279,18 @@ public final class EinkNotice {
             final int targetW = Math.min((int) (dm.widthPixels * 0.94), (int) (540 * density));
             dialog.setContentView(root, new ViewGroup.LayoutParams(targetW, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-            // Аппаратные клавиши (Back = Cancel, Enter/Dpad Center = Confirm)
+            // Аппаратные клавиши (Page/Volume = прокрутка, Back = Cancel, Enter/Dpad Center = Confirm)
             dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
                 @Override
                 public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
-                    if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                        if (keyCode == KeyEvent.KEYCODE_BACK) {
-                            dialog.dismiss();
-                            if (onCancel != null) {
-                                try { onCancel.run(); } catch (Exception ignored) {}
-                            }
-                            return true;
-                        } else if (keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_DPAD_CENTER) {
-                            dialog.dismiss();
-                            if (onConfirm != null) {
-                                try { onConfirm.run(); } catch (Exception ignored) {}
-                            }
-                            return true;
-                        }
-                    }
-                    return false;
+                    return handleNoticeDialogKey(dialog, scrollView, onConfirm, onCancel, keyCode, event);
                 }
             });
 
             dialog.setOnShowListener(new DialogInterface.OnShowListener() {
                 @Override
                 public void onShow(DialogInterface d) {
+                    if (!isActivityAlive(activity)) return;
                     if (dialog.getWindow() != null) {
                         dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
                     }
@@ -277,11 +304,14 @@ public final class EinkNotice {
                     if (sCurrentDialog == dialog) {
                         sCurrentDialog = null;
                     }
-                    EpdController.requestFullRefresh(activity, null);
+                    if (isActivityAlive(activity)) {
+                        EpdController.requestFullRefresh(activity, null);
+                    }
                 }
             });
 
             sCurrentDialog = dialog;
+            if (!isActivityAlive(activity)) return;
             dialog.show();
 
             if (dialog.getWindow() != null) {
@@ -315,14 +345,16 @@ public final class EinkNotice {
         }
 
         final Activity activity = findActivity(context);
-        if (activity == null || activity.isFinishing()) {
+        if (!isActivityAlive(activity)) {
             return;
         }
 
         // Если уже есть открытый диалог уведомления, аккуратно закрываем его перед показом нового
-        if (sCurrentDialog != null && sCurrentDialog.isShowing()) {
+        if (sCurrentDialog != null) {
             try {
-                sCurrentDialog.dismiss();
+                if (sCurrentDialog.isShowing()) {
+                    sCurrentDialog.dismiss();
+                }
             } catch (Exception ignored) {}
             sCurrentDialog = null;
         }
@@ -369,7 +401,7 @@ public final class EinkNotice {
 
             // Текст сообщения (в EinkScrollView с ограничением по высоте до 62% экрана)
             final int maxScrollH = (int) (dm.heightPixels * 0.62);
-            EinkScrollView scrollView = new MaxHeightScrollView(activity, maxScrollH);
+            final EinkScrollView scrollView = new MaxHeightScrollView(activity, maxScrollH);
             scrollView.setFadingEdgeLength(0);
             scrollView.setOverScrollMode(View.OVER_SCROLL_NEVER);
             LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -410,24 +442,18 @@ public final class EinkNotice {
             final int targetW = Math.min((int) (dm.widthPixels * 0.94), (int) (540 * density));
             dialog.setContentView(root, new ViewGroup.LayoutParams(targetW, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-            // Аппаратные клавиши (Back, Enter, Dpad Center)
+            // Аппаратные клавиши (Page/Volume = прокрутка, Back/Enter/Dpad Center = закрыть)
             dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
                 @Override
                 public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
-                    if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                        if (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_ENTER
-                                || keyCode == KeyEvent.KEYCODE_DPAD_CENTER) {
-                            dialog.dismiss();
-                            return true;
-                        }
-                    }
-                    return false;
+                    return handleNoticeDialogKey(dialog, scrollView, null, null, keyCode, event);
                 }
             });
 
             dialog.setOnShowListener(new DialogInterface.OnShowListener() {
                 @Override
                 public void onShow(DialogInterface d) {
+                    if (!isActivityAlive(activity)) return;
                     if (dialog.getWindow() != null) {
                         dialog.getWindow().setLayout(targetW, ViewGroup.LayoutParams.WRAP_CONTENT);
                     }
@@ -441,7 +467,9 @@ public final class EinkNotice {
                     if (sCurrentDialog == dialog) {
                         sCurrentDialog = null;
                     }
-                    EpdController.requestFullRefresh(activity, null);
+                    if (isActivityAlive(activity)) {
+                        EpdController.requestFullRefresh(activity, null);
+                    }
                     if (onDismiss != null) {
                         try {
                             onDismiss.run();
@@ -451,6 +479,7 @@ public final class EinkNotice {
             });
 
             sCurrentDialog = dialog;
+            if (!isActivityAlive(activity)) return;
             dialog.show();
 
             if (dialog.getWindow() != null) {

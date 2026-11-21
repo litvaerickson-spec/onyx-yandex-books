@@ -139,15 +139,52 @@ public class EinkListView extends ListView {
 
         int first = getFirstVisiblePosition();
         int last = getLastVisiblePosition();
-        int visibleCount = Math.max(1, last - first);
-        int step = Math.max(1, visibleCount - 1);
+        int childCount = getChildCount();
+        int listTop = getPaddingTop();
+        int listBottom = getHeight() - getPaddingBottom();
+        View firstChild = childCount > 0 ? getChildAt(0) : null;
+        View lastChild = childCount > 0 ? getChildAt(childCount - 1) : null;
 
-        int target = down ? Math.min(count - 1, first + step) : Math.max(0, first - step);
-        if (target == first && ((down && target == count - 1) || (!down && target == 0))) {
-            return false;
+        int target;
+        if (down) {
+            boolean atBottom = (last >= count - 1) && (lastChild == null || lastChild.getBottom() <= listBottom);
+            if (atBottom) {
+                return false;
+            }
+            if (lastChild != null && lastChild.getBottom() > listBottom && last > first) {
+                // Частично обрезанная нижняя карточка становится первой сверху на новой странице
+                target = last;
+            } else {
+                target = Math.min(count - 1, last + 1);
+            }
+            if (target == first && first < count - 1) {
+                target = first + 1;
+            }
+            if (target == first && lastChild != null && lastChild.getBottom() <= listBottom) {
+                return false;
+            }
+        } else {
+            boolean atTop = (first <= 0) && (firstChild == null || firstChild.getTop() >= listTop);
+            if (atTop) {
+                return false;
+            }
+            if (first == 0 && firstChild != null && firstChild.getTop() < listTop) {
+                target = 0;
+            } else {
+                int viewportH = Math.max(1, listBottom - listTop);
+                int visibleSpan = (firstChild != null && lastChild != null)
+                        ? Math.max(1, lastChild.getBottom() - firstChild.getTop())
+                        : viewportH;
+                int avgItemH = Math.max(1, visibleSpan / Math.max(1, childCount));
+                int step = Math.max(1, viewportH / avgItemH);
+                target = Math.max(0, first - step);
+                if (target == first && first > 0) {
+                    target = first - 1;
+                }
+            }
         }
 
-        setSelection(target);
+        setSelectionFromTop(target, listTop);
         EpdController.invalidateViewTree(this);
         scheduleEpdRefresh();
         return true;

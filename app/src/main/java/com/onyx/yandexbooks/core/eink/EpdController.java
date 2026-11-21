@@ -376,6 +376,15 @@ public class EpdController {
      * Запрос аппаратного полного обновления дисплея E-Ink (GC16 Full Refresh).
      */
     public static void requestFullRefresh(Context context, View view) {
+        if (view == null && context instanceof android.app.Activity) {
+            try {
+                android.view.Window w = ((android.app.Activity) context).getWindow();
+                if (w != null) {
+                    view = w.getDecorView();
+                }
+            } catch (Throwable ignored) {}
+        }
+
         // 1. Попытка вызвать методы Onyx SDK через рефлексию
         tryOnyxSdkRefresh(view);
 
@@ -482,6 +491,11 @@ public class EpdController {
      * полную перерисовку дерева при прокрутке.
      */
     public static void configureEinkListView(final Context context, final AbsListView listView) {
+        configureEinkListView(context, listView, null);
+    }
+
+    public static void configureEinkListView(final Context context, final AbsListView listView,
+                                             final AbsListView.OnScrollListener chainedListener) {
         if (listView == null) return;
         try {
             listView.setCacheColorHint(Color.WHITE);
@@ -494,16 +508,23 @@ public class EpdController {
             listView.setOnScrollListener(new AbsListView.OnScrollListener() {
                 @Override
                 public void onScrollStateChanged(AbsListView view, int scrollState) {
-                    invalidateViewTree(view);
                     if (scrollState == AbsListView.OnScrollListener.SCROLL_STATE_IDLE) {
                         View target = view.getRootView() != null ? view.getRootView() : view;
                         requestFullRefresh(context, target);
+                    } else {
+                        invalidateViewTree(view);
+                    }
+                    if (chainedListener != null) {
+                        chainedListener.onScrollStateChanged(view, scrollState);
                     }
                 }
 
                 @Override
                 public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount) {
                     invalidateViewTree(view);
+                    if (chainedListener != null) {
+                        chainedListener.onScroll(view, firstVisibleItem, visibleItemCount, totalItemCount);
+                    }
                 }
             });
         } catch (Throwable ignored) {}
@@ -524,7 +545,8 @@ public class EpdController {
                 if (constants != null) {
                     for (Object c : constants) {
                         String name = c.toString();
-                        if ("EPD_FULL".equalsIgnoreCase(name) || "EPD_GC16".equalsIgnoreCase(name)) {
+                        if ("EPD_FULL".equalsIgnoreCase(name) || "EPD_GC16".equalsIgnoreCase(name)
+                                || "FULL".equalsIgnoreCase(name) || "GC16".equalsIgnoreCase(name)) {
                             epdFull = c;
                             break;
                         }
@@ -546,48 +568,67 @@ public class EpdController {
     }
 
     private static boolean tryOnyxSdkRefresh(View view) {
+        if (view == null) return false;
         for (String className : EPD_CONTROLLER_CLASS_NAMES) {
             try {
                 Class<?> clazz = Class.forName(className);
+                Method refreshViewEnum = null;
+                Method invalidateViewEnum = null;
+                Method refreshViewString = null;
+                Method refreshViewInt = null;
+                Method refreshViewOnly = null;
 
-                // А) Поиск метода refreshScreen(View, ...)
                 for (Method m : clazz.getMethods()) {
-                    if ("refreshScreen".equals(m.getName())) {
-                        Class<?>[] params = m.getParameterTypes();
-                        if (params.length == 1 && params[0].isAssignableFrom(View.class)) {
-                            m.invoke(null, view);
-                            Log.d(TAG, "Triggered " + className + ".refreshScreen(View)");
-                            return true;
-                        } else if (params.length == 2 && params[0].isAssignableFrom(View.class)) {
-                            // Второй параметр может быть String, int или UpdateMode enum
-                            if (params[1] == String.class) {
-                                m.invoke(null, view, "GC");
-                                Log.d(TAG, "Triggered " + className + ".refreshScreen(View, 'GC')");
-                                return true;
-                            } else if (params[1].isEnum()) {
-                                Object enumConst = findGcEnumConstant(params[1]);
-                                if (enumConst != null) {
-                                    m.invoke(null, view, enumConst);
-                                    Log.d(TAG, "Triggered " + className + ".refreshScreen(View, " + enumConst + ")");
-                                    return true;
-                                }
+                    String name = m.getName();
+                    Class<?>[] params = m.getParameterTypes();
+                    if ("refreshScreen".equals(name)) {
+                        if (params.length == 2 && params[0].isAssignableFrom(View.class)) {
+                            if (params[1].isEnum()) {
+                                refreshViewEnum = m;
+                            } else if (params[1] == String.class) {
+                                refreshViewString = m;
                             } else if (params[1] == int.class) {
-                                m.invoke(null, view, 1); // 1 = GC mode
-                                Log.d(TAG, "Triggered " + className + ".refreshScreen(View, 1)");
-                                return true;
+                                refreshViewInt = m;
                             }
+                        } else if (params.length == 1 && params[0].isAssignableFrom(View.class)) {
+                            refreshViewOnly = m;
                         }
-                    } else if ("invalidate".equals(m.getName())) {
-                        Class<?>[] params = m.getParameterTypes();
-                        if (params.length == 2 && params[0].isAssignableFrom(View.class) && params[1].isEnum()) {
-                            Object enumConst = findGcEnumConstant(params[1]);
-                            if (enumConst != null) {
-                                m.invoke(null, view, enumConst);
-                                Log.d(TAG, "Triggered " + className + ".invalidate(View, " + enumConst + ")");
-                                return true;
-                            }
-                        }
+                    } else if ("invalidate".equals(name)
+                            && params.length == 2 && params[0].isAssignableFrom(View.class) && params[1].isEnum()) {
+                        invalidateViewEnum = m;
                     }
+                }
+
+                if (refreshViewEnum != null) {
+                    Object enumConst = findGcEnumConstant(refreshViewEnum.getParameterTypes()[1]);
+                    if (enumConst != null) {
+                        refreshViewEnum.invoke(null, view, enumConst);
+                        Log.d(TAG, "Triggered " + className + ".refreshScreen(View, " + enumConst + ")");
+                        return true;
+                    }
+                }
+                if (invalidateViewEnum != null) {
+                    Object enumConst = findGcEnumConstant(invalidateViewEnum.getParameterTypes()[1]);
+                    if (enumConst != null) {
+                        invalidateViewEnum.invoke(null, view, enumConst);
+                        Log.d(TAG, "Triggered " + className + ".invalidate(View, " + enumConst + ")");
+                        return true;
+                    }
+                }
+                if (refreshViewString != null) {
+                    refreshViewString.invoke(null, view, "GC");
+                    Log.d(TAG, "Triggered " + className + ".refreshScreen(View, 'GC')");
+                    return true;
+                }
+                if (refreshViewInt != null) {
+                    refreshViewInt.invoke(null, view, 1);
+                    Log.d(TAG, "Triggered " + className + ".refreshScreen(View, 1)");
+                    return true;
+                }
+                if (refreshViewOnly != null) {
+                    refreshViewOnly.invoke(null, view);
+                    Log.d(TAG, "Triggered " + className + ".refreshScreen(View)");
+                    return true;
                 }
             } catch (Throwable ignored) {
                 // Класс не найден на данном устройстве, пробуем следующий
@@ -602,7 +643,8 @@ public class EpdController {
             if (constants != null) {
                 for (Object c : constants) {
                     String name = c.toString();
-                    if ("GC".equalsIgnoreCase(name) || "GC16".equalsIgnoreCase(name) || "CLEAR".equalsIgnoreCase(name)) {
+                    if ("GC".equalsIgnoreCase(name) || "GC16".equalsIgnoreCase(name)
+                            || "CLEAR".equalsIgnoreCase(name) || "FULL".equalsIgnoreCase(name)) {
                         return c;
                     }
                 }

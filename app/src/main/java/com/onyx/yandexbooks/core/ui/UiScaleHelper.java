@@ -6,6 +6,8 @@ import android.content.res.Resources;
 import android.util.DisplayMetrics;
 import android.util.Log;
 
+import java.util.WeakHashMap;
+
 /**
  * Помощник динамического масштабирования интерфейса и шрифтов приложения (UI & Font Scale).
  * Позволяет адаптировать размеры кнопок, вкладок, списков и текстов для экранов Onyx Boox Darwin.
@@ -13,6 +15,7 @@ import android.util.Log;
 public class UiScaleHelper {
 
     private static final String TAG = "UiScaleHelper";
+    private static final WeakHashMap<android.view.View, Integer> sBaseViewHeights = new WeakHashMap<android.view.View, Integer>();
 
     private static float sBaseDensity = -1.0f;
     private static float sBaseScaledDensity = -1.0f;
@@ -107,16 +110,21 @@ public class UiScaleHelper {
         init(newBase);
         float effective = sanitizeScale(scaleFactor);
         if (Math.abs(effective - 1.0f) < 0.04f) {
-            return newBase;
+            effective = 1.0f;
         }
         try {
             if (android.os.Build.VERSION.SDK_INT >= 17 && sBaseDensityDpi > 0) {
                 Resources res = newBase.getResources();
                 if (res != null) {
-                    Configuration cfg = new Configuration(res.getConfiguration());
-                    cfg.densityDpi = Math.round(sBaseDensityDpi * effective);
-                    cfg.fontScale = sBaseFontScale;
-                    return newBase.createConfigurationContext(cfg);
+                    Configuration curCfg = res.getConfiguration();
+                    int targetDpi = Math.round(sBaseDensityDpi * effective);
+                    if (curCfg.densityDpi != targetDpi || Math.abs(curCfg.fontScale - sBaseFontScale) > 0.01f) {
+                        Configuration cfg = new Configuration(curCfg);
+                        cfg.densityDpi = targetDpi;
+                        cfg.fontScale = sBaseFontScale;
+                        return newBase.createConfigurationContext(cfg);
+                    }
+                    return newBase;
                 }
             }
         } catch (Throwable t) {
@@ -126,12 +134,14 @@ public class UiScaleHelper {
     }
 
     /**
-     * Проверяет, откатила ли система применённый масштаб обратно к эталонным 100%.
+     * Проверяет, откатила ли или сместила ли система применённый масштаб относительно целевого коэффициента.
      */
     public static boolean hasScaleDrifted(Context context, float targetScale) {
         if (context == null || sBaseDensity <= 0) return false;
         float effective = sanitizeScale(targetScale);
-        if (Math.abs(effective - 1.0f) < 0.04f) return false;
+        if (Math.abs(effective - 1.0f) < 0.04f) {
+            effective = 1.0f;
+        }
         try {
             Resources res = context.getResources();
             if (res == null) return false;
@@ -152,11 +162,10 @@ public class UiScaleHelper {
     public static void applyViewTreeScale(android.view.View root, float scaleFactor) {
         if (root == null) return;
         float effective = sanitizeScale(scaleFactor);
-        if (Math.abs(effective - 1.0f) < 0.04f) return;
+        if (Math.abs(effective - 1.0f) < 0.04f) {
+            effective = 1.0f;
+        }
         try {
-            Object tag = root.getTag();
-            if ("__ui_scaled__".equals(tag)) return;
-            root.setTag("__ui_scaled__");
             scaleViewNodeRecursive(root, effective);
         } catch (Throwable ignored) {}
     }
@@ -165,11 +174,21 @@ public class UiScaleHelper {
         if (view == null) return;
         try {
             android.view.ViewGroup.LayoutParams lp = view.getLayoutParams();
-            if (lp != null && lp.height > 0 && factor > 1.25f) {
-                // Мягкое дополнительное расширение высоты кнопок/панелей при масштабах 145%–200%
-                float boost = 1.0f + (factor - 1.0f) * 0.25f;
-                lp.height = Math.round(lp.height * boost);
-                view.setLayoutParams(lp);
+            if (lp != null && lp.height > 0) {
+                Integer origHeight;
+                synchronized (sBaseViewHeights) {
+                    origHeight = sBaseViewHeights.get(view);
+                    if (origHeight == null) {
+                        origHeight = lp.height;
+                        sBaseViewHeights.put(view, origHeight);
+                    }
+                }
+                float boost = (factor > 1.25f) ? (1.0f + (factor - 1.0f) * 0.25f) : 1.0f;
+                int desiredHeight = Math.round(origHeight * boost);
+                if (lp.height != desiredHeight) {
+                    lp.height = desiredHeight;
+                    view.setLayoutParams(lp);
+                }
             }
             if (view instanceof android.view.ViewGroup) {
                 android.view.ViewGroup vg = (android.view.ViewGroup) view;

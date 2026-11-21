@@ -23,6 +23,7 @@ import com.onyx.yandexbooks.core.storage.AppSettings;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.lang.ref.WeakReference;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -87,13 +88,13 @@ public class CoverLoader {
     }
 
     public void loadCover(final ImageView imageView, final String bookUuid, final String coverUrl, final String title) {
-        if (imageView == null) return;
+        if (imageView == null || bookUuid == null || bookUuid.isEmpty()) return;
 
         imageView.setTag(bookUuid);
 
         // 1. Проверка в памяти
         Bitmap cached = memoryCache.get(bookUuid);
-        if (cached != null) {
+        if (cached != null && !cached.isRecycled()) {
             imageView.setImageBitmap(cached);
             return;
         }
@@ -101,6 +102,8 @@ public class CoverLoader {
         // Показываем временную контрастную заглушку с названием книги
         Bitmap placeholder = createTypographyCover(title);
         imageView.setImageBitmap(placeholder);
+
+        final WeakReference<ImageView> imageViewRef = new WeakReference<ImageView>(imageView);
 
         // 2. Фоновая загрузка с диска или сети
         executor.execute(new Runnable() {
@@ -112,6 +115,9 @@ public class CoverLoader {
                 File diskFile = new File(diskCacheDir, bookUuid + ".jpg");
                 if (diskFile.exists() && diskFile.length() > 0) {
                     bitmap = decodeSampledBitmap(diskFile.getAbsolutePath(), 140, 200);
+                    if (bitmap == null) {
+                        try { diskFile.delete(); } catch (Throwable ignored) {}
+                    }
                 }
 
                 // Загрузка из сети
@@ -119,22 +125,27 @@ public class CoverLoader {
                     bitmap = downloadBitmap(coverUrl, diskFile);
                 }
 
-                if (bitmap != null && new AppSettings(appContext).isDitherCoversEnabled()) {
-                    bitmap = EinkDitherer.applyFloydSteinbergDither(bitmap);
+                if (bitmap != null && !bitmap.isRecycled() && new AppSettings(appContext).isDitherCoversEnabled()) {
+                    Bitmap dithered = EinkDitherer.applyFloydSteinbergDither(bitmap);
+                    if (dithered != null && dithered != bitmap) {
+                        bitmap.recycle();
+                        bitmap = dithered;
+                    }
                 }
 
-                if (bitmap == null) {
+                if (bitmap == null || bitmap.isRecycled()) {
                     bitmap = createTypographyCover(title);
                 }
 
-                if (bitmap != null) {
+                if (bitmap != null && !bitmap.isRecycled()) {
                     memoryCache.put(bookUuid, bitmap);
                     final Bitmap finalBmp = bitmap;
                     mainHandler.post(new Runnable() {
                         @Override
                         public void run() {
-                            if (bookUuid.equals(imageView.getTag())) {
-                                imageView.setImageBitmap(finalBmp);
+                            ImageView target = imageViewRef.get();
+                            if (target != null && bookUuid.equals(target.getTag()) && !finalBmp.isRecycled()) {
+                                target.setImageBitmap(finalBmp);
                             }
                         }
                     });
@@ -147,19 +158,32 @@ public class CoverLoader {
         Response response = null;
         InputStream in = null;
         FileOutputStream out = null;
+        File tmpFile = new File(destFile.getParentFile(), destFile.getName() + ".tmp." + Thread.currentThread().getId());
         try {
             Request request = new Request.Builder().url(url).build();
             response = httpClient.newCall(request).execute();
             if (response.isSuccessful() && response.body() != null) {
                 in = response.body().byteStream();
-                out = new FileOutputStream(destFile);
+                out = new FileOutputStream(tmpFile);
                 byte[] buffer = new byte[4096];
                 int read;
                 while ((read = in.read(buffer)) != -1) {
                     out.write(buffer, 0, read);
                 }
                 out.flush();
-                return decodeSampledBitmap(destFile.getAbsolutePath(), 140, 200);
+                out.close();
+                out = null;
+
+                Bitmap decoded = decodeSampledBitmap(tmpFile.getAbsolutePath(), 140, 200);
+                if (decoded != null && !decoded.isRecycled()) {
+                    if (destFile.exists()) {
+                        destFile.delete();
+                    }
+                    if (!tmpFile.renameTo(destFile)) {
+                        try { tmpFile.delete(); } catch (Throwable ignored) {}
+                    }
+                    return decoded;
+                }
             }
         } catch (Exception ignored) {
         } finally {
@@ -171,6 +195,9 @@ public class CoverLoader {
             }
             if (response != null) {
                 try { response.close(); } catch (Throwable ignored) {}
+            }
+            if (tmpFile.exists()) {
+                try { tmpFile.delete(); } catch (Throwable ignored) {}
             }
         }
         return null;

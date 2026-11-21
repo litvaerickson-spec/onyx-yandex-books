@@ -96,10 +96,19 @@ public class EinkScrollView extends ScrollView {
         EpdController.invalidateViewTree(this);
     }
 
+    private int lastComputedScrollX = Integer.MIN_VALUE;
+    private int lastComputedScrollY = Integer.MIN_VALUE;
+
     @Override
     public void computeScroll() {
         super.computeScroll();
-        EpdController.invalidateViewTree(this);
+        int sx = getScrollX();
+        int sy = getScrollY();
+        if (sx != lastComputedScrollX || sy != lastComputedScrollY) {
+            lastComputedScrollX = sx;
+            lastComputedScrollY = sy;
+            EpdController.invalidateViewTree(this);
+        }
     }
 
     @Override

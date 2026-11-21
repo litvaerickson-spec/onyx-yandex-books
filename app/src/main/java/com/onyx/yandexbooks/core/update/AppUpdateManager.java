@@ -64,8 +64,32 @@ public class AppUpdateManager {
             "https://api.github.com/repos/litvaerickson-spec/onyx-yandex-books/releases/latest";
 
     private static AppUpdateManager instance;
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final ExecutorService checkExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService downloadExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    private static boolean isActivityAlive(Activity activity) {
+        if (activity == null || activity.isFinishing()) return false;
+        if (android.os.Build.VERSION.SDK_INT >= 17 && activity.isDestroyed()) return false;
+        return true;
+    }
+
+    private static boolean isValidApkArchive(File apkFile) {
+        if (apkFile == null || !apkFile.exists() || apkFile.length() < 1024L) {
+            return false;
+        }
+        java.util.zip.ZipFile zip = null;
+        try {
+            zip = new java.util.zip.ZipFile(apkFile);
+            return zip.getEntry("AndroidManifest.xml") != null;
+        } catch (Throwable ignored) {
+            return false;
+        } finally {
+            if (zip != null) {
+                try { zip.close(); } catch (Throwable ignored) {}
+            }
+        }
+    }
 
     public static class ReleaseInfo {
         public String tagName;       // e.g. "v1.3.0"
@@ -127,18 +151,44 @@ public class AppUpdateManager {
             if (lVal < cVal) return false;
         }
 
-        // Базовые версии равны: стабильный релиз (без суффикса) всегда новее pre-release (beta)
+        // Базовые версии равны: стабильный релиз (без суффикса) всегда новее pre-release (SemVer 2.0.0)
         boolean lHasPre = !lPre.isEmpty();
         boolean cHasPre = !cPre.isEmpty();
         if (!lHasPre && cHasPre) return true;
         if (lHasPre && !cHasPre) return false;
         if (lHasPre && cHasPre) {
-            int lPreNum = parseIntSafe(lPre);
-            int cPreNum = parseIntSafe(cPre);
-            if (lPreNum != cPreNum) return lPreNum > cPreNum;
-            return lPre.compareToIgnoreCase(cPre) > 0;
+            String[] lPreIds = lPre.split("\\.");
+            String[] cPreIds = cPre.split("\\.");
+            int minPre = Math.min(lPreIds.length, cPreIds.length);
+            for (int i = 0; i < minPre; i++) {
+                String li = lPreIds[i];
+                String ci = cPreIds[i];
+                if (li.equalsIgnoreCase(ci)) continue;
+                boolean lNum = isAsciiDigits(li);
+                boolean cNum = isAsciiDigits(ci);
+                if (lNum && cNum) {
+                    int lv = parseIntSafe(li);
+                    int cv = parseIntSafe(ci);
+                    if (lv != cv) return lv > cv;
+                } else if (lNum != cNum) {
+                    return !lNum; // по SemVer нечисловые идентификаторы старше числовых
+                } else {
+                    int cmp = li.compareToIgnoreCase(ci);
+                    if (cmp != 0) return cmp > 0;
+                }
+            }
+            return lPreIds.length > cPreIds.length;
         }
         return false;
+    }
+
+    private static boolean isAsciiDigits(String s) {
+        if (s == null || s.isEmpty()) return false;
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            if (ch < '0' || ch > '9') return false;
+        }
+        return true;
     }
 
     private static int parseIntSafe(String part) {
@@ -215,7 +265,7 @@ public class AppUpdateManager {
      * 3) В крайнем случае делает fallback на /releases/latest.
      */
     public void fetchLatestRelease(final Context context, final UpdateCheckCallback callback) {
-        executor.execute(new Runnable() {
+        checkExecutor.execute(new Runnable() {
             @Override
             public void run() {
                 ReleaseInfo foundRelease = null;
@@ -224,6 +274,7 @@ public class AppUpdateManager {
                 String currentVer = getCurrentVersionName(context);
 
                 // Стратегия 1: GitHub Releases List (находит свежайшие версии, включая пре-релизы и бета)
+                Response response1 = null;
                 try {
                     Request request = new Request.Builder()
                             .url(GITHUB_RELEASES_LIST_URL)
@@ -232,9 +283,9 @@ public class AppUpdateManager {
                             .header("Cache-Control", "no-cache")
                             .build();
 
-                    Response response = client.newCall(request).execute();
-                    if (response.isSuccessful() && response.body() != null) {
-                        String jsonStr = response.body().string();
+                    response1 = client.newCall(request).execute();
+                    if (response1.isSuccessful() && response1.body() != null) {
+                        String jsonStr = response1.body().string();
                         JSONArray array = new JSONArray(jsonStr);
                         for (int i = 0; i < array.length(); i++) {
                             JSONObject relObj = array.optJSONObject(i);
@@ -246,34 +297,44 @@ public class AppUpdateManager {
                             }
                         }
                     } else {
-                        lastError = "GitHub API: HTTP " + (response != null ? response.code() : "null");
+                        lastError = "GitHub API: HTTP " + (response1 != null ? response1.code() : "null");
                     }
                 } catch (Exception e) {
                     Log.w(TAG, "Releases list fetch failed, falling back to version.json / latest", e);
                     lastError = e.getMessage();
+                } finally {
+                    if (response1 != null) {
+                        try { response1.close(); } catch (Throwable ignored) {}
+                    }
                 }
 
                 // Стратегия 2: Fallback на raw.githubusercontent.com version.json (без лимитов GitHub API)
                 if (foundRelease == null) {
+                    Response response2 = null;
                     try {
                         Request request = new Request.Builder()
                                 .url(GITHUB_RAW_VERSION_URL)
                                 .header("User-Agent", "OnyxYandexBooks-App/" + currentVer)
                                 .header("Cache-Control", "no-cache")
                                 .build();
-                        Response response = client.newCall(request).execute();
-                        if (response.isSuccessful() && response.body() != null) {
-                            String jsonStr = response.body().string();
+                        response2 = client.newCall(request).execute();
+                        if (response2.isSuccessful() && response2.body() != null) {
+                            String jsonStr = response2.body().string();
                             JSONObject json = new JSONObject(jsonStr);
                             foundRelease = parseReleaseFromJson(json);
                         }
                     } catch (Exception e) {
                         Log.w(TAG, "Raw version.json fallback failed", e);
+                    } finally {
+                        if (response2 != null) {
+                            try { response2.close(); } catch (Throwable ignored) {}
+                        }
                     }
                 }
 
                 // Стратегия 3: Fallback на /releases/latest
                 if (foundRelease == null) {
+                    Response response3 = null;
                     try {
                         Request request = new Request.Builder()
                                 .url(GITHUB_LATEST_RELEASE_URL)
@@ -281,14 +342,18 @@ public class AppUpdateManager {
                                 .header("Accept", "application/vnd.github.v3+json")
                                 .header("Cache-Control", "no-cache")
                                 .build();
-                        Response response = client.newCall(request).execute();
-                        if (response.isSuccessful() && response.body() != null) {
-                            String jsonStr = response.body().string();
+                        response3 = client.newCall(request).execute();
+                        if (response3.isSuccessful() && response3.body() != null) {
+                            String jsonStr = response3.body().string();
                             JSONObject json = new JSONObject(jsonStr);
                             foundRelease = parseReleaseFromJson(json);
                         }
                     } catch (Exception e) {
                         Log.w(TAG, "Releases latest fallback failed", e);
+                    } finally {
+                        if (response3 != null) {
+                            try { response3.close(); } catch (Throwable ignored) {}
+                        }
                     }
                 }
 
@@ -707,7 +772,7 @@ public class AppUpdateManager {
      * Скачивание APK с отображением прогресса и последующий вызов системного установщика.
      */
     public void downloadAndInstallApk(final Activity activity, final ReleaseInfo release) {
-        if (activity == null || activity.isFinishing()) return;
+        if (!isActivityAlive(activity) || release == null) return;
 
         final ProgressDialog progressDialog = new ProgressDialog(activity);
         progressDialog.setTitle("Яндекс Книги");
@@ -716,18 +781,26 @@ public class AppUpdateManager {
         progressDialog.setMax(100);
         progressDialog.setProgress(0);
         progressDialog.setCancelable(false);
+        if (progressDialog.getWindow() != null) {
+            progressDialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        }
         progressDialog.show();
 
-        executor.execute(new Runnable() {
+        downloadExecutor.execute(new Runnable() {
             @Override
             public void run() {
                 File targetFile = null;
+                File tmpFile = null;
+                Response response = null;
+                InputStream in = null;
+                FileOutputStream out = null;
                 try {
                     // Выбираем доступную для записи директорию Загрузок
                     File downloadDir = resolveWritableDownloadDir(activity, true);
 
                     String fname = release.apkFileName != null ? release.apkFileName : "yandex-books-update.apk";
                     targetFile = new File(downloadDir, fname);
+                    tmpFile = new File(downloadDir, fname + ".tmp");
 
                     OkHttpClient client = HttpClientFactory.getClient();
                     Request request = new Request.Builder()
@@ -735,9 +808,9 @@ public class AppUpdateManager {
                             .header("User-Agent", "OnyxYandexBooks-App/" + getCurrentVersionName(activity))
                             .build();
 
-                    Response response = client.newCall(request).execute();
-                    if (!response.isSuccessful()) {
-                        throw new Exception("HTTP " + response.code() + " " + response.message());
+                    response = client.newCall(request).execute();
+                    if (!response.isSuccessful() || response.body() == null) {
+                        throw new Exception("HTTP " + (response != null ? response.code() + " " + response.message() : "null"));
                     }
 
                     long contentLength = response.body().contentLength();
@@ -745,8 +818,8 @@ public class AppUpdateManager {
                         contentLength = release.apkSize;
                     }
 
-                    InputStream in = response.body().byteStream();
-                    FileOutputStream out = new FileOutputStream(targetFile);
+                    in = response.body().byteStream();
+                    out = new FileOutputStream(tmpFile);
                     byte[] buffer = new byte[8192];
                     long totalRead = 0;
                     int read;
@@ -755,13 +828,13 @@ public class AppUpdateManager {
                         out.write(buffer, 0, read);
                         totalRead += read;
                         if (contentLength > 0) {
-                            final int pct = (int) ((totalRead * 100) / contentLength);
+                            final int pct = Math.min(100, (int) ((totalRead * 100) / contentLength));
                             final long curBytes = totalRead;
                             final long totBytes = contentLength;
                             mainHandler.post(new Runnable() {
                                 @Override
                                 public void run() {
-                                    if (progressDialog.isShowing()) {
+                                    if (isActivityAlive(activity) && progressDialog.isShowing()) {
                                         progressDialog.setProgress(pct);
                                         progressDialog.setMessage(String.format("Скачивание: %d%% (%.1f / %.1f МБ)",
                                                 pct, curBytes / (1024.0 * 1024.0), totBytes / (1024.0 * 1024.0)));
@@ -773,7 +846,24 @@ public class AppUpdateManager {
 
                     out.flush();
                     out.close();
+                    out = null;
                     in.close();
+                    in = null;
+                    response.close();
+                    response = null;
+
+                    if (totalRead <= 0 || (release.apkSize > 0 && totalRead != release.apkSize)) {
+                        throw new Exception("Размер загруженного APK не совпадает (" + totalRead + " / " + release.apkSize + ")");
+                    }
+                    if (!isValidApkArchive(tmpFile)) {
+                        throw new Exception("Загруженный файл поврежден и не является корректным APK");
+                    }
+                    if (targetFile.exists()) {
+                        targetFile.delete();
+                    }
+                    if (!tmpFile.renameTo(targetFile)) {
+                        throw new Exception("Не удалось сохранить итоговый APK в " + targetFile.getAbsolutePath());
+                    }
 
                     // Даем права на чтение системному PackageInstaller
                     targetFile.setReadable(true, false);
@@ -782,23 +872,38 @@ public class AppUpdateManager {
                     mainHandler.post(new Runnable() {
                         @Override
                         public void run() {
-                            if (progressDialog.isShowing()) progressDialog.dismiss();
-                            installApk(activity, finalFile);
+                            if (progressDialog.isShowing()) {
+                                try { progressDialog.dismiss(); } catch (Exception ignored) {}
+                            }
+                            if (isActivityAlive(activity)) {
+                                installApk(activity, finalFile);
+                            }
                         }
                     });
 
                 } catch (final Exception e) {
                     Log.e(TAG, "Failed to download update APK", e);
+                    if (tmpFile != null && tmpFile.exists()) {
+                        tmpFile.delete();
+                    }
                     if (targetFile != null && targetFile.exists()) {
                         targetFile.delete();
                     }
                     mainHandler.post(new Runnable() {
                         @Override
                         public void run() {
-                            if (progressDialog.isShowing()) progressDialog.dismiss();
-                            EinkNotice.show(activity, "Сбой обновления", "Сбой загрузки обновления:\n" + e.getMessage());
+                            if (progressDialog.isShowing()) {
+                                try { progressDialog.dismiss(); } catch (Exception ignored) {}
+                            }
+                            if (isActivityAlive(activity)) {
+                                EinkNotice.show(activity, "Сбой обновления", "Сбой загрузки обновления:\n" + e.getMessage());
+                            }
                         }
                     });
+                } finally {
+                    if (out != null) { try { out.close(); } catch (Throwable ignored) {} }
+                    if (in != null) { try { in.close(); } catch (Throwable ignored) {} }
+                    if (response != null) { try { response.close(); } catch (Throwable ignored) {} }
                 }
             }
         });
@@ -831,21 +936,49 @@ public class AppUpdateManager {
      * При обновлении без удаления приложения все данные (база SQLite, SharedPreferences, книги)
      * полностью сохраняются.
      */
-    public static void installApk(Context context, File apkFile) {
+    public static void installApk(final Context context, final File apkFile) {
         if (apkFile == null || !apkFile.exists()) {
             EinkNotice.show(context, "Установка обновления", "Файл APK обновления не найден.");
             return;
         }
+        if (!isValidApkArchive(apkFile)) {
+            EinkNotice.show(context, "Установка обновления", "Установочный файл APK поврежден или скачан не полностью.");
+            return;
+        }
+
+        if (android.os.Build.VERSION.SDK_INT >= 26 && context != null) {
+            try {
+                Object pm = context.getPackageManager();
+                java.lang.reflect.Method canInstallMethod = pm.getClass().getMethod("canRequestPackageInstalls");
+                boolean canInstall = Boolean.TRUE.equals(canInstallMethod.invoke(pm));
+                if (!canInstall) {
+                    final Intent settingsIntent = new Intent("android.settings.MANAGE_UNKNOWN_APP_SOURCES");
+                    settingsIntent.setData(Uri.parse("package:" + context.getPackageName()));
+                    settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    if (pm != null && settingsIntent.resolveActivity((android.content.pm.PackageManager) pm) != null) {
+                        EinkNotice.showConfirm(
+                                context,
+                                "Разрешение установки",
+                                "На Android 8+ необходимо разрешить установку приложений из этого источника, затем повторить запуск обновления.\n\nФайл сохранён:\n" + apkFile.getAbsolutePath(),
+                                "Открыть настройки",
+                                "Отмена",
+                                new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        try {
+                                            context.startActivity(settingsIntent);
+                                        } catch (Exception ignored) {}
+                                    }
+                                },
+                                null
+                        );
+                        return;
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
 
         try {
-            if (android.os.Build.VERSION.SDK_INT >= 24) {
-                try {
-                    java.lang.reflect.Method m = android.os.StrictMode.class.getMethod("disableDeathOnFileUriExposure");
-                    m.invoke(null);
-                } catch (Exception ignored) {
-                    android.os.StrictMode.setVmPolicy(new android.os.StrictMode.VmPolicy.Builder().build());
-                }
-            }
             apkFile.setReadable(true, false);
             Intent intent = new Intent(Intent.ACTION_VIEW);
             Uri uri = (android.os.Build.VERSION.SDK_INT >= 24)
@@ -854,16 +987,7 @@ public class AppUpdateManager {
             intent.setDataAndType(uri, "application/vnd.android.package-archive");
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            try {
-                context.startActivity(intent);
-            } catch (Exception contentErr) {
-                // Fallback на прямой file:// URI для старых прошивок E-Ink
-                Intent fallback = new Intent(Intent.ACTION_VIEW);
-                fallback.setDataAndType(Uri.fromFile(apkFile), "application/vnd.android.package-archive");
-                fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                context.startActivity(fallback);
-            }
+            context.startActivity(intent);
         } catch (Exception e) {
             Log.e(TAG, "Error launching package installer", e);
             EinkNotice.show(context, "Установка обновления", "Не удалось запустить установщик:\n" + e.getMessage() + "\n\nФайл сохранен:\n" + apkFile.getAbsolutePath());
@@ -879,7 +1003,7 @@ public class AppUpdateManager {
      * для предоставления пользователю возможности отката на любую предыдущую версию.
      */
     public void fetchAllReleases(final Context context, final ReleaseArchiveCallback callback) {
-        executor.execute(new Runnable() {
+        checkExecutor.execute(new Runnable() {
             @Override
             public void run() {
                 final java.util.List<ReleaseInfo> list = new java.util.ArrayList<>();
@@ -887,6 +1011,7 @@ public class AppUpdateManager {
                 OkHttpClient client = HttpClientFactory.getClient();
                 String currentVer = getCurrentVersionName(context);
 
+                Response response = null;
                 try {
                     Request request = new Request.Builder()
                             .url(GITHUB_RELEASES_LIST_URL)
@@ -895,7 +1020,7 @@ public class AppUpdateManager {
                             .header("Cache-Control", "no-cache")
                             .build();
 
-                    Response response = client.newCall(request).execute();
+                    response = client.newCall(request).execute();
                     if (response.isSuccessful() && response.body() != null) {
                         String jsonStr = response.body().string();
                         JSONArray array = new JSONArray(jsonStr);
@@ -911,6 +1036,10 @@ public class AppUpdateManager {
                     }
                 } catch (Exception e) {
                     err = e.getMessage();
+                } finally {
+                    if (response != null) {
+                        try { response.close(); } catch (Throwable ignored) {}
+                    }
                 }
 
                 final String finalErr = err;
@@ -1077,13 +1206,38 @@ public class AppUpdateManager {
         final int targetW = (int) (dm.widthPixels * 0.90);
         final int targetH = (int) (dm.heightPixels * 0.82);
 
+        dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
+            @Override
+            public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
+                if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+                        || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP
+                        || keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                        boolean down = (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_DOWN);
+                        scrollView.pageScrollEink(down);
+                    }
+                    return true;
+                }
+                return false;
+            }
+        });
+
         dialog.setOnShowListener(new DialogInterface.OnShowListener() {
             @Override
             public void onShow(DialogInterface d) {
+                if (!isActivityAlive(activity)) return;
                 if (dialog.getWindow() != null) {
                     dialog.getWindow().setLayout(targetW, targetH);
                 }
                 EpdController.requestFullRefresh(activity, root);
+            }
+        });
+        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface d) {
+                if (isActivityAlive(activity)) {
+                    EpdController.requestFullRefresh(activity, null);
+                }
             }
         });
         dialog.show();
@@ -1139,7 +1293,7 @@ public class AppUpdateManager {
     }
 
     private void downloadAndInstallDowngradeApk(final Activity activity, final ReleaseInfo release) {
-        if (activity == null || activity.isFinishing()) return;
+        if (!isActivityAlive(activity) || release == null) return;
 
         final ProgressDialog progressDialog = new ProgressDialog(activity);
         progressDialog.setTitle("Подготовка отката " + release.tagName);
@@ -1148,11 +1302,15 @@ public class AppUpdateManager {
         progressDialog.setMax(100);
         progressDialog.setProgress(0);
         progressDialog.setCancelable(false);
+        if (progressDialog.getWindow() != null) {
+            progressDialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        }
         progressDialog.show();
 
-        executor.execute(new Runnable() {
+        downloadExecutor.execute(new Runnable() {
             @Override
             public void run() {
+                File tmpFile = null;
                 try {
                     final com.onyx.yandexbooks.core.storage.DatabaseHelper.BackupSummary backupSummary =
                             com.onyx.yandexbooks.core.storage.DatabaseHelper.getInstance(activity)
@@ -1167,16 +1325,18 @@ public class AppUpdateManager {
                     }
                     final String fname = release.apkFileName != null ? release.apkFileName : ("yandex-books-lite-" + release.tagName + ".apk");
                     final File targetFile = new File(downloadDir, fname);
+                    tmpFile = new File(downloadDir, fname + ".tmp");
 
                     boolean alreadyDownloaded = targetFile.exists()
                             && release.apkSize > 0
-                            && targetFile.length() == release.apkSize;
+                            && targetFile.length() == release.apkSize
+                            && isValidApkArchive(targetFile);
 
                     if (!alreadyDownloaded) {
                         mainHandler.post(new Runnable() {
                             @Override
                             public void run() {
-                                if (progressDialog.isShowing()) {
+                                if (isActivityAlive(activity) && progressDialog.isShowing()) {
                                     progressDialog.setMessage("Скачивание " + fname + " в Загрузки...");
                                 }
                             }
@@ -1188,29 +1348,32 @@ public class AppUpdateManager {
                                 .header("User-Agent", "OnyxYandexBooks-App/" + getCurrentVersionName(activity))
                                 .build();
 
-                        Response response = client.newCall(request).execute();
-                        if (!response.isSuccessful()) {
-                            throw new Exception("HTTP " + response.code());
-                        }
-
-                        long contentLength = response.body().contentLength();
-                        if (contentLength <= 0 && release.apkSize > 0) contentLength = release.apkSize;
-
-                        InputStream in = response.body().byteStream();
-                        FileOutputStream out = new FileOutputStream(targetFile);
+                        Response response = null;
+                        InputStream in = null;
+                        FileOutputStream out = null;
+                        long totalRead = 0;
                         try {
+                            response = client.newCall(request).execute();
+                            if (!response.isSuccessful() || response.body() == null) {
+                                throw new Exception("HTTP " + (response != null ? response.code() : "null"));
+                            }
+
+                            long contentLength = response.body().contentLength();
+                            if (contentLength <= 0 && release.apkSize > 0) contentLength = release.apkSize;
+
+                            in = response.body().byteStream();
+                            out = new FileOutputStream(tmpFile);
                             byte[] buffer = new byte[8192];
-                            long totalRead = 0;
                             int read;
                             while ((read = in.read(buffer)) != -1) {
                                 out.write(buffer, 0, read);
                                 totalRead += read;
                                 if (contentLength > 0) {
-                                    final int pct = (int) ((totalRead * 100) / contentLength);
+                                    final int pct = Math.min(100, (int) ((totalRead * 100) / contentLength));
                                     mainHandler.post(new Runnable() {
                                         @Override
                                         public void run() {
-                                            if (progressDialog.isShowing()) {
+                                            if (isActivityAlive(activity) && progressDialog.isShowing()) {
                                                 progressDialog.setProgress(pct);
                                             }
                                         }
@@ -1219,15 +1382,28 @@ public class AppUpdateManager {
                             }
                             out.flush();
                         } finally {
-                            try { out.close(); } catch (Throwable ignored) {}
-                            try { in.close(); } catch (Throwable ignored) {}
-                            try { response.close(); } catch (Throwable ignored) {}
+                            if (out != null) { try { out.close(); } catch (Throwable ignored) {} }
+                            if (in != null) { try { in.close(); } catch (Throwable ignored) {} }
+                            if (response != null) { try { response.close(); } catch (Throwable ignored) {} }
+                        }
+
+                        if (totalRead <= 0 || (release.apkSize > 0 && totalRead != release.apkSize)) {
+                            throw new Exception("Размер загруженного APK не совпадает (" + totalRead + " / " + release.apkSize + ")");
+                        }
+                        if (!isValidApkArchive(tmpFile)) {
+                            throw new Exception("Загруженный файл поврежден и не является корректным APK");
+                        }
+                        if (targetFile.exists()) {
+                            targetFile.delete();
+                        }
+                        if (!tmpFile.renameTo(targetFile)) {
+                            throw new Exception("Не удалось сохранить APK в " + targetFile.getAbsolutePath());
                         }
                     } else {
                         mainHandler.post(new Runnable() {
                             @Override
                             public void run() {
-                                if (progressDialog.isShowing()) {
+                                if (isActivityAlive(activity) && progressDialog.isShowing()) {
                                     progressDialog.setProgress(100);
                                 }
                             }
@@ -1256,7 +1432,10 @@ public class AppUpdateManager {
                     mainHandler.post(new Runnable() {
                         @Override
                         public void run() {
-                            if (progressDialog.isShowing()) progressDialog.dismiss();
+                            if (progressDialog.isShowing()) {
+                                try { progressDialog.dismiss(); } catch (Exception ignored) {}
+                            }
+                            if (!isActivityAlive(activity)) return;
                             EinkNotice.showConfirm(
                                     activity,
                                     "Готово к откату на " + release.tagName,
@@ -1280,11 +1459,18 @@ public class AppUpdateManager {
                         }
                     });
                 } catch (final Exception e) {
+                    if (tmpFile != null && tmpFile.exists()) {
+                        tmpFile.delete();
+                    }
                     mainHandler.post(new Runnable() {
                         @Override
                         public void run() {
-                            if (progressDialog.isShowing()) progressDialog.dismiss();
-                            EinkNotice.show(activity, "Ошибка отката", "Не удалось подготовить откат на версию " + release.tagName + ":\n" + e.getMessage());
+                            if (progressDialog.isShowing()) {
+                                try { progressDialog.dismiss(); } catch (Exception ignored) {}
+                            }
+                            if (isActivityAlive(activity)) {
+                                EinkNotice.show(activity, "Ошибка отката", "Не удалось подготовить откат на версию " + release.tagName + ":\n" + e.getMessage());
+                            }
                         }
                     });
                 }

@@ -100,7 +100,10 @@ public class MainActivity extends Activity {
     private List<Book> currentBooks = new ArrayList<>();
     private BooksAdapter adapter;
     private boolean isAuthLaunching = false;
+    private boolean justReturnedFromAuth = false;
     private final java.util.concurrent.atomic.AtomicLong loadBooksSeqId = new java.util.concurrent.atomic.AtomicLong(0L);
+    private final Handler mainUiHandler = new Handler(Looper.getMainLooper());
+    private final java.util.Set<Dialog> activeDialogs = new java.util.HashSet<Dialog>();
 
     private TextView shelfFooterStatus;
     private Button btnShelfPrevPage;
@@ -155,6 +158,37 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
             networkReceiver = null;
         }
+    }
+
+    private boolean isActivityAlive() {
+        if (isFinishing()) return false;
+        if (android.os.Build.VERSION.SDK_INT >= 17 && isDestroyed()) return false;
+        return true;
+    }
+
+    private void registerActiveDialog(final Dialog dialog) {
+        if (dialog == null) return;
+        activeDialogs.add(dialog);
+        dialog.setOnCancelListener(new DialogInterface.OnCancelListener() {
+            @Override
+            public void onCancel(DialogInterface d) {
+                activeDialogs.remove(dialog);
+            }
+        });
+    }
+
+    @Override
+    protected void onDestroy() {
+        mainUiHandler.removeCallbacksAndMessages(null);
+        for (Dialog d : new ArrayList<Dialog>(activeDialogs)) {
+            try {
+                if (d != null && d.isShowing()) {
+                    d.dismiss();
+                }
+            } catch (Throwable ignored) {}
+        }
+        activeDialogs.clear();
+        super.onDestroy();
     }
 
     @Override
@@ -1530,16 +1564,18 @@ public class MainActivity extends Activity {
                     @Override
                     public void run() {
                         if (!dialog.isShowing()) return;
-                        progressBar.setProgress(total);
                         btnCancel.setEnabled(true);
                         btnCancel.setText("Готово");
                         int ok = completedCount.get();
                         int err = errorCount.get();
                         if (isCancelled.get()) {
+                            progressBar.setVisibility(View.GONE);
                             currentBookText.setText("Загрузка остановлена.\nСкачано: " + ok + " из " + total + " (ошибок: " + err + ")");
                         } else if (err > 0) {
+                            progressBar.setProgress(total);
                             currentBookText.setText("Завершено! Успешно скачано: " + ok + " из " + total + " (ошибок: " + err + ")");
                         } else {
+                            progressBar.setProgress(total);
                             currentBookText.setText("Успешно! Все выбранные книги (" + ok + ") сохранены в память устройства.");
                         }
                         progressBar.postInvalidate();
@@ -1604,6 +1640,7 @@ public class MainActivity extends Activity {
     }
 
     private Dialog showEinkLoadingDialog(String title, String message) {
+        if (!isActivityAlive()) return null;
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle(title);
         builder.setMessage(message);
@@ -1620,13 +1657,10 @@ public class MainActivity extends Activity {
         if (dialog.getWindow() != null) {
             dialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
         }
-        dialog.show();
-
-        // 60-секундный предохранитель для защиты от зависаний (увеличен для крупных книг)
-        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+        final Runnable timeoutRunnable = new Runnable() {
             @Override
             public void run() {
-                if (dialog != null && dialog.isShowing()) {
+                if (isActivityAlive() && dialog != null && dialog.isShowing()) {
                     try {
                         dialog.dismiss();
                     } catch (Exception ignored) {}
@@ -1634,17 +1668,40 @@ public class MainActivity extends Activity {
                     EpdController.requestFullRefresh(MainActivity.this, null);
                 }
             }
-        }, 60000);
+        };
+        dialog.setOnKeyListener(new DialogInterface.OnKeyListener() {
+            @Override
+            public boolean onKey(DialogInterface d, int keyCode, KeyEvent event) {
+                return HardwareKeyHandler.isPageKey(keyCode, event);
+            }
+        });
+        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface d) {
+                mainUiHandler.removeCallbacks(timeoutRunnable);
+                activeDialogs.remove(dialog);
+            }
+        });
+        registerActiveDialog(dialog);
+        dialog.show();
+
+        // 60-секундный предохранитель для защиты от зависаний (увеличен для крупных книг)
+        mainUiHandler.postDelayed(timeoutRunnable, 60000);
 
         return dialog;
     }
 
     private void dismissEinkLoadingDialog(Dialog dialog) {
-        if (dialog != null && dialog.isShowing()) {
-            try {
-                dialog.dismiss();
-            } catch (Exception ignored) {}
-            EpdController.requestFullRefresh(MainActivity.this, null);
+        if (dialog != null) {
+            activeDialogs.remove(dialog);
+            if (dialog.isShowing()) {
+                try {
+                    dialog.dismiss();
+                } catch (Exception ignored) {}
+                if (isActivityAlive()) {
+                    EpdController.requestFullRefresh(MainActivity.this, null);
+                }
+            }
         }
     }
 
@@ -1738,12 +1795,9 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void switchTab(String shelf) {
-        currentShelf = shelf;
-        updateTabStyles();
-
-        boolean isSearch = "search".equals(shelf);
-        boolean isCatalog = "catalog".equals(shelf);
+    private void updateTabAccessoryBars() {
+        boolean isSearch = "search".equals(currentShelf);
+        boolean isCatalog = "catalog".equals(currentShelf);
         if (searchBarContainer != null) {
             searchBarContainer.setVisibility(isSearch ? View.VISIBLE : View.GONE);
         }
@@ -1756,8 +1810,21 @@ public class MainActivity extends Activity {
         if (catalogBarDivider != null) {
             catalogBarDivider.setVisibility(isCatalog ? View.VISIBLE : View.GONE);
         }
+    }
+
+    private void switchTab(String shelf) {
+        loadBooksSeqId.incrementAndGet();
+        currentShelf = shelf;
+        updateTabStyles();
+        updateTabAccessoryBars();
+
+        boolean isSearch = "search".equals(shelf);
+        boolean isCatalog = "catalog".equals(shelf);
 
         if (isSearch) {
+            loadingTextView.setVisibility(View.GONE);
+            currentBooks.clear();
+            adapter.notifyDataSetChanged();
             if (searchQueryInput != null) searchQueryInput.requestFocus();
             updateEmptyState();
             updateShelfFooter();
@@ -1850,10 +1917,29 @@ public class MainActivity extends Activity {
         if (d.getWindow() != null) {
             d.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
         }
+        final AlertDialog finalDialog = d;
+        d.setOnKeyListener(new DialogInterface.OnKeyListener() {
+            @Override
+            public boolean onKey(DialogInterface dlg, int keyCode, KeyEvent event) {
+                if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+                        || keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_PAGE_DOWN) {
+                    return true;
+                }
+                return false;
+            }
+        });
+        d.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface dlg) {
+                activeDialogs.remove(finalDialog);
+            }
+        });
+        registerActiveDialog(d);
         d.show();
     }
 
     private void loadCatalog() {
+        final long reqSeq = loadBooksSeqId.incrementAndGet();
         updateCatalogCategoryButtonText();
         if (!isNetworkAvailable()) {
             currentBooks.clear();
@@ -1864,7 +1950,9 @@ public class MainActivity extends Activity {
             showNoInternetDialog(new Runnable() {
                 @Override
                 public void run() {
-                    loadCatalog();
+                    if ("catalog".equals(currentShelf)) {
+                        loadCatalog();
+                    }
                 }
             });
             return;
@@ -1894,6 +1982,9 @@ public class MainActivity extends Activity {
         apiClient.getCatalogBooksByShelf(selectedCatalogShelfUuid, new YandexBooksApiClient.ApiCallback<List<Book>>() {
             @Override
             public void onSuccess(List<Book> books) {
+                if (!isActivityAlive() || reqSeq != loadBooksSeqId.get() || !"catalog".equals(currentShelf)) {
+                    return;
+                }
                 loadingTextView.setVisibility(View.GONE);
                 if (books != null) {
                     currentBooks = books;
@@ -1908,6 +1999,9 @@ public class MainActivity extends Activity {
 
             @Override
             public void onError(String errorMessage) {
+                if (!isActivityAlive() || reqSeq != loadBooksSeqId.get() || !"catalog".equals(currentShelf)) {
+                    return;
+                }
                 loadingTextView.setVisibility(View.GONE);
                 updateEmptyState();
                 updateShelfFooter();
@@ -1915,7 +2009,9 @@ public class MainActivity extends Activity {
                     showNoInternetDialog(new Runnable() {
                         @Override
                         public void run() {
-                            loadCatalog();
+                            if ("catalog".equals(currentShelf)) {
+                                loadCatalog();
+                            }
                         }
                     });
                 } else {
@@ -1930,7 +2026,9 @@ public class MainActivity extends Activity {
                             new Runnable() {
                                 @Override
                                 public void run() {
-                                    loadCatalog();
+                                    if ("catalog".equals(currentShelf)) {
+                                        loadCatalog();
+                                    }
                                 }
                             },
                             null
@@ -1941,6 +2039,7 @@ public class MainActivity extends Activity {
     }
 
     private void loadUserUploadedBooks() {
+        final long reqSeq = loadBooksSeqId.incrementAndGet();
         currentBooks = dbHelper.getBooksByShelf("user_books");
         adapter.notifyDataSetChanged();
         updateTabBadges();
@@ -1956,29 +2055,33 @@ public class MainActivity extends Activity {
         apiClient.fetchUserUploadedBooks(new YandexBooksApiClient.ApiCallback<List<Book>>() {
             @Override
             public void onSuccess(List<Book> books) {
-                loadingTextView.setVisibility(View.GONE);
+                if (!isActivityAlive()) return;
                 if (books != null && !books.isEmpty()) {
                     dbHelper.saveAllBooks(books);
                 }
-                if ("user_books".equals(currentShelf)) {
-                    currentBooks = dbHelper.getBooksByShelf("user_books");
-                    adapter.notifyDataSetChanged();
+                if (reqSeq != loadBooksSeqId.get() || !"user_books".equals(currentShelf)) {
                     updateTabBadges();
-                    updateEmptyState();
-                    updateShelfFooter();
-                    EpdController.requestFullRefresh(MainActivity.this, booksListView);
+                    return;
                 }
+                loadingTextView.setVisibility(View.GONE);
+                currentBooks = dbHelper.getBooksByShelf("user_books");
+                adapter.notifyDataSetChanged();
+                updateTabBadges();
+                updateEmptyState();
+                updateShelfFooter();
+                EpdController.requestFullRefresh(MainActivity.this, booksListView);
             }
 
             @Override
             public void onError(String errorMessage) {
+                if (!isActivityAlive() || reqSeq != loadBooksSeqId.get() || !"user_books".equals(currentShelf)) {
+                    return;
+                }
                 loadingTextView.setVisibility(View.GONE);
-                if ("user_books".equals(currentShelf)) {
-                    updateEmptyState();
-                    updateShelfFooter();
-                    if (currentBooks.isEmpty()) {
-                        EinkNotice.show(MainActivity.this, "Мои файлы", "Не удалось загрузить личные файлы.\n" + (errorMessage != null ? errorMessage : ""));
-                    }
+                updateEmptyState();
+                updateShelfFooter();
+                if (currentBooks.isEmpty()) {
+                    EinkNotice.show(MainActivity.this, "Мои файлы", "Не удалось загрузить личные файлы.\n" + (errorMessage != null ? errorMessage : ""));
                 }
             }
         });
@@ -1990,6 +2093,7 @@ public class MainActivity extends Activity {
             return;
         }
 
+        final long reqSeq = loadBooksSeqId.incrementAndGet();
         try {
             android.view.inputmethod.InputMethodManager imm = (android.view.inputmethod.InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
             if (imm != null && searchQueryInput != null) {
@@ -2006,7 +2110,9 @@ public class MainActivity extends Activity {
             showNoInternetDialog(new Runnable() {
                 @Override
                 public void run() {
-                    executeSearch(query);
+                    if ("search".equals(currentShelf)) {
+                        executeSearch(query);
+                    }
                 }
             });
             return;
@@ -2018,6 +2124,9 @@ public class MainActivity extends Activity {
         apiClient.searchBooks(query.trim(), new YandexBooksApiClient.ApiCallback<List<Book>>() {
             @Override
             public void onSuccess(List<Book> books) {
+                if (!isActivityAlive() || reqSeq != loadBooksSeqId.get() || !"search".equals(currentShelf)) {
+                    return;
+                }
                 loadingTextView.setVisibility(View.GONE);
                 if (books != null) {
                     currentBooks = books;
@@ -2035,13 +2144,18 @@ public class MainActivity extends Activity {
 
             @Override
             public void onError(String errorMessage) {
+                if (!isActivityAlive() || reqSeq != loadBooksSeqId.get() || !"search".equals(currentShelf)) {
+                    return;
+                }
                 loadingTextView.setVisibility(View.GONE);
                 updateEmptyState();
                 updateShelfFooter();
                 showNoInternetDialog(new Runnable() {
                     @Override
                     public void run() {
-                        executeSearch(query);
+                        if ("search".equals(currentShelf)) {
+                            executeSearch(query);
+                        }
                     }
                 });
             }
@@ -2108,12 +2222,7 @@ public class MainActivity extends Activity {
             btnShelfPrevPage.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    if (booksListView == null || currentBooks.isEmpty()) return;
-                    int current = booksListView.getFirstVisiblePosition();
-                    int target = Math.max(0, current - 3);
-                    booksListView.setSelection(target);
-                    updateShelfFooter();
-                    EpdController.requestFullRefresh(MainActivity.this, booksListView);
+                    scrollShelfBy(-3);
                 }
             });
         }
@@ -2122,23 +2231,17 @@ public class MainActivity extends Activity {
             btnShelfNextPage.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    if (booksListView == null || currentBooks.isEmpty()) return;
-                    int current = booksListView.getFirstVisiblePosition();
-                    int target = Math.min(currentBooks.size() - 1, current + 3);
-                    booksListView.setSelection(target);
-                    updateShelfFooter();
-                    EpdController.requestFullRefresh(MainActivity.this, booksListView);
+                    scrollShelfBy(3);
                 }
             });
         }
 
         if (booksListView != null) {
-            booksListView.setOnScrollListener(new android.widget.AbsListView.OnScrollListener() {
+            EpdController.configureEinkListView(this, booksListView, new android.widget.AbsListView.OnScrollListener() {
                 @Override
                 public void onScrollStateChanged(android.widget.AbsListView view, int scrollState) {
                     if (scrollState == SCROLL_STATE_IDLE) {
                         updateShelfFooter();
-                        EpdController.requestFullRefresh(MainActivity.this, booksListView);
                     }
                 }
                 @Override
@@ -2166,12 +2269,28 @@ public class MainActivity extends Activity {
             }
         });
 
-        if (currentBooks.isEmpty()) {
+        if (currentBooks.isEmpty() || booksListView == null) {
             shelfPageIndicator.setText(" 0/0 ");
         } else {
-            int totalPages = Math.max(1, (int) Math.ceil((double) currentBooks.size() / 3.0));
-            int firstPos = booksListView.getFirstVisiblePosition();
-            int currentPage = Math.min(totalPages, (firstPos / 3) + 1);
+            int firstPos = Math.max(0, booksListView.getFirstVisiblePosition());
+            int childCount = booksListView.getChildCount();
+            int perPage = 3;
+            if (childCount > 0) {
+                int listBottom = booksListView.getHeight() - booksListView.getPaddingBottom();
+                View lastChild = booksListView.getChildAt(childCount - 1);
+                boolean lastClipped = (lastChild != null && listBottom > 0 && lastChild.getBottom() > listBottom && childCount > 1);
+                perPage = Math.max(1, childCount - (lastClipped ? 1 : 0));
+            }
+            int totalPages = Math.max(1, (int) Math.ceil((double) currentBooks.size() / (double) perPage));
+            int currentPage = Math.min(totalPages, (firstPos / perPage) + 1);
+            int lastPos = booksListView.getLastVisiblePosition();
+            if (lastPos >= currentBooks.size() - 1) {
+                int listBottom = booksListView.getHeight() - booksListView.getPaddingBottom();
+                View lastChild = childCount > 0 ? booksListView.getChildAt(childCount - 1) : null;
+                if (lastChild == null || lastChild.getBottom() <= listBottom) {
+                    currentPage = totalPages;
+                }
+            }
             shelfPageIndicator.setText(" " + currentPage + "/" + totalPages + " ");
         }
     }
@@ -2245,12 +2364,13 @@ public class MainActivity extends Activity {
         apiClient.getAllUserBooks(new YandexBooksApiClient.ApiCallback<List<Book>>() {
             @Override
             public void onSuccess(List<Book> allBooks) {
-                loadingTextView.setVisibility(View.GONE);
+                if (!isActivityAlive()) return;
                 if (allBooks != null && !allBooks.isEmpty()) {
                     dbHelper.saveAllBooks(allBooks);
                     syncManager.flushOfflineQueue();
                 }
-                if (reqSeq == loadBooksSeqId.get() && !"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
+                if (reqSeq == loadBooksSeqId.get() && !"catalog".equals(currentShelf) && !"search".equals(currentShelf) && !"user_books".equals(currentShelf)) {
+                    loadingTextView.setVisibility(View.GONE);
                     currentBooks = dbHelper.getBooksByShelf(currentShelf);
                     adapter.notifyDataSetChanged();
                     updateEmptyState();
@@ -2264,8 +2384,9 @@ public class MainActivity extends Activity {
 
             @Override
             public void onError(String errorMessage) {
-                loadingTextView.setVisibility(View.GONE);
+                if (!isActivityAlive()) return;
                 if (reqSeq == loadBooksSeqId.get()) {
+                    loadingTextView.setVisibility(View.GONE);
                     updateEmptyState();
                     updateShelfFooter();
                 }
@@ -2277,10 +2398,13 @@ public class MainActivity extends Activity {
                     EinkNotice.show(MainActivity.this, "Сессия истекла", "Сессия авторизации истекла (401).\nПожалуйста, войдите снова.", "ОК", new Runnable() {
                         @Override
                         public void run() {
-                            startActivityForResult(new Intent(MainActivity.this, AuthActivity.class), REQUEST_AUTH);
+                            if (isActivityAlive() && !isAuthLaunching) {
+                                isAuthLaunching = true;
+                                startActivityForResult(new Intent(MainActivity.this, AuthActivity.class), REQUEST_AUTH);
+                            }
                         }
                     });
-                } else if (onCloudError == null && currentBooks.isEmpty()) {
+                } else if (reqSeq == loadBooksSeqId.get() && onCloudError == null && currentBooks.isEmpty()) {
                     EinkNotice.show(MainActivity.this, "Ошибка сети", "Не удалось загрузить книги: " + errorMessage);
                 }
             }
@@ -2317,6 +2441,9 @@ public class MainActivity extends Activity {
                 }
             }
         }
+        final boolean skipDuplicateAuthLoad = justReturnedFromAuth;
+        justReturnedFromAuth = false;
+
         if (tokenStorage.isAuthorized()) {
             // Перезагружаем прогресс после возврата из ридера (не затирая результаты поиска и каталога)
             if (!"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
@@ -2325,32 +2452,38 @@ public class MainActivity extends Activity {
             }
             updateTabBadges();
             updateShelfFooter();
-            // Сначала дожидаемся завершения активных и отложенных отправок прогресса в облако,
-            // и только затем подтягиваем полки с сервера, чтобы исключить гонку старого процента
-            syncManager.runWhenIdle(new Runnable() {
-                @Override
-                public void run() {
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (isFinishing()) return;
-                            syncManager.flushOfflineQueue(new SyncManager.SyncCompleteCallback() {
-                                @Override
-                                public void onSyncFinished(final int syncedCount) {
-                                    new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
-                                        @Override
-                                        public void run() {
-                                            if (!isFinishing() && !"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
-                                                loadBooks(currentShelf);
+            if (!skipDuplicateAuthLoad) {
+                // Сначала дожидаемся завершения активных и отложенных отправок прогресса в облако,
+                // и только затем подтягиваем полки с сервера, чтобы исключить гонку старого процента
+                syncManager.runWhenIdle(new Runnable() {
+                    @Override
+                    public void run() {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (!isActivityAlive()) return;
+                                syncManager.flushOfflineQueue(new SyncManager.SyncCompleteCallback() {
+                                    @Override
+                                    public void onSyncFinished(final int syncedCount) {
+                                        mainUiHandler.postDelayed(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                if (isActivityAlive() && !"catalog".equals(currentShelf) && !"search".equals(currentShelf)) {
+                                                    if ("user_books".equals(currentShelf)) {
+                                                        loadUserUploadedBooks();
+                                                    } else {
+                                                        loadBooks(currentShelf);
+                                                    }
+                                                }
                                             }
-                                        }
-                                    }, syncedCount > 0 ? 450L : 200L);
-                                }
-                            });
-                        }
-                    });
-                }
-            });
+                                        }, syncedCount > 0 ? 450L : 200L);
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+            }
 
             // Автоматическая фоновая проверка обновлений при появлении интернета
             if (!sUpdateCheckedSuccessfully && isNetworkAvailable()) {
@@ -2375,24 +2508,37 @@ public class MainActivity extends Activity {
 
     private void scrollShelfBy(int delta) {
         if (booksListView != null && currentBooks != null && !currentBooks.isEmpty()) {
-            int current = booksListView.getFirstVisiblePosition();
-            int target;
-            if (delta > 0) {
-                target = Math.min(currentBooks.size() - 1, current + delta);
-            } else {
-                target = Math.max(0, current + delta);
+            if (!booksListView.pageScrollEink(delta > 0)) {
+                int current = booksListView.getFirstVisiblePosition();
+                int target = (delta > 0)
+                        ? Math.min(currentBooks.size() - 1, current + delta)
+                        : Math.max(0, current + delta);
+                booksListView.setSelection(target);
             }
-            booksListView.setSelection(target);
-            updateShelfFooter();
+            booksListView.post(new Runnable() {
+                @Override
+                public void run() {
+                    updateShelfFooter();
+                }
+            });
             EpdController.requestFullRefresh(MainActivity.this, booksListView);
         }
+    }
+
+    private boolean shouldAllowFocusedEditNavigation(int keyCode) {
+        View focused = getCurrentFocus();
+        if (!(focused instanceof EditText)) return false;
+        return keyCode == KeyEvent.KEYCODE_DPAD_LEFT
+                || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
+                || keyCode == KeyEvent.KEYCODE_DPAD_UP
+                || keyCode == KeyEvent.KEYCODE_DPAD_DOWN;
     }
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (event == null) return false;
         int keyCode = event.getKeyCode();
-        if (HardwareKeyHandler.isPageKey(keyCode, event)) {
+        if (HardwareKeyHandler.isPageKey(keyCode, event) && !shouldAllowFocusedEditNavigation(keyCode)) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 if (event.getRepeatCount() == 0) {
                     if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
@@ -2414,7 +2560,7 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (HardwareKeyHandler.isPageKey(keyCode, event)) {
+        if (HardwareKeyHandler.isPageKey(keyCode, event) && !shouldAllowFocusedEditNavigation(keyCode)) {
             if (event != null && event.getRepeatCount() > 0) {
                 return true;
             }
@@ -2432,7 +2578,7 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
-        if (HardwareKeyHandler.isPageKey(keyCode, event)) {
+        if (HardwareKeyHandler.isPageKey(keyCode, event) && !shouldAllowFocusedEditNavigation(keyCode)) {
             return true;
         }
         return super.onKeyUp(keyCode, event);
@@ -2626,8 +2772,10 @@ public class MainActivity extends Activity {
                 dbHelper.updateBookShelf(book.getUuid(), "reading");
             }
 
+            loadBooksSeqId.incrementAndGet();
             currentShelf = "reading";
             updateTabStyles();
+            updateTabAccessoryBars();
             updateTabBadges();
             currentBooks = dbHelper.getBooksByShelf(currentShelf);
             adapter.notifyDataSetChanged();
@@ -2932,7 +3080,36 @@ public class MainActivity extends Activity {
         startActivity(intent);
     }
 
+    private static class BookRowViewHolder {
+        ImageView cover;
+        TextView title;
+        TextView author;
+        TextView annotation;
+        TextView progress;
+        TextView statusTag;
+        ProgressBar progressBar;
+        Button readBtn;
+        Button downloadBtn;
+    }
+
     private class BooksAdapter extends BaseAdapter {
+        private final java.util.Map<String, Boolean> downloadedStatusCache = new java.util.HashMap<String, Boolean>();
+
+        @Override
+        public void notifyDataSetChanged() {
+            downloadedStatusCache.clear();
+            super.notifyDataSetChanged();
+        }
+
+        private boolean isBookDownloadedCached(String uuid) {
+            if (uuid == null || uuid.isEmpty()) return false;
+            Boolean cached = downloadedStatusCache.get(uuid);
+            if (cached != null) return cached;
+            boolean actual = cacheManager.isBookDownloaded(uuid);
+            downloadedStatusCache.put(uuid, actual);
+            return actual;
+        }
+
         @Override
         public int getCount() { return currentBooks.size(); }
         @Override
@@ -2942,54 +3119,60 @@ public class MainActivity extends Activity {
 
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
+            BookRowViewHolder holder;
             if (convertView == null) {
                 convertView = LayoutInflater.from(MainActivity.this).inflate(R.layout.item_book, parent, false);
+                holder = new BookRowViewHolder();
+                holder.cover = (ImageView) convertView.findViewById(R.id.book_cover);
+                holder.title = (TextView) convertView.findViewById(R.id.book_title);
+                holder.author = (TextView) convertView.findViewById(R.id.book_author);
+                holder.annotation = (TextView) convertView.findViewById(R.id.book_annotation);
+                holder.progress = (TextView) convertView.findViewById(R.id.book_progress);
+                holder.statusTag = (TextView) convertView.findViewById(R.id.book_status_tag);
+                holder.progressBar = (ProgressBar) convertView.findViewById(R.id.book_progress_bar);
+                holder.readBtn = (Button) convertView.findViewById(R.id.book_read_btn);
+                holder.downloadBtn = (Button) convertView.findViewById(R.id.book_download_btn);
+                convertView.setTag(holder);
+            } else {
+                holder = (BookRowViewHolder) convertView.getTag();
             }
 
             final Book book = currentBooks.get(position);
-            ImageView cover = (ImageView) convertView.findViewById(R.id.book_cover);
-            TextView title = (TextView) convertView.findViewById(R.id.book_title);
-            TextView author = (TextView) convertView.findViewById(R.id.book_author);
-            TextView annotation = (TextView) convertView.findViewById(R.id.book_annotation);
-            TextView progress = (TextView) convertView.findViewById(R.id.book_progress);
-            TextView statusTag = (TextView) convertView.findViewById(R.id.book_status_tag);
-            ProgressBar progressBar = (ProgressBar) convertView.findViewById(R.id.book_progress_bar);
-            Button readBtn = (Button) convertView.findViewById(R.id.book_read_btn);
-            Button downloadBtn = (Button) convertView.findViewById(R.id.book_download_btn);
 
-            title.setText(book.getTitle());
-            author.setText(book.getAuthor());
+            holder.title.setText(book.getTitle());
+            holder.author.setText(book.getAuthor());
 
-            if (annotation != null) {
-                annotation.setVisibility(View.GONE);
+            if (holder.annotation != null) {
+                holder.annotation.setVisibility(View.GONE);
             }
 
-            final boolean downloaded = cacheManager.isBookDownloaded(book.getUuid());
-            if (statusTag != null) {
-                statusTag.setText(downloaded ? " • В памяти" : " • Онлайн");
+            final boolean downloaded = isBookDownloadedCached(book.getUuid());
+            if (holder.statusTag != null) {
+                holder.statusTag.setText(downloaded ? " • В памяти" : " • Онлайн");
             }
 
             double pct = book.getPercent();
-            progressBar.setProgress((int) Math.round(pct));
+            holder.progressBar.setProgress((int) Math.round(pct));
             if (pct > 0.0) {
-                progress.setText(String.format("%.0f%%", pct));
+                holder.progress.setText(String.format("%.0f%%", pct));
             } else {
-                progress.setText("0%");
+                holder.progress.setText("0%");
             }
 
-            coverLoader.loadCover(cover, book.getUuid(), book.getCoverUrl(), book.getTitle());
+            coverLoader.loadCover(holder.cover, book.getUuid(), book.getCoverUrl(), book.getTitle());
 
-            applyCardDensityToRow(convertView, cover, title, author, progress, statusTag, readBtn, downloadBtn);
+            applyCardDensityToRow(convertView, holder.cover, holder.title, holder.author,
+                    holder.progress, holder.statusTag, holder.readBtn, holder.downloadBtn);
 
-            downloadBtn.setText("О книге");
-            downloadBtn.setOnClickListener(new View.OnClickListener() {
+            holder.downloadBtn.setText("О книге");
+            holder.downloadBtn.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
                     showBookDetailsDialog(book);
                 }
             });
 
-            readBtn.setOnClickListener(new View.OnClickListener() {
+            holder.readBtn.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
                     openBook(book);
@@ -3643,7 +3826,9 @@ public class MainActivity extends Activity {
         if (requestCode == REQUEST_AUTH) {
             isAuthLaunching = false;
             if (resultCode == RESULT_OK) {
-                loadBooks(currentShelf);
+                justReturnedFromAuth = true;
+                switchTab(currentShelf);
+                checkAppUpdate(false);
             } else if (!tokenStorage.isAuthorized()) {
                 finish();
             }

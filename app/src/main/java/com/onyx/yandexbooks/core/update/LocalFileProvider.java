@@ -29,6 +29,7 @@ public class LocalFileProvider extends ContentProvider {
                 .scheme("content")
                 .authority(AUTHORITY)
                 .appendPath("file")
+                .appendPath(file.getName())
                 .appendQueryParameter("path", file.getAbsolutePath())
                 .build();
     }
