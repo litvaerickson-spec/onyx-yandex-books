@@ -3051,7 +3051,8 @@ def test_v1520_beta_page_flip_crash_prevention_and_schema_auto_heal():
     with open(db_file, "r", encoding="utf-8") as f:
         db_code = f.read()
 
-    assert any(f"DATABASE_VERSION = {v};" in db_code for v in (8, 9, 10)), "DatabaseHelper обязан иметь DATABASE_VERSION >= 8!"
+    m_db = re.search(r"DATABASE_VERSION\s*=\s*(\d+)\s*;", db_code)
+    assert m_db and int(m_db.group(1)) >= 8, "DatabaseHelper обязан иметь DATABASE_VERSION >= 8!"
     assert "public void ensureSchemaMigration(SQLiteDatabase db)" in db_code, "ensureSchemaMigration обязан существовать!"
     assert "public void onOpen(SQLiteDatabase db)" in db_code, "onOpen обязан вызывать ensureSchemaMigration для авто-восстановления схемы!"
     assert "internalSaveProgress(progress);" in db_code, "saveProgress обязан использовать безопасный fallback через internalSaveProgress!"
@@ -3288,7 +3289,8 @@ def test_v160_stable_release_and_evolution_summary():
     db_file = os.path.join(PROJECT_DIR, "app/src/main/java/com/onyx/yandexbooks/core/storage/DatabaseHelper.java")
     with open(db_file, "r", encoding="utf-8") as f:
         dbh = f.read()
-    assert any(f"DATABASE_VERSION = {v};" in dbh for v in (8, 9, 10)) and "ensureSchemaMigration" in dbh
+    m_dbh = re.search(r"DATABASE_VERSION\s*=\s*(\d+)\s*;", dbh)
+    assert m_dbh and int(m_dbh.group(1)) >= 8 and "ensureSchemaMigration" in dbh
     print(" - Проверка сквозной архитектуры эволюции v1.5.8 -> v1.6.0: ВСЕ МОДУЛИ И КОНТРАКТЫ НА МЕСТЕ: OK")
 
     print("✅ Тест v1.6.0 Официальный стабильный релиз и обобщение эволюции успешно пройден!\n")
@@ -4136,7 +4138,8 @@ def test_v203_beta_all_7_feedback_fixes():
     assert "setCanceledOnTouchOutside(false)" in ma
     assert "TocLookupIndex" in ep and "rawHtmlStartOffset" in ep and "rawHtmlEndOffset" in ep
     assert "textWidthCache" in tp
-    assert ("DATABASE_VERSION = 10" in db or "DATABASE_VERSION = 9" in db) and "char_count" in db and "getCharCount" in ch and "setCharCount" in cm
+    m_db_ver = re.search(r"DATABASE_VERSION\s*=\s*(\d+)\s*;", db)
+    assert m_db_ver and int(m_db_ver.group(1)) >= 9 and "char_count" in db and "getCharCount" in ch and "setCharCount" in cm
     assert "findTocNodeByTargetHref" in ra
     assert "Math.min(fontSizeSp, 60)" in tc
     assert "seekbarFontSize.setMax(48)" in ra and "cur < 60" in ra and 'android:max="48"' in rx
@@ -4275,7 +4278,8 @@ def test_v204_stable_toc_vignettes_speed_sync():
     # 2. Баг 1: Составной ключ глав (book_uuid, chapter_index), DATABASE_VERSION = 10 и format_v204/205.flag
     db = rd(jb + "core/storage/DatabaseHelper.java")
     cm = rd(jb + "core/storage/CacheManager.java")
-    assert "DATABASE_VERSION = 10" in db
+    m_db10 = re.search(r"DATABASE_VERSION\s*=\s*(\d+)\s*;", db)
+    assert m_db10 and int(m_db10.group(1)) >= 10
     assert "PRIMARY KEY (book_uuid, chapter_index)" in db
     assert "DROP TABLE IF EXISTS chapters" in db and "oldVersion < 10" in db
     assert "sqlite_master" in db and "ensureSchemaMigration" in db

@@ -20,7 +20,7 @@ import java.util.List;
 public class DatabaseHelper extends SQLiteOpenHelper {
 
     private static final String DATABASE_NAME = "yandex_books_lite.db";
-    private static final int DATABASE_VERSION = 10;
+    private static final int DATABASE_VERSION = 11;
 
     private static DatabaseHelper instance;
 
@@ -65,7 +65,13 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 "ALTER TABLE chapters ADD COLUMN original_opf_spine_index INTEGER DEFAULT -1",
                 "ALTER TABLE chapters ADD COLUMN opf_item_id TEXT",
                 "ALTER TABLE chapters ADD COLUMN char_count INTEGER DEFAULT 0",
-                "ALTER TABLE books ADD COLUMN file_url TEXT"
+                "ALTER TABLE books ADD COLUMN file_url TEXT",
+                "ALTER TABLE books ADD COLUMN linked_audio_uuid TEXT",
+                "ALTER TABLE books ADD COLUMN audio_percent REAL DEFAULT 0",
+                "ALTER TABLE books ADD COLUMN audio_updated_at INTEGER DEFAULT 0",
+                "ALTER TABLE progress ADD COLUMN linked_audio_uuid TEXT",
+                "ALTER TABLE progress ADD COLUMN audio_percent REAL DEFAULT 0",
+                "ALTER TABLE progress ADD COLUMN audio_updated_at INTEGER DEFAULT 0"
         };
         for (String sql : migrations) {
             try {
@@ -121,7 +127,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 "last_read_timestamp INTEGER," +
                 "document_uuid TEXT," +
                 "cfi TEXT," +
-                "file_url TEXT" +
+                "file_url TEXT," +
+                "linked_audio_uuid TEXT," +
+                "audio_percent REAL DEFAULT 0," +
+                "audio_updated_at INTEGER DEFAULT 0" +
                 ")");
 
         // Таблица глав (составной ключ исключает перезапись глав при открытии нескольких книг)
@@ -148,7 +157,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 "timestamp INTEGER," +
                 "is_synced INTEGER," +
                 "document_uuid TEXT," +
-                "cfi TEXT" +
+                "cfi TEXT," +
+                "linked_audio_uuid TEXT," +
+                "audio_percent REAL DEFAULT 0," +
+                "audio_updated_at INTEGER DEFAULT 0" +
                 ")");
 
         // Очередь офлайн-синхронизации прогресса
@@ -257,7 +269,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 createTables(db);
             } catch (Exception ignored) {}
             ensureSchemaMigration(db);
-        } else if (oldVersion < 8) {
+        } else if (oldVersion < 11) {
             ensureSchemaMigration(db);
         }
     }
@@ -320,13 +332,17 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         String localFileUrl = null;
         String localDocUuid = null;
         String bestLocalCfi = null;
+        String localLinkedAudioUuid = null;
+        double localAudioPercent = 0.0;
+        long localAudioUpdatedAt = 0L;
         int bestLocalPage = 0;
 
         try {
             // 1. Проверяем локальную запись в таблице books
-            Cursor c = db.rawQuery("SELECT percent, is_downloaded, last_read_timestamp, current_chapter, current_paragraph, shelf_type, card_id, file_url, document_uuid, cfi FROM books WHERE uuid = ?", new String[]{book.getUuid()});
-            if (c != null) {
-                if (c.moveToFirst()) {
+            Cursor c = null;
+            try {
+                c = db.rawQuery("SELECT percent, is_downloaded, last_read_timestamp, current_chapter, current_paragraph, shelf_type, card_id, file_url, document_uuid, cfi, linked_audio_uuid, audio_percent, audio_updated_at FROM books WHERE uuid = ?", new String[]{book.getUuid()});
+                if (c != null && c.moveToFirst()) {
                     hasLocalRecord = true;
                     double localPercent = c.getDouble(0);
                     int localDown = c.getInt(1);
@@ -335,21 +351,19 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     int localPar = c.getInt(4);
                     localShelfType = c.getString(5);
                     int cardIdx = c.getColumnIndex("card_id");
-                    if (cardIdx >= 0) {
-                        localCardId = c.getString(cardIdx);
-                    }
+                    if (cardIdx >= 0) localCardId = c.getString(cardIdx);
                     int fileUrlIdx = c.getColumnIndex("file_url");
-                    if (fileUrlIdx >= 0) {
-                        localFileUrl = c.getString(fileUrlIdx);
-                    }
+                    if (fileUrlIdx >= 0) localFileUrl = c.getString(fileUrlIdx);
                     int docIdx = c.getColumnIndex("document_uuid");
-                    if (docIdx >= 0) {
-                        localDocUuid = c.getString(docIdx);
-                    }
+                    if (docIdx >= 0) localDocUuid = c.getString(docIdx);
                     int cfiIdx = c.getColumnIndex("cfi");
-                    if (cfiIdx >= 0) {
-                        bestLocalCfi = c.getString(cfiIdx);
-                    }
+                    if (cfiIdx >= 0) bestLocalCfi = c.getString(cfiIdx);
+                    int audioUuidIdx = c.getColumnIndex("linked_audio_uuid");
+                    if (audioUuidIdx >= 0) localLinkedAudioUuid = c.getString(audioUuidIdx);
+                    int audioPctIdx = c.getColumnIndex("audio_percent");
+                    if (audioPctIdx >= 0) localAudioPercent = c.getDouble(audioPctIdx);
+                    int audioUpdIdx = c.getColumnIndex("audio_updated_at");
+                    if (audioUpdIdx >= 0) localAudioUpdatedAt = c.getLong(audioUpdIdx);
 
                     if (localDown == 1) {
                         effectiveDownloaded = true;
@@ -363,16 +377,18 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                         bestLocalPar = localPar;
                     }
                 }
-                c.close();
+            } finally {
+                if (c != null) try { c.close(); } catch (Throwable ignored) {}
             }
 
             // 2. Дополнительно сверяем с таблицей progress и очередью sync_queue
             long bestProgressTs = (bestLocalPercent > 0.0 || bestLocalCh > 0) ? bestLocalTs : 0L;
             boolean isLocalProgressSynced = true;
             boolean hasUnsyncedQueue = false;
-            Cursor pc = db.rawQuery("SELECT percent, timestamp, chapter_index, paragraph_index, is_synced, page_index, cfi, document_uuid FROM progress WHERE book_uuid = ?", new String[]{book.getUuid()});
-            if (pc != null) {
-                if (pc.moveToFirst()) {
+            Cursor pc = null;
+            try {
+                pc = db.rawQuery("SELECT percent, timestamp, chapter_index, paragraph_index, is_synced, page_index, cfi, document_uuid, linked_audio_uuid, audio_percent, audio_updated_at FROM progress WHERE book_uuid = ?", new String[]{book.getUuid()});
+                if (pc != null && pc.moveToFirst()) {
                     hasLocalRecord = true;
                     double progPercent = pc.getDouble(0);
                     long progTs = pc.getLong(1);
@@ -382,8 +398,18 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     int progPage = pc.getInt(5);
                     String progCfi = pc.getString(6);
                     String progDoc = pc.getString(7);
+                    String progAudioUuid = pc.getString(8);
+                    double progAudioPct = pc.getDouble(9);
+                    long progAudioUpd = pc.getLong(10);
                     if ((localDocUuid == null || localDocUuid.isEmpty()) && progDoc != null && !progDoc.isEmpty()) {
                         localDocUuid = progDoc;
+                    }
+                    if ((localLinkedAudioUuid == null || localLinkedAudioUuid.isEmpty()) && progAudioUuid != null && !progAudioUuid.isEmpty()) {
+                        localLinkedAudioUuid = progAudioUuid;
+                    }
+                    if (progAudioUpd > localAudioUpdatedAt && progAudioPct > 0.0) {
+                        localAudioPercent = progAudioPct;
+                        localAudioUpdatedAt = progAudioUpd;
                     }
 
                     boolean progCorrupted = (progPercent >= 99.0 && progCh == 0);
@@ -405,13 +431,18 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                         }
                     }
                 }
-                pc.close();
+            } finally {
+                if (pc != null) try { pc.close(); } catch (Throwable ignored) {}
             }
 
-            Cursor qc = db.rawQuery("SELECT 1 FROM sync_queue WHERE book_uuid = ?", new String[]{book.getUuid()});
-            if (qc != null) {
-                hasUnsyncedQueue = qc.moveToFirst();
-                qc.close();
+            Cursor qc = null;
+            try {
+                qc = db.rawQuery("SELECT 1 FROM sync_queue WHERE book_uuid = ?", new String[]{book.getUuid()});
+                if (qc != null) {
+                    hasUnsyncedQueue = qc.moveToFirst();
+                }
+            } finally {
+                if (qc != null) try { qc.close(); } catch (Throwable ignored) {}
             }
 
             boolean hasLocalProgress = hasLocalRecord && (bestLocalPercent > 0.0 || bestLocalCh > 0 || bestLocalTs > 0);
@@ -498,12 +529,13 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             } else if (book.getShelfType() != null && ("reading".equals(book.getShelfType()) || "to_read".equals(book.getShelfType()) || "done".equals(book.getShelfType()))) {
                 boolean localReadingIsNewer = "reading".equals(localShelfType) && (hasLocalProgress || bestLocalTs > 0) && (cloudTimestamp <= 0 || bestLocalTs >= cloudTimestamp);
                 boolean localToReadIsNewer = "to_read".equals(localShelfType) && bestLocalTs > 0 && (cloudTimestamp <= 0 || bestLocalTs > cloudTimestamp);
-                if ("to_read".equals(book.getShelfType()) && ("reading".equals(localShelfType) && (localReadingIsNewer || hasLocalProgress))) {
+                boolean localDoneIsNewer = "done".equals(localShelfType) && bestLocalTs > 0 && (cloudTimestamp <= 0 || bestLocalTs > cloudTimestamp);
+                if ("done".equals(book.getShelfType()) || localDoneIsNewer || (effectivePercent >= 99.0 && effectiveChapter > 0)) {
+                    targetShelf = "done";
+                } else if ("to_read".equals(book.getShelfType()) && ("reading".equals(localShelfType) && (localReadingIsNewer || hasLocalProgress))) {
                     targetShelf = "reading";
                 } else if ("reading".equals(book.getShelfType()) && localToReadIsNewer) {
                     targetShelf = "to_read";
-                } else if ("done".equals(book.getShelfType()) || (effectivePercent >= 99.0 && effectiveChapter > 0)) {
-                    targetShelf = "done";
                 } else if (effectivePercent > 0.0 && effectivePercent < 99.0 && !localToReadIsNewer) {
                     targetShelf = "reading";
                 } else {
@@ -550,6 +582,25 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 cv.put("file_url", effectiveFileUrl);
             }
 
+            String effectiveAudioUuid = book.getLinkedAudioUuid();
+            if ((effectiveAudioUuid == null || effectiveAudioUuid.isEmpty()) && localLinkedAudioUuid != null && !localLinkedAudioUuid.isEmpty()) {
+                effectiveAudioUuid = localLinkedAudioUuid;
+                book.setLinkedAudioUuid(effectiveAudioUuid);
+            }
+            if (effectiveAudioUuid != null && !effectiveAudioUuid.isEmpty()) {
+                cv.put("linked_audio_uuid", effectiveAudioUuid);
+            }
+            double effectiveAudioPercent = book.getAudioPercent();
+            long effectiveAudioUpdatedAt = book.getAudioUpdatedAt();
+            if (localAudioUpdatedAt > effectiveAudioUpdatedAt && localAudioPercent > 0.0) {
+                effectiveAudioPercent = localAudioPercent;
+                effectiveAudioUpdatedAt = localAudioUpdatedAt;
+                book.setAudioPercent(effectiveAudioPercent);
+                book.setAudioUpdatedAt(effectiveAudioUpdatedAt);
+            }
+            cv.put("audio_percent", effectiveAudioPercent);
+            cv.put("audio_updated_at", effectiveAudioUpdatedAt);
+
             cv.put("title", book.getTitle());
             cv.put("author", book.getAuthor());
             cv.put("annotation", book.getAnnotation());
@@ -573,33 +624,31 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     private void syncInitialCloudProgress(SQLiteDatabase db, Book book, boolean forceCloudUpdate) {
+        Cursor c = null;
         try {
-            Cursor c = db.rawQuery("SELECT percent, timestamp, chapter_index, page_index, cfi, document_uuid FROM progress WHERE book_uuid = ?", new String[]{book.getUuid()});
+            c = db.rawQuery("SELECT percent, timestamp, chapter_index, page_index, cfi, document_uuid FROM progress WHERE book_uuid = ?", new String[]{book.getUuid()});
             boolean shouldUpdate = true;
             double existingPercent = 0.0;
             int existingChapter = 0;
             int existingPage = 0;
             String existingCfi = null;
             String existingDocUuid = null;
-            if (c != null) {
-                if (c.moveToFirst()) {
-                    existingPercent = c.getDouble(0);
-                    long existingTs = c.getLong(1);
-                    existingChapter = c.getInt(2);
-                    existingPage = c.getInt(3);
-                    existingCfi = c.getString(4);
-                    existingDocUuid = c.getString(5);
+            if (c != null && c.moveToFirst()) {
+                existingPercent = c.getDouble(0);
+                long existingTs = c.getLong(1);
+                existingChapter = c.getInt(2);
+                existingPage = c.getInt(3);
+                existingCfi = c.getString(4);
+                existingDocUuid = c.getString(5);
 
-                    boolean existingCorrupted = (existingPercent >= 99.0 && existingChapter == 0);
-                    if (existingCorrupted || forceCloudUpdate) {
-                        shouldUpdate = true;
-                    } else if (book.getLastReadTimestamp() > existingTs && book.getLastReadTimestamp() > 0 && book.getPercent() >= existingPercent) {
-                        shouldUpdate = true;
-                    } else if (existingPercent > book.getPercent() || existingChapter > book.getCurrentChapterIndex() || existingTs >= book.getLastReadTimestamp()) {
-                        shouldUpdate = false;
-                    }
+                boolean existingCorrupted = (existingPercent >= 99.0 && existingChapter == 0);
+                if (existingCorrupted || forceCloudUpdate) {
+                    shouldUpdate = true;
+                } else if (book.getLastReadTimestamp() > existingTs && book.getLastReadTimestamp() > 0 && book.getPercent() >= existingPercent) {
+                    shouldUpdate = true;
+                } else if (existingPercent > book.getPercent() || existingChapter > book.getCurrentChapterIndex() || existingTs >= book.getLastReadTimestamp()) {
+                    shouldUpdate = false;
                 }
-                c.close();
             }
 
             if (shouldUpdate) {
@@ -625,6 +674,11 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 if (docUuid != null && !docUuid.isEmpty()) {
                     pCv.put("document_uuid", docUuid);
                 }
+                if (book.getLinkedAudioUuid() != null && !book.getLinkedAudioUuid().isEmpty()) {
+                    pCv.put("linked_audio_uuid", book.getLinkedAudioUuid());
+                }
+                pCv.put("audio_percent", book.getAudioPercent());
+                pCv.put("audio_updated_at", book.getAudioUpdatedAt());
                 pCv.put("timestamp", book.getLastReadTimestamp() > 0 ? book.getLastReadTimestamp() : System.currentTimeMillis());
                 pCv.put("is_synced", 1);
                 db.insertWithOnConflict("progress", null, pCv, SQLiteDatabase.CONFLICT_REPLACE);
@@ -633,7 +687,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     ensureCloudSyncBookmarkInternal(db, book.getUuid(), book.getCurrentChapterIndex(), 0, book.getPercent());
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
+        }
     }
 
     public synchronized void ensureCloudSyncBookmark(String bookUuid, int chapterIndex, int pageIndex, double percent) {
@@ -642,12 +699,12 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     private void ensureCloudSyncBookmarkInternal(SQLiteDatabase db, String bookUuid, int chapterIndex, int pageIndex, double percent) {
+        Cursor bc = null;
         try {
             ensureBookmarksTable(db);
-            Cursor bc = db.rawQuery("SELECT id FROM bookmarks WHERE book_uuid = ? AND title LIKE 'Облако%'", new String[]{bookUuid});
+            bc = db.rawQuery("SELECT id FROM bookmarks WHERE book_uuid = ? AND title LIKE 'Облако%'", new String[]{bookUuid});
             boolean exists = (bc != null && bc.moveToFirst());
             long existingId = exists ? bc.getLong(0) : -1L;
-            if (bc != null) bc.close();
 
             ContentValues bCv = new ContentValues();
             bCv.put("book_uuid", bookUuid);
@@ -665,7 +722,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             } else {
                 db.insert("bookmarks", null, bCv);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        } finally {
+            if (bc != null) try { bc.close(); } catch (Throwable ignored) {}
+        }
     }
 
     public synchronized void updateBookDownloaded(String uuid, boolean isDownloaded) {
@@ -711,46 +771,63 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     public synchronized String getBookDocumentUuid(String uuid) {
         if (uuid == null || uuid.isEmpty()) return null;
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT document_uuid FROM books WHERE uuid = ?", new String[]{uuid});
+        Cursor c = null;
         String docUuid = null;
-        if (c != null) {
-            if (c.moveToFirst()) {
+        try {
+            c = db.rawQuery("SELECT document_uuid FROM books WHERE uuid = ?", new String[]{uuid});
+            if (c != null && c.moveToFirst()) {
                 docUuid = c.getString(0);
             }
-            c.close();
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
         }
         return docUuid;
     }
 
     public synchronized void resetReadingProgress(String uuid) {
         SQLiteDatabase db = getWritableDatabase();
-        ensureHiddenBooksTable(db);
-        db.delete("hidden_books", "uuid = ?", new String[]{uuid});
-        ContentValues cv = new ContentValues();
-        cv.put("percent", 0.0);
-        cv.put("current_chapter", 0);
-        cv.put("current_paragraph", 0);
-        cv.put("last_read_timestamp", System.currentTimeMillis());
-        cv.put("shelf_type", "to_read");
-        db.update("books", cv, "uuid = ?", new String[]{uuid});
-        db.delete("progress", "book_uuid = ?", new String[]{uuid});
-        db.delete("sync_queue", "book_uuid = ?", new String[]{uuid});
-        db.delete("bookmarks", "book_uuid = ? AND title LIKE 'Облако%'", new String[]{uuid});
+        db.beginTransaction();
+        try {
+            ensureHiddenBooksTable(db);
+            db.delete("hidden_books", "uuid = ?", new String[]{uuid});
+            ContentValues cv = new ContentValues();
+            cv.put("percent", 0.0);
+            cv.put("current_chapter", 0);
+            cv.put("current_paragraph", 0);
+            cv.put("cfi", "");
+            cv.put("last_read_timestamp", System.currentTimeMillis());
+            cv.put("shelf_type", "to_read");
+            db.update("books", cv, "uuid = ?", new String[]{uuid});
+            db.delete("progress", "book_uuid = ?", new String[]{uuid});
+            db.delete("sync_queue", "book_uuid = ?", new String[]{uuid});
+            db.delete("bookmarks", "book_uuid = ? AND title LIKE 'Облако%'", new String[]{uuid});
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
     }
 
     public synchronized void hideBook(String uuid) {
         SQLiteDatabase db = getWritableDatabase();
-        ensureHiddenBooksTable(db);
-        ContentValues cv = new ContentValues();
-        cv.put("uuid", uuid);
-        cv.put("removed_at", System.currentTimeMillis());
-        db.insertWithOnConflict("hidden_books", null, cv, SQLiteDatabase.CONFLICT_REPLACE);
+        db.beginTransaction();
+        try {
+            ensureHiddenBooksTable(db);
+            ensureQuotesTable(db);
+            ContentValues cv = new ContentValues();
+            cv.put("uuid", uuid);
+            cv.put("removed_at", System.currentTimeMillis());
+            db.insertWithOnConflict("hidden_books", null, cv, SQLiteDatabase.CONFLICT_REPLACE);
 
-        db.delete("books", "uuid = ?", new String[]{uuid});
-        db.delete("chapters", "book_uuid = ?", new String[]{uuid});
-        db.delete("progress", "book_uuid = ?", new String[]{uuid});
-        db.delete("bookmarks", "book_uuid = ?", new String[]{uuid});
-        db.delete("sync_queue", "book_uuid = ?", new String[]{uuid});
+            db.delete("books", "uuid = ?", new String[]{uuid});
+            db.delete("chapters", "book_uuid = ?", new String[]{uuid});
+            db.delete("progress", "book_uuid = ?", new String[]{uuid});
+            db.delete("bookmarks", "book_uuid = ?", new String[]{uuid});
+            db.delete("quotes", "book_uuid = ?", new String[]{uuid});
+            db.delete("sync_queue", "book_uuid = ?", new String[]{uuid});
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
     }
 
     public synchronized void unhideBook(String uuid) {
@@ -783,26 +860,30 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
     public synchronized int getBooksCountByShelf(String shelfType) {
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT COUNT(*) FROM books WHERE shelf_type = ?", new String[]{shelfType});
+        Cursor c = null;
         int count = 0;
-        if (c != null) {
-            if (c.moveToFirst()) {
+        try {
+            c = db.rawQuery("SELECT COUNT(*) FROM books WHERE shelf_type = ?", new String[]{shelfType});
+            if (c != null && c.moveToFirst()) {
                 count = c.getInt(0);
             }
-            c.close();
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
         }
         return count;
     }
 
     public synchronized Book getBookByUuid(String uuid) {
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT * FROM books WHERE uuid = ?", new String[]{uuid});
+        Cursor c = null;
         Book b = null;
-        if (c != null) {
-            if (c.moveToFirst()) {
+        try {
+            c = db.rawQuery("SELECT * FROM books WHERE uuid = ?", new String[]{uuid});
+            if (c != null && c.moveToFirst()) {
                 b = parseBookFromCursor(c);
             }
-            c.close();
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
         }
         return b;
     }
@@ -810,12 +891,16 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     public synchronized List<Book> getBooksByShelf(String shelfType) {
         List<Book> list = new ArrayList<>();
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT * FROM books WHERE shelf_type = ? ORDER BY last_read_timestamp DESC", new String[]{shelfType});
-        if (c != null) {
-            while (c.moveToNext()) {
-                list.add(parseBookFromCursor(c));
+        Cursor c = null;
+        try {
+            c = db.rawQuery("SELECT * FROM books WHERE shelf_type = ? ORDER BY last_read_timestamp DESC", new String[]{shelfType});
+            if (c != null) {
+                while (c.moveToNext()) {
+                    list.add(parseBookFromCursor(c));
+                }
             }
-            c.close();
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
         }
         return list;
     }
@@ -867,6 +952,21 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             b.setFileUrl(c.getString(fileUrlIdx));
         }
 
+        int audioUuidIdx = c.getColumnIndex("linked_audio_uuid");
+        if (audioUuidIdx >= 0) {
+            b.setLinkedAudioUuid(c.getString(audioUuidIdx));
+        }
+
+        int audioPctIdx = c.getColumnIndex("audio_percent");
+        if (audioPctIdx >= 0) {
+            b.setAudioPercent(c.getDouble(audioPctIdx));
+        }
+
+        int audioUpdIdx = c.getColumnIndex("audio_updated_at");
+        if (audioUpdIdx >= 0) {
+            b.setAudioUpdatedAt(c.getLong(audioUpdIdx));
+        }
+
         return b;
     }
 
@@ -896,23 +996,27 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     public synchronized List<Chapter> getChapters(String bookUuid) {
         List<Chapter> list = new ArrayList<>();
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT * FROM chapters WHERE book_uuid = ? ORDER BY chapter_index ASC", new String[]{bookUuid});
-        if (c != null) {
-            while (c.moveToNext()) {
-                Chapter ch = new Chapter();
-                ch.setId(c.getString(c.getColumnIndex("id")));
-                ch.setBookUuid(c.getString(c.getColumnIndex("book_uuid")));
-                ch.setChapterIndex(c.getInt(c.getColumnIndex("chapter_index")));
-                ch.setTitle(c.getString(c.getColumnIndex("title")));
-                int opfIdxCol = c.getColumnIndex("original_opf_spine_index");
-                if (opfIdxCol >= 0) ch.setOriginalOpfSpineIndex(c.getInt(opfIdxCol));
-                int opfIdCol = c.getColumnIndex("opf_item_id");
-                if (opfIdCol >= 0) ch.setOpfItemId(c.getString(opfIdCol));
-                int charCountCol = c.getColumnIndex("char_count");
-                if (charCountCol >= 0) ch.setCharCount(c.getInt(charCountCol));
-                list.add(ch);
+        Cursor c = null;
+        try {
+            c = db.rawQuery("SELECT * FROM chapters WHERE book_uuid = ? ORDER BY chapter_index ASC", new String[]{bookUuid});
+            if (c != null) {
+                while (c.moveToNext()) {
+                    Chapter ch = new Chapter();
+                    ch.setId(c.getString(c.getColumnIndex("id")));
+                    ch.setBookUuid(c.getString(c.getColumnIndex("book_uuid")));
+                    ch.setChapterIndex(c.getInt(c.getColumnIndex("chapter_index")));
+                    ch.setTitle(c.getString(c.getColumnIndex("title")));
+                    int opfIdxCol = c.getColumnIndex("original_opf_spine_index");
+                    if (opfIdxCol >= 0) ch.setOriginalOpfSpineIndex(c.getInt(opfIdxCol));
+                    int opfIdCol = c.getColumnIndex("opf_item_id");
+                    if (opfIdCol >= 0) ch.setOpfItemId(c.getString(opfIdCol));
+                    int charCountCol = c.getColumnIndex("char_count");
+                    if (charCountCol >= 0) ch.setCharCount(c.getInt(charCountCol));
+                    list.add(ch);
+                }
             }
-            c.close();
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
         }
         return list;
     }
@@ -949,7 +1053,25 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         if (progress.getDocumentUuid() != null && !progress.getDocumentUuid().isEmpty()) {
             cv.put("document_uuid", progress.getDocumentUuid());
         }
+        if (progress.getLinkedAudioUuid() != null && !progress.getLinkedAudioUuid().isEmpty()) {
+            cv.put("linked_audio_uuid", progress.getLinkedAudioUuid());
+        }
+        if (progress.getAudioPercent() > 0.0 || progress.getAudioUpdatedAt() > 0L) {
+            cv.put("audio_percent", progress.getAudioPercent());
+            cv.put("audio_updated_at", progress.getAudioUpdatedAt());
+        }
         db.insertWithOnConflict("progress", null, cv, SQLiteDatabase.CONFLICT_REPLACE);
+
+        String existingShelf = null;
+        Cursor sc = null;
+        try {
+            sc = db.rawQuery("SELECT shelf_type FROM books WHERE uuid = ?", new String[]{progress.getBookUuid()});
+            if (sc != null && sc.moveToFirst()) {
+                existingShelf = sc.getString(0);
+            }
+        } finally {
+            if (sc != null) try { sc.close(); } catch (Throwable ignored) {}
+        }
 
         // Также обновляем процент, главы, полку и таймштамп в таблице books
         ContentValues bookCv = new ContentValues();
@@ -957,7 +1079,9 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         bookCv.put("current_chapter", progress.getChapterIndex());
         bookCv.put("current_paragraph", progress.getParagraphIndex());
         bookCv.put("last_read_timestamp", progress.getTimestamp());
-        if (progress.getPercent() >= 99.0 && (progress.getChapterIndex() > 0 || progress.getPercent() >= 99.9)) {
+        if ("user_books".equals(existingShelf)) {
+            bookCv.put("shelf_type", "user_books");
+        } else if (progress.getPercent() >= 99.0 && (progress.getChapterIndex() > 0 || progress.getPercent() >= 99.9)) {
             bookCv.put("shelf_type", "done");
         } else {
             bookCv.put("shelf_type", "reading");
@@ -971,15 +1095,23 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         if (progress.getDocumentUuid() != null && !progress.getDocumentUuid().isEmpty()) {
             bookCv.put("document_uuid", progress.getDocumentUuid());
         }
+        if (progress.getLinkedAudioUuid() != null && !progress.getLinkedAudioUuid().isEmpty()) {
+            bookCv.put("linked_audio_uuid", progress.getLinkedAudioUuid());
+        }
+        if (progress.getAudioPercent() > 0.0 || progress.getAudioUpdatedAt() > 0L) {
+            bookCv.put("audio_percent", progress.getAudioPercent());
+            bookCv.put("audio_updated_at", progress.getAudioUpdatedAt());
+        }
         db.update("books", bookCv, "uuid = ?", new String[]{progress.getBookUuid()});
     }
 
     public synchronized ReadingProgress getProgress(String bookUuid) {
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT * FROM progress WHERE book_uuid = ?", new String[]{bookUuid});
+        Cursor c = null;
         ReadingProgress p = null;
-        if (c != null) {
-            if (c.moveToFirst()) {
+        try {
+            c = db.rawQuery("SELECT * FROM progress WHERE book_uuid = ?", new String[]{bookUuid});
+            if (c != null && c.moveToFirst()) {
                 p = new ReadingProgress();
                 p.setBookUuid(c.getString(c.getColumnIndex("book_uuid")));
                 p.setPercent(c.getDouble(c.getColumnIndex("percent")));
@@ -989,41 +1121,45 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 p.setTimestamp(c.getLong(c.getColumnIndex("timestamp")));
                 p.setSyncedWithServer(c.getInt(c.getColumnIndex("is_synced")) == 1);
                 int cfiIdx = c.getColumnIndex("cfi");
-                if (cfiIdx >= 0) {
-                    p.setCfi(c.getString(cfiIdx));
-                }
+                if (cfiIdx >= 0) p.setCfi(c.getString(cfiIdx));
                 int docIdx = c.getColumnIndex("document_uuid");
-                if (docIdx >= 0) {
-                    p.setDocumentUuid(c.getString(docIdx));
-                }
+                if (docIdx >= 0) p.setDocumentUuid(c.getString(docIdx));
+                int auUuidIdx = c.getColumnIndex("linked_audio_uuid");
+                if (auUuidIdx >= 0) p.setLinkedAudioUuid(c.getString(auUuidIdx));
+                int auPctIdx = c.getColumnIndex("audio_percent");
+                if (auPctIdx >= 0) p.setAudioPercent(c.getDouble(auPctIdx));
+                int auUpdIdx = c.getColumnIndex("audio_updated_at");
+                if (auUpdIdx >= 0) p.setAudioUpdatedAt(c.getLong(auUpdIdx));
             }
-            c.close();
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
         }
         if (p != null) {
+            Cursor bc = null;
             try {
-                Cursor bc = db.rawQuery("SELECT card_id, document_uuid, cfi FROM books WHERE uuid = ?", new String[]{bookUuid});
-                if (bc != null) {
-                    if (bc.moveToFirst()) {
-                        String cardId = bc.getString(0);
-                        if (cardId != null && !cardId.isEmpty()) {
-                            p.setLibraryCardId(cardId);
-                        }
-                        if (p.getDocumentUuid() == null || p.getDocumentUuid().isEmpty()) {
-                            String dUuid = bc.getString(1);
-                            if (dUuid != null && !dUuid.isEmpty()) {
-                                p.setDocumentUuid(dUuid);
-                            }
-                        }
-                        if (p.getCfi() == null || p.getCfi().isEmpty()) {
-                            String savedCfi = bc.getString(2);
-                            if (savedCfi != null && !savedCfi.isEmpty()) {
-                                p.setCfi(savedCfi);
-                            }
-                        }
+                bc = db.rawQuery("SELECT card_id, document_uuid, cfi, linked_audio_uuid, audio_percent, audio_updated_at FROM books WHERE uuid = ?", new String[]{bookUuid});
+                if (bc != null && bc.moveToFirst()) {
+                    String cardId = bc.getString(0);
+                    if (cardId != null && !cardId.isEmpty()) p.setLibraryCardId(cardId);
+                    if (p.getDocumentUuid() == null || p.getDocumentUuid().isEmpty()) {
+                        String dUuid = bc.getString(1);
+                        if (dUuid != null && !dUuid.isEmpty()) p.setDocumentUuid(dUuid);
                     }
-                    bc.close();
+                    if (p.getCfi() == null || p.getCfi().isEmpty()) {
+                        String savedCfi = bc.getString(2);
+                        if (savedCfi != null && !savedCfi.isEmpty()) p.setCfi(savedCfi);
+                    }
+                    if (p.getLinkedAudioUuid() == null || p.getLinkedAudioUuid().isEmpty()) {
+                        String bAudio = bc.getString(3);
+                        if (bAudio != null && !bAudio.isEmpty()) p.setLinkedAudioUuid(bAudio);
+                    }
+                    if (p.getAudioPercent() <= 0.0) p.setAudioPercent(bc.getDouble(4));
+                    if (p.getAudioUpdatedAt() <= 0L) p.setAudioUpdatedAt(bc.getLong(5));
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            } finally {
+                if (bc != null) try { bc.close(); } catch (Throwable ignored) {}
+            }
         }
         return p;
     }
@@ -1090,34 +1226,36 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         }
 
         // 2. Несинхронизированные записи из таблицы progress (is_synced == 0)
-        Cursor c = db.rawQuery("SELECT * FROM progress WHERE is_synced = 0", null);
-        if (c != null) {
-            while (c.moveToNext()) {
-                String uuid = c.getString(c.getColumnIndex("book_uuid"));
-                if (!seenUuids.contains(uuid)) {
-                    ReadingProgress p = new ReadingProgress();
-                    p.setBookUuid(uuid);
-                    p.setPercent(c.getDouble(c.getColumnIndex("percent")));
-                    p.setChapterIndex(c.getInt(c.getColumnIndex("chapter_index")));
-                    p.setParagraphIndex(c.getInt(c.getColumnIndex("paragraph_index")));
-                    p.setPageIndex(c.getInt(c.getColumnIndex("page_index")));
-                    p.setTimestamp(c.getLong(c.getColumnIndex("timestamp")));
-                    int cfiCol = c.getColumnIndex("cfi");
-                    if (cfiCol >= 0) {
-                        String cfiVal = c.getString(cfiCol);
-                        if (cfiVal != null && !cfiVal.isEmpty()) p.setCfi(cfiVal);
-                    }
-                    int docCol = c.getColumnIndex("document_uuid");
-                    if (docCol >= 0) {
-                        String docVal = c.getString(docCol);
-                        if (docVal != null && !docVal.isEmpty()) p.setDocumentUuid(docVal);
-                    }
-                    p.setSyncedWithServer(false);
+        Cursor c = null;
+        try {
+            c = db.rawQuery("SELECT * FROM progress WHERE is_synced = 0", null);
+            if (c != null) {
+                while (c.moveToNext()) {
+                    String uuid = c.getString(c.getColumnIndex("book_uuid"));
+                    if (!seenUuids.contains(uuid)) {
+                        ReadingProgress p = new ReadingProgress();
+                        p.setBookUuid(uuid);
+                        p.setPercent(c.getDouble(c.getColumnIndex("percent")));
+                        p.setChapterIndex(c.getInt(c.getColumnIndex("chapter_index")));
+                        p.setParagraphIndex(c.getInt(c.getColumnIndex("paragraph_index")));
+                        p.setPageIndex(c.getInt(c.getColumnIndex("page_index")));
+                        p.setTimestamp(c.getLong(c.getColumnIndex("timestamp")));
+                        int cfiCol = c.getColumnIndex("cfi");
+                        if (cfiCol >= 0) {
+                            String cfiVal = c.getString(cfiCol);
+                            if (cfiVal != null && !cfiVal.isEmpty()) p.setCfi(cfiVal);
+                        }
+                        int docCol = c.getColumnIndex("document_uuid");
+                        if (docCol >= 0) {
+                            String docVal = c.getString(docCol);
+                            if (docVal != null && !docVal.isEmpty()) p.setDocumentUuid(docVal);
+                        }
+                        p.setSyncedWithServer(false);
 
-                    try {
-                        Cursor bc = db.rawQuery("SELECT card_id, document_uuid, cfi FROM books WHERE uuid = ?", new String[]{uuid});
-                        if (bc != null) {
-                            if (bc.moveToFirst()) {
+                        Cursor bc = null;
+                        try {
+                            bc = db.rawQuery("SELECT card_id, document_uuid, cfi FROM books WHERE uuid = ?", new String[]{uuid});
+                            if (bc != null && bc.moveToFirst()) {
                                 String cardId = bc.getString(0);
                                 if (cardId != null && !cardId.isEmpty()) {
                                     p.setLibraryCardId(cardId);
@@ -1131,15 +1269,18 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                                     if (bCfi != null && !bCfi.isEmpty()) p.setCfi(bCfi);
                                 }
                             }
-                            bc.close();
+                        } catch (Exception ignored) {
+                        } finally {
+                            if (bc != null) try { bc.close(); } catch (Throwable ignored) {}
                         }
-                    } catch (Exception ignored) {}
 
-                    list.add(p);
-                    seenUuids.add(uuid);
+                        list.add(p);
+                        seenUuids.add(uuid);
+                    }
                 }
             }
-            c.close();
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
         }
         return list;
     }
@@ -1147,29 +1288,31 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     public synchronized List<ReadingProgress> getPendingSyncQueue() {
         List<ReadingProgress> list = new ArrayList<>();
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT * FROM sync_queue ORDER BY timestamp ASC", null);
-        if (c != null) {
-            while (c.moveToNext()) {
-                ReadingProgress p = new ReadingProgress();
-                p.setBookUuid(c.getString(c.getColumnIndex("book_uuid")));
-                p.setPercent(c.getDouble(c.getColumnIndex("percent")));
-                p.setChapterIndex(c.getInt(c.getColumnIndex("chapter_index")));
-                p.setParagraphIndex(c.getInt(c.getColumnIndex("paragraph_index")));
-                p.setTimestamp(c.getLong(c.getColumnIndex("timestamp")));
-                int cfiCol = c.getColumnIndex("cfi");
-                if (cfiCol >= 0) {
-                    String cfiVal = c.getString(cfiCol);
-                    if (cfiVal != null && !cfiVal.isEmpty()) p.setCfi(cfiVal);
-                }
-                int docCol = c.getColumnIndex("document_uuid");
-                if (docCol >= 0) {
-                    String docVal = c.getString(docCol);
-                    if (docVal != null && !docVal.isEmpty()) p.setDocumentUuid(docVal);
-                }
-                try {
-                    Cursor bc = db.rawQuery("SELECT card_id, document_uuid, cfi FROM books WHERE uuid = ?", new String[]{p.getBookUuid()});
-                    if (bc != null) {
-                        if (bc.moveToFirst()) {
+        Cursor c = null;
+        try {
+            c = db.rawQuery("SELECT * FROM sync_queue ORDER BY timestamp ASC", null);
+            if (c != null) {
+                while (c.moveToNext()) {
+                    ReadingProgress p = new ReadingProgress();
+                    p.setBookUuid(c.getString(c.getColumnIndex("book_uuid")));
+                    p.setPercent(c.getDouble(c.getColumnIndex("percent")));
+                    p.setChapterIndex(c.getInt(c.getColumnIndex("chapter_index")));
+                    p.setParagraphIndex(c.getInt(c.getColumnIndex("paragraph_index")));
+                    p.setTimestamp(c.getLong(c.getColumnIndex("timestamp")));
+                    int cfiCol = c.getColumnIndex("cfi");
+                    if (cfiCol >= 0) {
+                        String cfiVal = c.getString(cfiCol);
+                        if (cfiVal != null && !cfiVal.isEmpty()) p.setCfi(cfiVal);
+                    }
+                    int docCol = c.getColumnIndex("document_uuid");
+                    if (docCol >= 0) {
+                        String docVal = c.getString(docCol);
+                        if (docVal != null && !docVal.isEmpty()) p.setDocumentUuid(docVal);
+                    }
+                    Cursor bc = null;
+                    try {
+                        bc = db.rawQuery("SELECT card_id, document_uuid, cfi FROM books WHERE uuid = ?", new String[]{p.getBookUuid()});
+                        if (bc != null && bc.moveToFirst()) {
                             String cardId = bc.getString(0);
                             if (cardId != null && !cardId.isEmpty()) {
                                 p.setLibraryCardId(cardId);
@@ -1183,12 +1326,15 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                                 if (bCfi != null && !bCfi.isEmpty()) p.setCfi(bCfi);
                             }
                         }
-                        bc.close();
+                    } catch (Exception ignored) {
+                    } finally {
+                        if (bc != null) try { bc.close(); } catch (Throwable ignored) {}
                     }
-                } catch (Exception ignored) {}
-                list.add(p);
+                    list.add(p);
+                }
             }
-            c.close();
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
         }
         return list;
     }
@@ -1228,10 +1374,11 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
     public synchronized List<Bookmark> getBookmarks(String bookUuid) {
         List<Bookmark> list = new ArrayList<>();
+        Cursor c = null;
         try {
             SQLiteDatabase db = getWritableDatabase();
             ensureBookmarksTable(db);
-            Cursor c = db.rawQuery("SELECT * FROM bookmarks WHERE book_uuid = ? ORDER BY timestamp DESC", new String[]{bookUuid});
+            c = db.rawQuery("SELECT * FROM bookmarks WHERE book_uuid = ? ORDER BY timestamp DESC", new String[]{bookUuid});
             if (c != null) {
                 while (c.moveToNext()) {
                     Bookmark b = new Bookmark();
@@ -1244,10 +1391,11 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     b.timestamp = c.getLong(c.getColumnIndex("timestamp"));
                     list.add(b);
                 }
-                c.close();
             }
         } catch (Exception e) {
             android.util.Log.e("DatabaseHelper", "Failed to get bookmarks", e);
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
         }
         return list;
     }
@@ -1411,15 +1559,22 @@ public class DatabaseHelper extends SQLiteOpenHelper {
      */
     public synchronized void replaceSyncedCloudQuotes(String bookUuid, List<Quote> personalCloudQuotes) {
         if (bookUuid == null || bookUuid.isEmpty()) return;
+        SQLiteDatabase db = null;
         try {
-            SQLiteDatabase db = getWritableDatabase();
+            db = getWritableDatabase();
+            db.beginTransaction();
             ensureQuotesTable(db);
             db.delete("quotes", "book_uuid = ? AND synced = 1", new String[]{bookUuid});
             if (personalCloudQuotes != null && !personalCloudQuotes.isEmpty()) {
                 upsertCloudQuotes(bookUuid, personalCloudQuotes);
             }
+            db.setTransactionSuccessful();
         } catch (Exception e) {
             android.util.Log.e("DatabaseHelper", "Failed to replace synced cloud quotes", e);
+        } finally {
+            if (db != null) {
+                try { db.endTransaction(); } catch (Throwable ignored) {}
+            }
         }
     }
 
@@ -1554,6 +1709,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             meta.put("night_mode_enabled", settings.isNightMode());
             meta.put("dither_covers_enabled", settings.isDitherCoversEnabled());
             meta.put("edge_brightness_swipe", settings.isEdgeBrightnessSwipeEnabled());
+            meta.put("edge_frontlight_cold", settings.getEdgeFrontlightCold());
+            meta.put("edge_frontlight_warm", settings.getEdgeFrontlightWarm());
             meta.put("audio_sync_enabled", settings.isAudioSyncEnabled());
             meta.put("use_epub_fonts", settings.isUseEpubFonts());
             meta.put("text_align_mode", settings.getTextAlignMode());
@@ -1565,10 +1722,19 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             meta.put("backup_timestamp", System.currentTimeMillis());
 
             java.io.File metaFile = new java.io.File(backupDir, "backup_meta.json");
-            java.io.FileOutputStream fos = new java.io.FileOutputStream(metaFile);
-            fos.write(meta.toString().getBytes("UTF-8"));
-            fos.flush();
-            fos.close();
+            java.io.File metaTmp = new java.io.File(backupDir, "backup_meta.json.tmp");
+            java.io.FileOutputStream fos = null;
+            try {
+                fos = new java.io.FileOutputStream(metaTmp);
+                fos.write(meta.toString().getBytes("UTF-8"));
+                fos.flush();
+            } finally {
+                if (fos != null) try { fos.close(); } catch (Throwable ignored) {}
+            }
+            if (metaTmp.exists() && metaTmp.length() > 0) {
+                if (metaFile.exists()) metaFile.delete();
+                metaTmp.renameTo(metaFile);
+            }
 
             summary.success = metaFile.exists() && metaFile.length() > 0
                     && ((dbFile == null || !dbFile.exists()) || (dstDb.exists() && dstDb.length() > 0));
@@ -1603,7 +1769,11 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         if (context == null) return false;
         try {
             com.onyx.yandexbooks.core.auth.TokenStorage ts = new com.onyx.yandexbooks.core.auth.TokenStorage(context);
-            if (ts.isAuthorized() && getBooksCountByShelf("reading") + getBooksCountByShelf("to_read") > 0) {
+            int totalLocalBooks = getBooksCountByShelf("reading")
+                    + getBooksCountByShelf("to_read")
+                    + getBooksCountByShelf("done")
+                    + getBooksCountByShelf("user_books");
+            if (ts.isAuthorized() && totalLocalBooks > 0) {
                 return false; // Данные уже на месте
             }
 
@@ -1613,56 +1783,81 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             if (!backupDir.exists()) return false;
 
             boolean restoredAny = false;
+            boolean allowDbRestore = (totalLocalBooks == 0);
+            org.json.JSONObject meta = null;
             java.io.File metaFile = new java.io.File(backupDir, "backup_meta.json");
-            if (metaFile.exists() && metaFile.length() > 0 && !ts.isAuthorized()) {
-                java.io.FileInputStream fis = new java.io.FileInputStream(metaFile);
-                java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(fis, "UTF-8"));
-                StringBuilder sb = new StringBuilder();
-                String line;
-                while ((line = br.readLine()) != null) sb.append(line);
-                br.close();
-                fis.close();
+            if (metaFile.exists() && metaFile.length() > 0) {
+                java.io.FileInputStream fis = null;
+                java.io.BufferedReader br = null;
+                try {
+                    fis = new java.io.FileInputStream(metaFile);
+                    br = new java.io.BufferedReader(new java.io.InputStreamReader(fis, "UTF-8"));
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = br.readLine()) != null) sb.append(line);
+                    meta = new org.json.JSONObject(sb.toString());
+                } finally {
+                    if (br != null) try { br.close(); } catch (Throwable ignored) {}
+                    if (fis != null) try { fis.close(); } catch (Throwable ignored) {}
+                }
 
-                org.json.JSONObject meta = new org.json.JSONObject(sb.toString());
                 if (meta.optBoolean("logged_out", false)) {
                     return false;
                 }
-                String token = meta.optString("access_token", "");
-                if (token.isEmpty()) {
-                    return false;
+
+                String metaLogin = meta.optString("user_login", "");
+                String currentLogin = ts.getUserLogin();
+                boolean sameAccount = (currentLogin == null || currentLogin.isEmpty()
+                        || metaLogin.isEmpty() || currentLogin.equalsIgnoreCase(metaLogin));
+
+                if (!ts.isAuthorized()) {
+                    String token = meta.optString("access_token", "");
+                    if (token.isEmpty()) {
+                        return false;
+                    }
+                    ts.saveTokens(token, meta.optString("refresh_token", ""), 31536000L);
+                    ts.setUserLogin(metaLogin);
+                    restoredAny = true;
                 }
-                ts.saveTokens(token, meta.optString("refresh_token", ""), 31536000L);
-                ts.setUserLogin(meta.optString("user_login", ""));
-                restoredAny = true;
-                AppSettings settings = new AppSettings(context);
-                if (meta.has("ui_scale")) settings.setUiScale((float) meta.optDouble("ui_scale", 1.0));
-                if (meta.has("reader_mode")) settings.setReaderMode(meta.optString("reader_mode", AppSettings.READER_MODE_ONYX));
-                if (meta.has("tap_zone_mode")) settings.setTapZoneMode(meta.optString("tap_zone_mode", AppSettings.TAP_ZONE_STANDARD));
-                if (meta.has("custom_tap_zones")) settings.setCustomTapZonesRaw(meta.optString("custom_tap_zones", AppSettings.DEFAULT_CUSTOM_TAP_ZONES));
-                if (meta.has("fullscreen_reader")) settings.setFullscreenReader(meta.optBoolean("fullscreen_reader", false));
-                if (meta.has("margin_mode")) settings.setMarginMode(meta.optString("margin_mode", AppSettings.MARGIN_NARROW));
-                if (meta.has("reader_orientation")) settings.setReaderOrientation(meta.optString("reader_orientation", AppSettings.ORIENTATION_PORTRAIT));
-                if (meta.has("font_size_sp")) settings.setFontSizeSp((int) meta.optInt("font_size_sp", 18));
-                if (meta.has("font_family")) settings.setFontFamily(meta.optString("font_family", "literata"));
-                if (meta.has("line_spacing_mult")) settings.setLineSpacingMultiplier((float) meta.optDouble("line_spacing_mult", 1.25));
-                if (meta.has("paragraph_indent_px")) settings.setParagraphIndentPx(meta.optInt("paragraph_indent_px", 20));
-                if (meta.has("hyphenation_enabled")) settings.setHyphenationEnabled(meta.optBoolean("hyphenation_enabled", true));
-                if (meta.has("bold_text_enabled")) settings.setBoldText(meta.optBoolean("bold_text_enabled", false));
-                if (meta.has("contrast_mode")) settings.setContrastMode(meta.optString("contrast_mode", "normal"));
-                if (meta.has("vertical_margin_mode")) settings.setVerticalMarginMode(meta.optString("vertical_margin_mode", "normal"));
-                if (meta.has("night_mode_enabled")) settings.setNightMode(meta.optBoolean("night_mode_enabled", false));
-                if (meta.has("dither_covers_enabled")) settings.setDitherCoversEnabled(meta.optBoolean("dither_covers_enabled", false));
-                if (meta.has("edge_brightness_swipe")) settings.setEdgeBrightnessSwipeEnabled(meta.optBoolean("edge_brightness_swipe", true));
-                if (meta.has("audio_sync_enabled")) settings.setAudioSyncEnabled(meta.optBoolean("audio_sync_enabled", true));
-                if (meta.has("use_epub_fonts")) settings.setUseEpubFonts(meta.optBoolean("use_epub_fonts", false));
-                if (meta.has("text_align_mode")) settings.setTextAlignMode(meta.optString("text_align_mode", AppSettings.TEXT_ALIGN_JUSTIFY));
-                if (meta.has("panel_size_mode")) settings.setPanelSizeMode(meta.optString("panel_size_mode", AppSettings.PANEL_SIZE_COMFORTABLE));
-                if (meta.has("card_density_mode")) settings.setCardDensityMode(meta.optString("card_density_mode", AppSettings.CARD_DENSITY_NORMAL));
-                if (meta.has("reader_footer_offset_dp")) settings.setReaderFooterOffsetDp(meta.optInt("reader_footer_offset_dp", AppSettings.DEFAULT_FOOTER_OFFSET_DP));
+
+                if (!sameAccount) {
+                    allowDbRestore = false;
+                }
+
+                if (allowDbRestore) {
+                    AppSettings settings = new AppSettings(context);
+                    if (meta.has("ui_scale")) settings.setUiScale((float) meta.optDouble("ui_scale", 1.0));
+                    if (meta.has("reader_mode")) settings.setReaderMode(meta.optString("reader_mode", AppSettings.READER_MODE_ONYX));
+                    if (meta.has("tap_zone_mode")) settings.setTapZoneMode(meta.optString("tap_zone_mode", AppSettings.TAP_ZONE_STANDARD));
+                    if (meta.has("custom_tap_zones")) settings.setCustomTapZonesRaw(meta.optString("custom_tap_zones", AppSettings.DEFAULT_CUSTOM_TAP_ZONES));
+                    if (meta.has("fullscreen_reader")) settings.setFullscreenReader(meta.optBoolean("fullscreen_reader", false));
+                    if (meta.has("margin_mode")) settings.setMarginMode(meta.optString("margin_mode", AppSettings.MARGIN_NARROW));
+                    if (meta.has("reader_orientation")) settings.setReaderOrientation(meta.optString("reader_orientation", AppSettings.ORIENTATION_PORTRAIT));
+                    if (meta.has("font_size_sp")) settings.setFontSizeSp((int) meta.optInt("font_size_sp", 18));
+                    if (meta.has("font_family")) settings.setFontFamily(meta.optString("font_family", "literata"));
+                    if (meta.has("line_spacing_mult")) settings.setLineSpacingMultiplier((float) meta.optDouble("line_spacing_mult", 1.25));
+                    if (meta.has("paragraph_indent_px")) settings.setParagraphIndentPx(meta.optInt("paragraph_indent_px", 20));
+                    if (meta.has("hyphenation_enabled")) settings.setHyphenationEnabled(meta.optBoolean("hyphenation_enabled", true));
+                    if (meta.has("bold_text_enabled")) settings.setBoldText(meta.optBoolean("bold_text_enabled", false));
+                    if (meta.has("contrast_mode")) settings.setContrastMode(meta.optString("contrast_mode", "normal"));
+                    if (meta.has("vertical_margin_mode")) settings.setVerticalMarginMode(meta.optString("vertical_margin_mode", "normal"));
+                    if (meta.has("night_mode_enabled")) settings.setNightMode(meta.optBoolean("night_mode_enabled", false));
+                    if (meta.has("dither_covers_enabled")) settings.setDitherCoversEnabled(meta.optBoolean("dither_covers_enabled", false));
+                    if (meta.has("edge_brightness_swipe")) settings.setEdgeBrightnessSwipeEnabled(meta.optBoolean("edge_brightness_swipe", true));
+                    if (meta.has("edge_frontlight_cold")) settings.setEdgeFrontlightCold(meta.optInt("edge_frontlight_cold", 50));
+                    if (meta.has("edge_frontlight_warm")) settings.setEdgeFrontlightWarm(meta.optInt("edge_frontlight_warm", 50));
+                    if (meta.has("audio_sync_enabled")) settings.setAudioSyncEnabled(meta.optBoolean("audio_sync_enabled", true));
+                    if (meta.has("use_epub_fonts")) settings.setUseEpubFonts(meta.optBoolean("use_epub_fonts", false));
+                    if (meta.has("text_align_mode")) settings.setTextAlignMode(meta.optString("text_align_mode", AppSettings.TEXT_ALIGN_JUSTIFY));
+                    if (meta.has("panel_size_mode")) settings.setPanelSizeMode(meta.optString("panel_size_mode", AppSettings.PANEL_SIZE_COMFORTABLE));
+                    if (meta.has("card_density_mode")) settings.setCardDensityMode(meta.optString("card_density_mode", AppSettings.CARD_DENSITY_NORMAL));
+                    if (meta.has("reader_footer_offset_dp")) settings.setReaderFooterOffsetDp(meta.optInt("reader_footer_offset_dp", AppSettings.DEFAULT_FOOTER_OFFSET_DP));
+                    restoredAny = true;
+                }
             }
 
             java.io.File backupDb = new java.io.File(backupDir, DATABASE_NAME);
-            if (restoredAny && backupDb.exists() && backupDb.length() > 0 && (getBooksCountByShelf("reading") + getBooksCountByShelf("to_read") == 0)) {
+            if (allowDbRestore && (restoredAny || ts.isAuthorized()) && backupDb.exists() && backupDb.length() > 0 && totalLocalBooks == 0) {
                 try {
                     close();
                 } catch (Throwable ignored) {}

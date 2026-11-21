@@ -292,6 +292,8 @@ public class CacheManager {
 
     public void saveFootnotes(String bookUuid, Map<String, String> footnotes) {
         if (bookUuid == null || footnotes == null) return;
+        File fnFile = getFootnotesFile(bookUuid);
+        File tmpFile = new File(fnFile.getAbsolutePath() + ".tmp");
         FileOutputStream fos = null;
         OutputStreamWriter writer = null;
         try {
@@ -301,11 +303,14 @@ public class CacheManager {
                     obj.put(e.getKey(), e.getValue());
                 }
             }
-            fos = new FileOutputStream(getFootnotesFile(bookUuid));
+            fos = new FileOutputStream(tmpFile);
             writer = new OutputStreamWriter(fos, "UTF-8");
             writer.write(obj.toString());
+            writer.flush();
         } catch (Exception e) {
             Log.e(TAG, "Error saving footnotes", e);
+            if (tmpFile.exists()) tmpFile.delete();
+            return;
         } finally {
             if (writer != null) {
                 try { writer.close(); } catch (Throwable ignored) {}
@@ -313,6 +318,10 @@ public class CacheManager {
             if (fos != null) {
                 try { fos.close(); } catch (Throwable ignored) {}
             }
+        }
+        if (tmpFile.exists()) {
+            if (fnFile.exists()) fnFile.delete();
+            tmpFile.renameTo(fnFile);
         }
     }
 
@@ -325,6 +334,7 @@ public class CacheManager {
         }
         FileInputStream fis = null;
         BufferedReader reader = null;
+        boolean corruptJson = false;
         try {
             fis = new FileInputStream(fnFile);
             reader = new BufferedReader(new InputStreamReader(fis, "UTF-8"));
@@ -342,6 +352,9 @@ public class CacheManager {
                     map.put(k, v);
                 }
             }
+        } catch (org.json.JSONException je) {
+            Log.e(TAG, "Corrupt footnotes.json, removing cache file", je);
+            corruptJson = true;
         } catch (Exception e) {
             Log.e(TAG, "Error loading footnotes", e);
         } finally {
@@ -351,6 +364,9 @@ public class CacheManager {
             if (fis != null) {
                 try { fis.close(); } catch (Throwable ignored) {}
             }
+        }
+        if (corruptJson) {
+            try { fnFile.delete(); } catch (Throwable ignored) {}
         }
         return map;
     }
@@ -502,14 +518,7 @@ public class CacheManager {
     public boolean isBookDownloaded(String bookUuid) {
         if (bookUuid == null || bookUuid.trim().isEmpty()) return false;
         File epub = getEpubFile(bookUuid);
-        if (epub.exists() && epub.length() > 500) {
-            return true;
-        }
-        Book b = dbHelper.getBookByUuid(bookUuid);
-        if (b != null && b.isDownloaded()) {
-            return true;
-        }
-        return false;
+        return epub != null && epub.exists() && epub.length() > 500;
     }
 
     public boolean isChapterCached(String bookUuid, String chapterId) {
@@ -687,9 +696,13 @@ public class CacheManager {
             if (bDir.exists()) {
                 deleteDirRecursive(bDir);
             }
-            File pub = getPublicEpubFile(title);
-            if (pub != null && pub.exists()) {
-                pub.delete();
+            File pubSuffixed = getPublicEpubFile(bookUuid, title);
+            if (pubSuffixed != null && pubSuffixed.exists()) {
+                pubSuffixed.delete();
+            }
+            File pubLegacy = getPublicEpubFile(title);
+            if (pubLegacy != null && pubLegacy.exists()) {
+                pubLegacy.delete();
             }
         } catch (Exception e) {
             Log.e(TAG, "Error deleting book cache", e);
@@ -753,15 +766,19 @@ public class CacheManager {
         try {
             EpubParser.ParseResult parsed = EpubParser.parseEpubFull(epubFile, getEpubFontsDir(bookUuid));
             if (parsed == null || parsed.chapters.isEmpty()) {
+                try { epubFile.delete(); } catch (Throwable ignored) {}
+                dbHelper.updateBookDownloaded(bookUuid, false);
                 return YandexBooksApiClient.DownloadResult.error("Не удалось извлечь главы из книги");
             }
 
             saveParsedBookChapters(bookUuid, parsed);
-            exportToPublicBooksDir(epubFile, bookTitle);
+            exportToPublicBooksDir(epubFile, bookUuid, bookTitle);
 
             return YandexBooksApiClient.DownloadResult.ok(epubFile);
         } catch (Throwable e) {
             Log.e(TAG, "Error in sync EPUB processing for " + bookUuid, e);
+            try { epubFile.delete(); } catch (Throwable ignored) {}
+            dbHelper.updateBookDownloaded(bookUuid, false);
             return YandexBooksApiClient.DownloadResult.error("Ошибка парсинга: " + e.getMessage());
         }
     }
@@ -784,17 +801,21 @@ public class CacheManager {
                         try {
                             EpubParser.ParseResult parsed = EpubParser.parseEpubFull(downloadedFile, getEpubFontsDir(bookUuid));
                             if (parsed == null || parsed.chapters.isEmpty()) {
+                                try { downloadedFile.delete(); } catch (Throwable ignored) {}
+                                dbHelper.updateBookDownloaded(bookUuid, false);
                                 return null;
                             }
 
                             List<Chapter> chapters = saveParsedBookChapters(bookUuid, parsed);
 
                             // Также экспортируем копию в /sdcard/Books/YandexBooks/ для системы Onyx
-                            exportToPublicBooksDir(downloadedFile, bookTitle);
+                            exportToPublicBooksDir(downloadedFile, bookUuid, bookTitle);
 
                             return chapters;
                         } catch (Throwable e) {
                             Log.e(TAG, "Error parsing downloaded EPUB", e);
+                            try { downloadedFile.delete(); } catch (Throwable ignored) {}
+                            dbHelper.updateBookDownloaded(bookUuid, false);
                             return null;
                         }
                     }
@@ -831,13 +852,14 @@ public class CacheManager {
         final File epub = getEpubFile(bookUuid);
         List<Chapter> chapters = dbHelper.getChapters(bookUuid);
 
-        // Если EPUB файл уже на устройстве, но список глав неполный или кэш от старой версии без форматирования v1.7.0:
-        if (epub.exists() && epub.length() > 0 && ((chapters == null || chapters.size() <= 1) || !isFormattedCacheCurrent(bookUuid))) {
+        // Если EPUB файл уже на устройстве, но список глав неполный, повреждён или кэш от старой версии без форматирования v1.7.0:
+        if (epub.exists() && epub.length() > 500
+                && ((chapters == null || chapters.size() <= 1) || !isFormattedCacheCurrent(bookUuid) || !isChapterCacheValid(bookUuid, chapters))) {
             reparseAndSaveBook(bookUuid, bookTitle, callback);
             return;
         }
 
-        if (isBookDownloaded(bookUuid) && chapters != null && !chapters.isEmpty()) {
+        if (isBookDownloaded(bookUuid) && chapters != null && !chapters.isEmpty() && isChapterCacheValid(bookUuid, chapters)) {
             callback.onReady(chapters);
             return;
         }
@@ -869,17 +891,23 @@ public class CacheManager {
      */
     public void reparseAndSaveBook(final String bookUuid, final String bookTitle, final BookReadyCallback callback) {
         final File epub = getEpubFile(bookUuid);
-        if (epub != null && epub.exists() && epub.length() > 0) {
+        if (epub != null && epub.exists() && epub.length() > 500) {
             new AsyncTask<Void, Void, List<Chapter>>() {
                 @Override
                 protected List<Chapter> doInBackground(Void... voids) {
                     try {
                         EpubParser.ParseResult parsed = EpubParser.parseEpubFull(epub, getEpubFontsDir(bookUuid));
-                        if (parsed == null || parsed.chapters.isEmpty()) return null;
+                        if (parsed == null || parsed.chapters.isEmpty()) {
+                            try { epub.delete(); } catch (Throwable ignored) {}
+                            dbHelper.updateBookDownloaded(bookUuid, false);
+                            return null;
+                        }
 
                         return saveParsedBookChapters(bookUuid, parsed);
                     } catch (Throwable e) {
                         Log.e(TAG, "Error reparsing EPUB", e);
+                        try { epub.delete(); } catch (Throwable ignored) {}
+                        dbHelper.updateBookDownloaded(bookUuid, false);
                         return null;
                     }
                 }
@@ -926,6 +954,10 @@ public class CacheManager {
     }
 
     public File getPublicEpubFile(String title) {
+        return getPublicEpubFile(null, title);
+    }
+
+    public File getPublicEpubFile(String bookUuid, String title) {
         File extStorage = Environment.getExternalStorageDirectory();
         if (extStorage != null) {
             File yandexBooksDir = new File(extStorage, "Books/YandexBooks");
@@ -933,24 +965,38 @@ public class CacheManager {
             if (cleanName.length() > 60) {
                 cleanName = cleanName.substring(0, 60);
             }
-            return new File(yandexBooksDir, cleanName + ".epub");
+            String suffix = "";
+            if (bookUuid != null && !bookUuid.trim().isEmpty()) {
+                String safeUuid = bookUuid.trim().replaceAll("[^A-Za-z0-9_-]", "");
+                if (safeUuid.length() > 8) {
+                    safeUuid = safeUuid.substring(0, 8);
+                }
+                if (!safeUuid.isEmpty()) {
+                    suffix = "_" + safeUuid;
+                }
+            }
+            return new File(yandexBooksDir, cleanName + suffix + ".epub");
         }
         return null;
     }
 
     public File ensurePublicEpubFile(String bookUuid, String bookTitle) {
-        File publicFile = getPublicEpubFile(bookTitle);
-        if (publicFile != null && publicFile.exists() && publicFile.length() > 0) {
+        File publicFile = getPublicEpubFile(bookUuid, bookTitle);
+        if (publicFile != null && publicFile.exists() && publicFile.length() > 500) {
             return publicFile;
         }
         File privateEpub = getEpubFile(bookUuid);
-        if (privateEpub.exists() && privateEpub.length() > 0) {
-            return exportToPublicBooksDir(privateEpub, bookTitle);
+        if (privateEpub.exists() && privateEpub.length() > 500) {
+            return exportToPublicBooksDir(privateEpub, bookUuid, bookTitle);
         }
         return null;
     }
 
     public File exportToPublicBooksDir(File sourceEpub, String title) {
+        return exportToPublicBooksDir(sourceEpub, null, title);
+    }
+
+    public File exportToPublicBooksDir(File sourceEpub, String bookUuid, String title) {
         try {
             File extStorage = Environment.getExternalStorageDirectory();
             if (extStorage != null && extStorage.canWrite()) {
@@ -958,12 +1004,18 @@ public class CacheManager {
                 if (!yandexBooksDir.exists()) {
                     yandexBooksDir.mkdirs();
                 }
-                String cleanName = (title != null ? title : "book").replaceAll("[\\\\/:*?\"<>|]", "_");
-                if (cleanName.length() > 60) {
-                    cleanName = cleanName.substring(0, 60);
+                File destFile = getPublicEpubFile(bookUuid, title);
+                if (destFile == null) {
+                    return null;
                 }
-                File destFile = new File(yandexBooksDir, cleanName + ".epub");
-                copyFile(sourceEpub, destFile);
+                File tmpFile = new File(destFile.getAbsolutePath() + ".tmp");
+                copyFile(sourceEpub, tmpFile);
+                if (tmpFile.exists() && tmpFile.length() > 500) {
+                    if (destFile.exists()) destFile.delete();
+                    tmpFile.renameTo(destFile);
+                } else if (tmpFile.exists()) {
+                    tmpFile.delete();
+                }
                 Log.d(TAG, "Exported EPUB to: " + destFile.getAbsolutePath());
 
                 // Регистрация в системном медиа-сканере Onyx для появления в Библиотеке

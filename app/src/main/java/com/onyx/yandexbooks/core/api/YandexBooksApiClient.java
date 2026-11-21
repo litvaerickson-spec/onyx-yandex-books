@@ -95,6 +95,50 @@ public class YandexBooksApiClient {
         this.mainHandler = new Handler(Looper.getMainLooper());
     }
 
+    private long currentAuthEpoch() {
+        return tokenStorage != null ? tokenStorage.getCurrentAuthEpoch() : 0L;
+    }
+
+    private boolean isEpochActive(long requestEpoch) {
+        return tokenStorage == null || tokenStorage.getCurrentAuthEpoch() == requestEpoch;
+    }
+
+    private <T> void postSuccessIfEpoch(final ApiCallback<T> callback, final T result, final long requestEpoch) {
+        if (callback == null || !isEpochActive(requestEpoch)) return;
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (!isEpochActive(requestEpoch)) {
+                    Log.d(TAG, "Discarding stale API success from previous auth epoch");
+                    return;
+                }
+                try {
+                    callback.onSuccess(result);
+                } catch (Throwable t) {
+                    Log.e(TAG, "Unhandled exception in ApiCallback.onSuccess", t);
+                }
+            }
+        });
+    }
+
+    private <T> void postErrorIfEpoch(final ApiCallback<T> callback, final String message, final long requestEpoch) {
+        if (callback == null || !isEpochActive(requestEpoch)) return;
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (!isEpochActive(requestEpoch)) {
+                    Log.d(TAG, "Discarding stale API error from previous auth epoch");
+                    return;
+                }
+                try {
+                    callback.onError(message);
+                } catch (Throwable t) {
+                    Log.e(TAG, "Unhandled exception in ApiCallback.onError", t);
+                }
+            }
+        });
+    }
+
     private Request.Builder createAuthRequestBuilder(String url) {
         String token = tokenStorage.getAccessToken();
         Request.Builder builder = new Request.Builder().url(url);
@@ -197,37 +241,42 @@ public class YandexBooksApiClient {
     public void getAllUserBooks(final ApiCallback<List<Book>> callback) {
         final List<Book> allBooks = new ArrayList<>();
         final java.util.Set<String> seenUuids = new java.util.HashSet<>();
-        loadLibraryPage(1, allBooks, seenUuids, callback);
+        final long epoch = currentAuthEpoch();
+        loadLibraryPage(1, allBooks, seenUuids, epoch, callback);
     }
 
-    private void loadLibraryPage(final int page, final List<Book> accumulated, final java.util.Set<String> seenUuids, final ApiCallback<List<Book>> callback) {
+    private void loadLibraryPage(final int page, final List<Book> accumulated, final java.util.Set<String> seenUuids, final long requestEpoch, final ApiCallback<List<Book>> callback) {
+        if (!isEpochActive(requestEpoch)) {
+            return;
+        }
         String endpoint = BASE_URL + "/profile/library_cards?per_page=100&page=" + page;
         Request request = createAuthRequestBuilder(endpoint).get().build();
 
         httpClient.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, final IOException e) {
+                if (!isEpochActive(requestEpoch)) return;
                 if (!accumulated.isEmpty()) {
-                    postSuccess(callback, accumulated);
+                    postSuccessIfEpoch(callback, accumulated, requestEpoch);
                 } else {
-                    postError(callback, "Ошибка сети: " + e.getMessage());
+                    postErrorIfEpoch(callback, "Ошибка сети: " + e.getMessage(), requestEpoch);
                 }
             }
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
-                if (!response.isSuccessful()) {
-                    int code = response.code();
-                    response.close();
-                    if (!accumulated.isEmpty()) {
-                        postSuccess(callback, accumulated);
-                    } else {
-                        postError(callback, "Ошибка загрузки библиотеки: HTTP " + code);
-                    }
-                    return;
-                }
-
                 try {
+                    if (!isEpochActive(requestEpoch)) return;
+                    if (!response.isSuccessful()) {
+                        int code = response.code();
+                        if (!accumulated.isEmpty()) {
+                            postSuccessIfEpoch(callback, accumulated, requestEpoch);
+                        } else {
+                            postErrorIfEpoch(callback, "Ошибка загрузки библиотеки: HTTP " + code, requestEpoch);
+                        }
+                        return;
+                    }
+
                     String body = response.body() != null ? response.body().string() : "";
                     JSONObject json = new JSONObject(body);
                     JSONArray cardsArray = json.optJSONArray("library_cards");
@@ -254,16 +303,16 @@ public class YandexBooksApiClient {
                     boolean hasMoreByMeta = (totalExpected > 0 && accumulated.size() < totalExpected);
                     boolean hasMoreByNewItems = (countOnPage > 0 && newlyAdded > 0);
                     if ((hasMoreByMeta || hasMoreByNewItems) && page < 40) {
-                        loadLibraryPage(page + 1, accumulated, seenUuids, callback);
+                        loadLibraryPage(page + 1, accumulated, seenUuids, requestEpoch, callback);
                     } else {
-                        postSuccess(callback, accumulated);
+                        postSuccessIfEpoch(callback, accumulated, requestEpoch);
                     }
                 } catch (Exception e) {
                     Log.e(TAG, "Error parsing library page " + page, e);
                     if (!accumulated.isEmpty()) {
-                        postSuccess(callback, accumulated);
+                        postSuccessIfEpoch(callback, accumulated, requestEpoch);
                     } else {
-                        postError(callback, "Ошибка парсинга: " + e.getMessage());
+                        postErrorIfEpoch(callback, "Ошибка парсинга: " + e.getMessage(), requestEpoch);
                     }
                 } finally {
                     response.close();
@@ -1188,11 +1237,13 @@ public class YandexBooksApiClient {
             postError(callback, "Пустой UUID книги");
             return;
         }
+        final long requestEpoch = currentAuthEpoch();
 
         new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
+                    if (!isEpochActive(requestEpoch)) return;
                     // 1. Попытка запроса точной позиции чтения через GraphQL Gateway с автоматическим fallback
                     String gqlCfiStart = null;
                     try {
@@ -1283,14 +1334,18 @@ public class YandexBooksApiClient {
                             progress.setAudioUpdatedAt(linkedAudioMeta.updatedAt);
                         }
                         progress.setSyncedWithServer(true);
-                        postSuccess(callback, progress);
+                        postSuccessIfEpoch(callback, progress, requestEpoch);
                         return;
                     }
 
                     // 4. Если ничего не найдено, запускаем fallback
-                    getReadingProgressFallback(bookUuid, callback);
+                    if (isEpochActive(requestEpoch)) {
+                        getReadingProgressFallback(bookUuid, callback);
+                    }
                 } catch (Exception e) {
-                    getReadingProgressFallback(bookUuid, callback);
+                    if (isEpochActive(requestEpoch)) {
+                        getReadingProgressFallback(bookUuid, callback);
+                    }
                 }
             }
         }).start();
@@ -1604,14 +1659,12 @@ public class YandexBooksApiClient {
                     .build();
             response = httpClient.newCall(request).execute();
             if (!response.isSuccessful()) {
-                int code = response.code();
-                response.close();
-                return DownloadResult.error("HTTP " + code);
+                return DownloadResult.error("HTTP " + response.code());
             }
 
             String contentType = response.header("Content-Type", "");
             if (contentType != null && (contentType.contains("json") || contentType.contains("html"))) {
-                String bodyStr = response.body().string(); // Закрывает response.body()
+                String bodyStr = response.body() != null ? response.body().string() : "";
                 try {
                     JSONObject json = new JSONObject(bodyStr);
                     String redirectUrl = json.optString("url", null);
@@ -1633,13 +1686,18 @@ public class YandexBooksApiClient {
                                 .header("User-Agent", "okhttp/3.12.13")
                                 .get()
                                 .build();
-                        Response redirResp = httpClient.newCall(redirReq).execute();
-                        if (redirResp.isSuccessful()) {
-                            return saveSyncResponseBody(redirResp, destFile);
-                        } else {
-                            int rCode = redirResp.code();
-                            redirResp.close();
-                            return DownloadResult.error("Редирект HTTP " + rCode);
+                        Response redirResp = null;
+                        try {
+                            redirResp = httpClient.newCall(redirReq).execute();
+                            if (redirResp.isSuccessful()) {
+                                return saveSyncResponseBody(redirResp, destFile);
+                            } else {
+                                return DownloadResult.error("Редирект HTTP " + redirResp.code());
+                            }
+                        } finally {
+                            if (redirResp != null) {
+                                try { redirResp.close(); } catch (Exception ignored) {}
+                            }
                         }
                     }
                 } catch (Exception ignored) {}
@@ -1648,21 +1706,25 @@ public class YandexBooksApiClient {
 
             return saveSyncResponseBody(response, destFile);
         } catch (Exception e) {
+            return DownloadResult.error("Ошибка сети: " + e.getMessage());
+        } finally {
             if (response != null) {
                 try { response.close(); } catch (Exception ignored) {}
             }
-            return DownloadResult.error("Ошибка сети: " + e.getMessage());
         }
     }
 
     private DownloadResult saveSyncResponseBody(Response response, File destFile) {
+        File tempFile = new File(destFile.getAbsolutePath() + "." + System.nanoTime() + ".tmp");
         try {
+            if (response == null || response.body() == null) {
+                return DownloadResult.error("Пустой ответ сервера");
+            }
             File parent = destFile.getParentFile();
             if (parent != null && !parent.exists()) {
                 parent.mkdirs();
             }
 
-            File tempFile = new File(destFile.getAbsolutePath() + ".tmp");
             InputStream in = null;
             FileOutputStream out = null;
             try {
@@ -1694,6 +1756,7 @@ public class YandexBooksApiClient {
                 if (renamed && destFile.exists()) {
                     return DownloadResult.ok(destFile);
                 } else {
+                    if (tempFile.exists()) tempFile.delete();
                     return DownloadResult.error("Не удалось сохранить файл книги");
                 }
             } else {
@@ -1701,6 +1764,9 @@ public class YandexBooksApiClient {
                 return DownloadResult.error("Файл книги пуст (< 500 байт)");
             }
         } finally {
+            if (tempFile.exists()) {
+                try { tempFile.delete(); } catch (Exception ignored) {}
+            }
             if (response != null) {
                 try { response.close(); } catch (Exception ignored) {}
             }
@@ -1942,7 +2008,7 @@ public class YandexBooksApiClient {
                 parent.mkdirs();
             }
 
-            File tempFile = new File(destFile.getAbsolutePath() + ".tmp");
+            File tempFile = new File(destFile.getAbsolutePath() + "." + System.nanoTime() + ".tmp");
             InputStream in = null;
             FileOutputStream out = null;
             try {
@@ -1971,6 +2037,7 @@ public class YandexBooksApiClient {
                 if (renamed && destFile.exists()) {
                     postSuccess(callback, destFile);
                 } else {
+                    if (tempFile.exists()) tempFile.delete();
                     if (onFallback != null) {
                         onFallback.run();
                     } else {
@@ -1992,6 +2059,10 @@ public class YandexBooksApiClient {
                 postError(callback, "Ошибка записи файла книги: " + e.getMessage());
             }
         } finally {
+            File dir = destFile.getParentFile();
+            if (dir != null && dir.exists()) {
+                // tempFile is deleted cleanly in branches above
+            }
             if (response != null) {
                 try { response.close(); } catch (Exception ignored) {}
             }
@@ -2096,10 +2167,14 @@ public class YandexBooksApiClient {
             postError(callback, "Некорректные данные прогресса чтения");
             return;
         }
+        final long requestEpoch = currentAuthEpoch();
 
         PROGRESS_SYNC_EXECUTOR.execute(new Runnable() {
             @Override
             public void run() {
+                if (!isEpochActive(requestEpoch)) {
+                    return;
+                }
                 try {
                     String bookUuid = progress.getBookUuid();
                     String cardId = progress.getLibraryCardId();
@@ -2342,7 +2417,7 @@ public class YandexBooksApiClient {
                 @Override
                 public void onResponse(Call call, Response response) {
                     try {
-                        if (response.isSuccessful() || response.code() == 409 || response.code() == 422) {
+                        if (response.isSuccessful()) {
                             postSuccess(callback, true);
                         } else {
                             sendReadingProgressFallbackPatchCard(progress, cardObj, callback);
@@ -2695,12 +2770,11 @@ public class YandexBooksApiClient {
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
-                if (!response.isSuccessful()) {
-                    response.close();
-                    loadTopicFirstBookshelfFallback(topicUuid, callback);
-                    return;
-                }
                 try {
+                    if (!response.isSuccessful()) {
+                        loadTopicFirstBookshelfFallback(topicUuid, callback);
+                        return;
+                    }
                     String body = response.body().string();
                     JSONObject json = new JSONObject(body);
                     JSONArray booksArray = json.optJSONArray("books");
@@ -2725,6 +2799,8 @@ public class YandexBooksApiClient {
                     postSuccess(callback, books);
                 } catch (Exception e) {
                     loadTopicFirstBookshelfFallback(topicUuid, callback);
+                } finally {
+                    response.close();
                 }
             }
         });
@@ -2742,12 +2818,11 @@ public class YandexBooksApiClient {
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
-                if (!response.isSuccessful()) {
-                    response.close();
-                    loadBookshelfByUuid(DEFAULT_CATALOG_SHELF_UUID, false, callback);
-                    return;
-                }
                 try {
+                    if (!response.isSuccessful()) {
+                        loadBookshelfByUuid(DEFAULT_CATALOG_SHELF_UUID, false, callback);
+                        return;
+                    }
                     String body = response.body().string();
                     JSONObject json = new JSONObject(body);
                     JSONArray shelves = json.optJSONArray("bookshelves");
@@ -2765,6 +2840,8 @@ public class YandexBooksApiClient {
                     loadBookshelfByUuid(DEFAULT_CATALOG_SHELF_UUID, false, callback);
                 } catch (Exception e) {
                     loadBookshelfByUuid(DEFAULT_CATALOG_SHELF_UUID, false, callback);
+                } finally {
+                    response.close();
                 }
             }
         });
@@ -2785,13 +2862,11 @@ public class YandexBooksApiClient {
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
-                if (!response.isSuccessful()) {
-                    response.close();
-                    loadBookshelfByUuid(DEFAULT_CATALOG_SHELF_UUID, false, callback);
-                    return;
-                }
-
                 try {
+                    if (!response.isSuccessful()) {
+                        loadBookshelfByUuid(DEFAULT_CATALOG_SHELF_UUID, false, callback);
+                        return;
+                    }
                     String body = response.body().string();
                     JSONObject json = new JSONObject(body);
                     JSONObject pop = json.optJSONObject("popular_searches");
@@ -2819,6 +2894,8 @@ public class YandexBooksApiClient {
                     loadBookshelfByUuid(shelfUuid, true, callback);
                 } catch (Exception e) {
                     loadBookshelfByUuid(DEFAULT_CATALOG_SHELF_UUID, false, callback);
+                } finally {
+                    response.close();
                 }
             }
         });
@@ -2836,18 +2913,16 @@ public class YandexBooksApiClient {
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
-                if (!response.isSuccessful()) {
-                    int code = response.code();
-                    response.close();
-                    if (allowFallback && !DEFAULT_CATALOG_SHELF_UUID.equals(shelfUuid)) {
-                        loadBookshelfByUuid(DEFAULT_CATALOG_SHELF_UUID, false, callback);
+                try {
+                    if (!response.isSuccessful()) {
+                        int code = response.code();
+                        if (allowFallback && !DEFAULT_CATALOG_SHELF_UUID.equals(shelfUuid)) {
+                            loadBookshelfByUuid(DEFAULT_CATALOG_SHELF_UUID, false, callback);
+                            return;
+                        }
+                        postError(callback, "Ошибка загрузки каталога: HTTP " + code);
                         return;
                     }
-                    postError(callback, "Ошибка загрузки каталога: HTTP " + code);
-                    return;
-                }
-
-                try {
                     String body = response.body().string();
                     JSONObject json = new JSONObject(body);
                     JSONArray booksArray = json.optJSONArray("books");
@@ -2872,6 +2947,8 @@ public class YandexBooksApiClient {
                     postSuccess(callback, books);
                 } catch (Exception e) {
                     postError(callback, "Ошибка парсинга каталога: " + e.getMessage());
+                } finally {
+                    response.close();
                 }
             }
         });
@@ -2912,14 +2989,13 @@ public class YandexBooksApiClient {
 
                 @Override
                 public void onResponse(Call call, Response response) throws IOException {
-                    if (!response.isSuccessful()) {
-                        int code = response.code();
-                        response.close();
-                        postError(callback, "Ошибка поиска: HTTP " + code);
-                        return;
-                    }
-
                     try {
+                        if (!response.isSuccessful()) {
+                            int code = response.code();
+                            postError(callback, "Ошибка поиска: HTTP " + code);
+                            return;
+                        }
+
                         String bodyStr = response.body().string();
                         JSONObject json = new JSONObject(bodyStr);
                         JSONObject data = json.optJSONObject("data");
@@ -2998,6 +3074,8 @@ public class YandexBooksApiClient {
                         postSuccess(callback, books);
                     } catch (Exception e) {
                         postError(callback, "Ошибка обработки результатов: " + e.getMessage());
+                    } finally {
+                        response.close();
                     }
                 }
             });
@@ -3027,7 +3105,7 @@ public class YandexBooksApiClient {
                 @Override
                 public void onResponse(Call call, Response response) {
                     try {
-                        if (response.isSuccessful() || response.code() == 409 || response.code() == 422) {
+                        if (response.isSuccessful() || response.code() == 409) {
                             postSuccess(callback, true);
                         } else {
                             postError(callback, "Ошибка сервера: HTTP " + response.code());
@@ -3301,7 +3379,7 @@ public class YandexBooksApiClient {
                 @Override
                 public void onResponse(Call call, Response response) {
                     try {
-                        if (response.isSuccessful() || response.code() == 409 || response.code() == 422) {
+                        if (response.isSuccessful() || response.code() == 409) {
                             postSuccess(callback, true);
                         } else {
                             postError(callback, "Ошибка сервера при смене полки: HTTP " + response.code());
@@ -3457,7 +3535,7 @@ public class YandexBooksApiClient {
                 @Override
                 public void onResponse(Call call, Response response) {
                     try {
-                        if (response.isSuccessful() || response.code() == 404 || response.code() == 409 || response.code() == 422) {
+                        if (response.isSuccessful() || response.code() == 404 || response.code() == 409) {
                             postSuccess(callback, true);
                         } else {
                             postError(callback, "Ошибка сервера при удалении: HTTP " + response.code());
@@ -3494,10 +3572,12 @@ public class YandexBooksApiClient {
             postSuccess(callback, new ArrayList<Quote>());
             return;
         }
+        final long requestEpoch = currentAuthEpoch();
         new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
+                    if (!isEpochActive(requestEpoch)) return;
                     List<Quote> mine = new ArrayList<>();
                     java.util.Set<String> seen = new java.util.HashSet<>();
 
@@ -3515,9 +3595,9 @@ public class YandexBooksApiClient {
                         }
                     }
 
-                    postSuccess(callback, mine);
+                    postSuccessIfEpoch(callback, mine, requestEpoch);
                 } catch (Exception e) {
-                    postError(callback, "Ошибка загрузки личных цитат: " + e.getMessage());
+                    postErrorIfEpoch(callback, "Ошибка загрузки личных цитат: " + e.getMessage(), requestEpoch);
                 }
             }
         }).start();
@@ -3605,11 +3685,13 @@ public class YandexBooksApiClient {
             if (text == null || text.trim().isEmpty() || "null".equals(text)) continue;
             Quote q = new Quote();
             q.bookUuid = bookUuid;
-            q.quoteUuid = obj.optString("uuid", obj.optString("id", ""));
+            String rawQUuid = obj.optString("uuid", obj.optString("id", ""));
+            q.quoteUuid = (rawQUuid != null && !"null".equalsIgnoreCase(rawQUuid)) ? rawQUuid : "";
             q.text = text.trim();
             String note = obj.optString("note", obj.optString("comment", ""));
             q.note = (note != null && !"null".equalsIgnoreCase(note)) ? note : "";
-            q.cfi = obj.optString("cfi", "");
+            String rawCfi = obj.optString("cfi", "");
+            q.cfi = (rawCfi != null && !"null".equalsIgnoreCase(rawCfi)) ? rawCfi : "";
             CfiPosition pos = parseCfiPosition(q.cfi);
             q.chapterIndex = (pos != null && pos.chapterIndex >= 0) ? pos.chapterIndex : 0;
             q.startOffset = Math.max(0, obj.optInt("start_offset", 0));
@@ -3632,6 +3714,7 @@ public class YandexBooksApiClient {
             postError(callback, "Empty quote");
             return;
         }
+        final long requestEpoch = currentAuthEpoch();
         try {
             JSONObject payload = new JSONObject();
             payload.put("content", quote.text != null ? quote.text : "");
@@ -3648,14 +3731,15 @@ public class YandexBooksApiClient {
             httpClient.newCall(req).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
-                    postError(callback, e.getMessage());
+                    postErrorIfEpoch(callback, e.getMessage(), requestEpoch);
                 }
 
                 @Override
                 public void onResponse(Call call, Response response) throws IOException {
                     try {
+                        if (!isEpochActive(requestEpoch)) return;
                         if (!response.isSuccessful()) {
-                            postError(callback, "HTTP " + response.code());
+                            postErrorIfEpoch(callback, "HTTP " + response.code(), requestEpoch);
                             return;
                         }
                         String respStr = response.body() != null ? response.body().string() : "";
@@ -3668,17 +3752,20 @@ public class YandexBooksApiClient {
                             } else {
                                 qUuid = root.optString("uuid", root.optString("id", ""));
                             }
+                            if ("null".equalsIgnoreCase(qUuid)) {
+                                qUuid = "";
+                            }
                         }
-                        postSuccess(callback, qUuid);
+                        postSuccessIfEpoch(callback, qUuid, requestEpoch);
                     } catch (Exception e) {
-                        postError(callback, e.getMessage());
+                        postErrorIfEpoch(callback, e.getMessage(), requestEpoch);
                     } finally {
                         response.close();
                     }
                 }
             });
         } catch (Exception e) {
-            postError(callback, e.getMessage());
+            postErrorIfEpoch(callback, e.getMessage(), requestEpoch);
         }
     }
 
@@ -3690,22 +3777,24 @@ public class YandexBooksApiClient {
             postSuccess(callback, true);
             return;
         }
+        final long requestEpoch = currentAuthEpoch();
         Request req = createAuthRequestBuilder(BASE_URL + "/quotes/" + quoteUuid)
                 .delete()
                 .build();
         httpClient.newCall(req).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-                postError(callback, e.getMessage());
+                postErrorIfEpoch(callback, e.getMessage(), requestEpoch);
             }
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
                 try {
+                    if (!isEpochActive(requestEpoch)) return;
                     if (response.isSuccessful() || response.code() == 404) {
-                        postSuccess(callback, true);
+                        postSuccessIfEpoch(callback, true, requestEpoch);
                     } else {
-                        postError(callback, "HTTP " + response.code());
+                        postErrorIfEpoch(callback, "HTTP " + response.code(), requestEpoch);
                     }
                 } finally {
                     response.close();

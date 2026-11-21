@@ -5,6 +5,7 @@ import android.util.Log;
 
 import com.onyx.yandexbooks.core.api.YandexBooksApiClient;
 import com.onyx.yandexbooks.core.api.models.ReadingProgress;
+import com.onyx.yandexbooks.core.auth.TokenStorage;
 import com.onyx.yandexbooks.core.storage.DatabaseHelper;
 
 import java.util.List;
@@ -27,6 +28,7 @@ public class SyncManager {
 
     private final DatabaseHelper dbHelper;
     private final YandexBooksApiClient apiClient;
+    private final TokenStorage tokenStorage;
     private static final java.util.concurrent.ConcurrentHashMap<String, Long> RECENT_LOCAL_SAVES_ELAPSED =
             new java.util.concurrent.ConcurrentHashMap<>();
     private static final java.util.concurrent.atomic.AtomicInteger ACTIVE_CLOUD_SYNCS =
@@ -88,6 +90,22 @@ public class SyncManager {
     public SyncManager(Context context, YandexBooksApiClient apiClient) {
         this.dbHelper = DatabaseHelper.getInstance(context);
         this.apiClient = apiClient;
+        this.tokenStorage = context != null ? new TokenStorage(context) : null;
+    }
+
+    private long currentAuthEpoch() {
+        return tokenStorage != null ? tokenStorage.getCurrentAuthEpoch() : 0L;
+    }
+
+    private boolean isAuthEpochActive(long expectedEpoch) {
+        return tokenStorage == null || tokenStorage.getCurrentAuthEpoch() == expectedEpoch;
+    }
+
+    private static long normalizeEpochMs(long ts) {
+        if (ts > 0L && ts < 1000000000000L) {
+            return ts * 1000L;
+        }
+        return ts;
     }
 
     /**
@@ -137,12 +155,20 @@ public class SyncManager {
             snapshot.setLibraryCardId(localProgress.getLibraryCardId());
             snapshot.setDocumentUuid(localProgress.getDocumentUuid());
             snapshot.setCfi(localProgress.getCfi());
+            snapshot.setLinkedAudioUuid(localProgress.getLinkedAudioUuid());
+            snapshot.setAudioPercent(localProgress.getAudioPercent());
+            snapshot.setAudioUpdatedAt(localProgress.getAudioUpdatedAt());
 
+            final long authEpoch = currentAuthEpoch();
             onCloudSyncStarted();
             apiClient.sendReadingProgress(snapshot, new YandexBooksApiClient.ApiCallback<Boolean>() {
                 @Override
                 public void onSuccess(Boolean result) {
                     try {
+                        if (!isAuthEpochActive(authEpoch)) {
+                            Log.d(TAG, "Discarding stale progress sync success from previous auth epoch");
+                            return;
+                        }
                         dbHelper.markProgressSynced(snapshot.getBookUuid(), snapshot.getTimestamp());
                         ReadingProgress latest = dbHelper.getProgress(snapshot.getBookUuid());
                         if (latest == null || latest.getTimestamp() <= snapshot.getTimestamp()) {
@@ -160,8 +186,16 @@ public class SyncManager {
                 @Override
                 public void onError(String errorMessage) {
                     try {
-                        Log.w(TAG, "Failed to send progress: " + errorMessage + ". Enqueuing.");
-                        dbHelper.enqueueOfflineProgress(snapshot);
+                        if (!isAuthEpochActive(authEpoch)) {
+                            return;
+                        }
+                        ReadingProgress latest = dbHelper.getProgress(snapshot.getBookUuid());
+                        if (latest == null || latest.getTimestamp() <= snapshot.getTimestamp()) {
+                            Log.w(TAG, "Failed to send progress: " + errorMessage + ". Enqueuing.");
+                            dbHelper.enqueueOfflineProgress(snapshot);
+                        } else {
+                            Log.d(TAG, "Skipping enqueue for superseded progress error (" + snapshot.getTimestamp() + " < " + latest.getTimestamp() + ")");
+                        }
                     } finally {
                         onCloudSyncFinished();
                     }
@@ -173,11 +207,11 @@ public class SyncManager {
     }
 
     /**
-     * Сравнение прогресса между сервером и ридером при входе или подключении Wi-Fi.
-     * Возвращает true, если конфликт отсутствует и локальная позиция актуальна.
+     * Сравнение прогресса между сервером и устройством при входе или подключении Wi-Fi.
+     * Разрешает конфликты с учётом обоих направлений (вперёд/назад) и актуальности timestamp.
      */
     public void evaluateProgressConflict(ReadingProgress local, ReadingProgress remote, ConflictResolutionCallback callback) {
-        if (remote == null) {
+        if (remote == null || (remote.getPercent() <= 0.0 && (remote.getCfi() == null || remote.getCfi().isEmpty()))) {
             if (callback != null) callback.onProgressUpdated(local);
             return;
         }
@@ -187,8 +221,11 @@ public class SyncManager {
             return;
         }
 
-        // 1. Позиция на сервере строго больше и дата новее -> обнаружено чтение со смартфона/ПК
-        if (remote.getPercent() > local.getPercent() && remote.getTimestamp() > local.getTimestamp()) {
+        long localTs = normalizeEpochMs(local.getTimestamp());
+        long remoteTs = normalizeEpochMs(remote.getTimestamp());
+
+        // 1. Позиция на сервере строго дальше и при этом серверная метка времени не старше локальной -> конфликт
+        if (remote.getPercent() > (local.getPercent() + 0.05) && (remoteTs <= 0L || localTs <= 0L || remoteTs >= localTs)) {
             Log.i(TAG, "Conflict: Remote progress is further (" + remote.getPercent() + "%) than local (" + local.getPercent() + "%).");
             if (callback != null) {
                 callback.onConflictDetected(local, remote);
@@ -196,11 +233,24 @@ public class SyncManager {
             return;
         }
 
-        // 2. Локальная позиция больше или равна -> обновляем облако
-        if (local.getPercent() >= remote.getPercent()) {
+        // 2. Локальная позиция строго свежее по времени (в т.ч. осознанный откат к ранней главе) -> обновляем облако
+        if (localTs > 0L && remoteTs > 0L && localTs > (remoteTs + 2000L)) {
+            saveAndSyncProgress(local, true, callback);
+            return;
+        }
+
+        // 3. Серверная позиция строго свежее (например, пользователь дочитал или перенёс позицию на другом устройстве)
+        if (remoteTs > 0L && localTs > 0L && remoteTs > (localTs + 2000L) && Math.abs(remote.getPercent() - local.getPercent()) > 0.05) {
+            if (callback != null) {
+                callback.onConflictDetected(local, remote);
+            }
+            return;
+        }
+
+        // 4. Локальная позиция больше или совпадает -> обновляем облако
+        if (local.getPercent() >= remote.getPercent() - 0.05) {
             saveAndSyncProgress(local, true, callback);
         } else {
-            // В спорных случаях предлагаем выбор
             if (callback != null) {
                 callback.onConflictDetected(local, remote);
             }
@@ -221,12 +271,17 @@ public class SyncManager {
             return;
         }
 
+        final long authEpoch = currentAuthEpoch();
         final int total = queue.size();
         final java.util.concurrent.atomic.AtomicInteger syncedCount = new java.util.concurrent.atomic.AtomicInteger(0);
         final java.util.concurrent.atomic.AtomicInteger processedCount = new java.util.concurrent.atomic.AtomicInteger(0);
 
         Log.i(TAG, "Flushing " + total + " pending offline progress events to Yandex cloud...");
         for (final ReadingProgress p : queue) {
+            if (!isAuthEpochActive(authEpoch)) {
+                if (onComplete != null) onComplete.onSyncFinished(syncedCount.get());
+                return;
+            }
             if (p.getLibraryCardId() == null || p.getLibraryCardId().isEmpty()
                     || p.getDocumentUuid() == null || p.getDocumentUuid().isEmpty()) {
                 try {
@@ -247,6 +302,10 @@ public class SyncManager {
                 @Override
                 public void onSuccess(Boolean result) {
                     try {
+                        if (!isAuthEpochActive(authEpoch)) {
+                            checkDone();
+                            return;
+                        }
                         dbHelper.markProgressSynced(p.getBookUuid(), p.getTimestamp());
                         ReadingProgress latest = dbHelper.getProgress(p.getBookUuid());
                         if (latest == null || latest.getTimestamp() <= p.getTimestamp()) {
@@ -272,7 +331,7 @@ public class SyncManager {
                 private void checkDone() {
                     if (processedCount.incrementAndGet() >= total) {
                         Log.i(TAG, "Flush completed. Successfully synced " + syncedCount.get() + " of " + total + " books.");
-                        if (onComplete != null) {
+                        if (onComplete != null && isAuthEpochActive(authEpoch)) {
                             onComplete.onSyncFinished(syncedCount.get());
                         }
                     }
