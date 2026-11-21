@@ -167,9 +167,17 @@ public class EpubParser {
                 while (entries.hasMoreElements()) {
                     ZipEntry entry = entries.nextElement();
                     String name = entry.getName();
-                    String lower = name.toLowerCase();
+                    String lower = name.toLowerCase(java.util.Locale.US);
+                    int lastSlash = lower.lastIndexOf('/');
+                    String baseName = lastSlash >= 0 ? lower.substring(lastSlash + 1) : lower;
+                    boolean isMetaDoc = baseName.startsWith("cover")
+                            || baseName.startsWith("toc")
+                            || "nav.xhtml".equals(baseName)
+                            || "nav.html".equals(baseName)
+                            || baseName.startsWith("nav-")
+                            || baseName.startsWith("nav_");
                     if ((lower.endsWith(".xhtml") || lower.endsWith(".html") || lower.endsWith(".htm"))
-                            && !lower.contains("cover") && !lower.contains("toc") && !lower.contains("nav")) {
+                            && !isMetaDoc) {
                         allHtml.add(name);
                     }
                 }
@@ -204,7 +212,8 @@ public class EpubParser {
 
             if (chapterHrefs.size() == 1) {
                 // Если файл книги всего 1 большой HTML: проверяем деление по h1/h2
-                List<ChapterData> byHeadings = splitSingleFileByHeadings(zip, chapterHrefs.get(0), rawHtmlCache);
+                SpineItem singleMeta = spineItems.isEmpty() ? null : spineItems.get(0);
+                List<ChapterData> byHeadings = splitSingleFileByHeadings(zip, chapterHrefs.get(0), singleMeta, rawHtmlCache);
                 if (byHeadings != null && byHeadings.size() > 1) {
                     chapters = byHeadings;
                 }
@@ -555,13 +564,15 @@ public class EpubParser {
     /**
      * Разделение единого большого XHTML-файла по тегам h1/h2 для книг без детального spine.
      */
-    private static List<ChapterData> splitSingleFileByHeadings(ZipFile zip, String href, Map<Integer, String> rawHtmlCache) {
+    private static List<ChapterData> splitSingleFileByHeadings(ZipFile zip, String href, SpineItem singleMeta, Map<Integer, String> rawHtmlCache) {
         List<ChapterData> list = new ArrayList<>();
         String rawHtml = readEntryRawHtml(zip, href);
         if (rawHtml == null || rawHtml.length() < 200) return list;
         if (rawHtmlCache != null) {
             rawHtmlCache.put(0, rawHtml);
         }
+        int baseOpfIdx = singleMeta != null ? singleMeta.originalOpfSpineIndex : 0;
+        String baseOpfId = (singleMeta != null && singleMeta.idref != null) ? singleMeta.idref : "";
 
         Pattern p = Pattern.compile("<(h[1-2])[^>]*>(.*?)</\\1>", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
         Matcher m = p.matcher(rawHtml);
@@ -591,6 +602,9 @@ public class EpubParser {
                     ChapterData cd0 = new ChapterData();
                     cd0.id = "ch_0";
                     cd0.fileHref = href;
+                    cd0.spineIndex = list.size();
+                    cd0.originalOpfSpineIndex = baseOpfIdx;
+                    cd0.opfItemId = baseOpfId;
                     cd0.title = "Начало книги";
                     cd0.textContent = front;
                     cd0.rawHtmlStartOffset = 0;
@@ -608,6 +622,9 @@ public class EpubParser {
                     ChapterData cd = new ChapterData();
                     cd.id = "ch_" + (list.size() + 1);
                     cd.fileHref = href;
+                    cd.spineIndex = list.size();
+                    cd.originalOpfSpineIndex = baseOpfIdx;
+                    cd.opfItemId = baseOpfId;
                     cd.title = TocNode.normalizeTitle(headings.get(i).title);
                     cd.textContent = formatted;
                     cd.rawHtmlStartOffset = from;
@@ -871,9 +888,19 @@ public class EpubParser {
         return result;
     }
 
+    private static String extractXmlTagAttr(String attrs, String attrName) {
+        if (attrs == null || attrs.isEmpty() || attrName == null) return null;
+        Pattern p = Pattern.compile("(?:^|\\s)" + Pattern.quote(attrName) + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+        Matcher m = p.matcher(attrs);
+        if (m.find()) {
+            return m.group(1) != null ? m.group(1) : m.group(2);
+        }
+        return null;
+    }
+
     private static List<SpineItem> parseOpfSpineDetailed(ZipFile zip, String opfPath, String baseDir, Map<String, String> outManifestMap) {
         List<SpineItem> result = new ArrayList<>();
-        ZipEntry opfEntry = zip.getEntry(opfPath);
+        ZipEntry opfEntry = findZipEntry(zip, opfPath);
         if (opfEntry == null) return result;
 
         InputStream is = null;
@@ -881,42 +908,38 @@ public class EpubParser {
             is = zip.getInputStream(opfEntry);
             String opfXml = readStreamToString(is);
 
-            // Сопоставление id -> href из <manifest>
-            Pattern itemPattern = Pattern.compile("<item\\s+[^>]*?id\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
-            Matcher m = itemPattern.matcher(opfXml);
+            // Сопоставление id -> href из <manifest> независимо от порядка атрибутов
+            Pattern itemTagPattern = Pattern.compile("<item\\b([^>]*)>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+            Matcher m = itemTagPattern.matcher(opfXml);
             while (m.find()) {
-                outManifestMap.put(m.group(1), m.group(2));
-            }
-            Pattern itemPatternRev = Pattern.compile("<item\\s+[^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?id\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
-            Matcher mRev = itemPatternRev.matcher(opfXml);
-            while (mRev.find()) {
-                outManifestMap.put(mRev.group(2), mRev.group(1));
+                String attrs = m.group(1);
+                String id = extractXmlTagAttr(attrs, "id");
+                String href = extractXmlTagAttr(attrs, "href");
+                if (id != null && !id.isEmpty() && href != null && !href.isEmpty()) {
+                    outManifestMap.put(id, href);
+                }
             }
 
             // Порядок чтения из <spine> с сохранением точного 0-based индекса <itemref> и opfItemId
-            Pattern itemrefPattern = Pattern.compile("<itemref\\s+[^>]*?idref\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+            Pattern itemrefPattern = Pattern.compile("<itemref\\b([^>]*)>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
             Matcher mSpine = itemrefPattern.matcher(opfXml);
             int opfIdx = 0;
             while (mSpine.find()) {
-                String idref = mSpine.group(1);
-                String href = outManifestMap.get(idref);
+                String idref = extractXmlTagAttr(mSpine.group(1), "idref");
+                String href = idref != null ? outManifestMap.get(idref) : null;
                 if (href != null) {
-                    if (href.contains("#")) {
-                        href = href.substring(0, href.indexOf('#'));
-                    }
-                    try {
-                        href = URLDecoder.decode(href, "UTF-8");
-                    } catch (Exception ignored) {}
-                    String fullPath = baseDir.isEmpty() ? href : (baseDir + href);
-                    boolean alreadyExists = false;
-                    for (int k = 0; k < result.size(); k++) {
-                        if (fullPath.equals(result.get(k).href)) {
-                            alreadyExists = true;
-                            break;
+                    String fullPath = resolveZipPath(baseDir, href);
+                    if (!fullPath.isEmpty()) {
+                        boolean alreadyExists = false;
+                        for (int k = 0; k < result.size(); k++) {
+                            if (fullPath.equals(result.get(k).href)) {
+                                alreadyExists = true;
+                                break;
+                            }
                         }
-                    }
-                    if (!alreadyExists) {
-                        result.add(new SpineItem(fullPath, idref, opfIdx));
+                        if (!alreadyExists) {
+                            result.add(new SpineItem(fullPath, idref, opfIdx));
+                        }
                     }
                 }
                 opfIdx++;
@@ -932,23 +955,29 @@ public class EpubParser {
     }
 
     private static String findNcxPathFromOpf(ZipFile zip, String opfPath, String baseDir) {
-        ZipEntry opfEntry = zip.getEntry(opfPath);
+        ZipEntry opfEntry = findZipEntry(zip, opfPath);
         if (opfEntry == null) return null;
         InputStream is = null;
         try {
             is = zip.getInputStream(opfEntry);
             String opfXml = readStreamToString(is);
-            Pattern p = Pattern.compile("<item\\s+[^>]*?href\\s*=\\s*[\"']([^\"']+\\.ncx)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
-            Matcher m = p.matcher(opfXml);
-            if (m.find()) {
-                String href = m.group(1);
-                return baseDir.isEmpty() ? href : (baseDir + href);
+            Pattern itemTagPattern = Pattern.compile("<item\\b([^>]*)>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+            Matcher m = itemTagPattern.matcher(opfXml);
+            String fallbackNcxHref = null;
+            while (m.find()) {
+                String attrs = m.group(1);
+                String href = extractXmlTagAttr(attrs, "href");
+                if (href == null || href.isEmpty()) continue;
+                String mediaType = extractXmlTagAttr(attrs, "media-type");
+                if ("application/x-dtbncx+xml".equalsIgnoreCase(mediaType)) {
+                    return resolveZipPath(baseDir, href);
+                }
+                if (fallbackNcxHref == null && href.toLowerCase(java.util.Locale.US).endsWith(".ncx")) {
+                    fallbackNcxHref = href;
+                }
             }
-            Pattern p2 = Pattern.compile("<item\\s+[^>]*?media-type\\s*=\\s*[\"']application/x-dtbncx\\+xml[\"'][^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
-            Matcher m2 = p2.matcher(opfXml);
-            if (m2.find()) {
-                String href = m2.group(1);
-                return baseDir.isEmpty() ? href : (baseDir + href);
+            if (fallbackNcxHref != null) {
+                return resolveZipPath(baseDir, fallbackNcxHref);
             }
         } catch (Exception ignored) {
         } finally {
@@ -960,17 +989,23 @@ public class EpubParser {
     }
 
     private static String findNavPathFromOpf(ZipFile zip, String opfPath, String baseDir) {
-        ZipEntry opfEntry = zip.getEntry(opfPath);
+        ZipEntry opfEntry = findZipEntry(zip, opfPath);
         if (opfEntry == null) return null;
         InputStream is = null;
         try {
             is = zip.getInputStream(opfEntry);
             String opfXml = readStreamToString(is);
-            Pattern p = Pattern.compile("<item\\s+[^>]*?properties\\s*=\\s*[\"'][^\"']*?\\bnav\\b[^\"']*?[\"'][^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
-            Matcher m = p.matcher(opfXml);
-            if (m.find()) {
-                String href = m.group(1);
-                return baseDir.isEmpty() ? href : (baseDir + href);
+            Pattern itemTagPattern = Pattern.compile("<item\\b([^>]*)>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+            Matcher m = itemTagPattern.matcher(opfXml);
+            while (m.find()) {
+                String attrs = m.group(1);
+                String props = extractXmlTagAttr(attrs, "properties");
+                if (props != null && props.matches("(?is).*\\bnav\\b.*")) {
+                    String href = extractXmlTagAttr(attrs, "href");
+                    if (href != null && !href.isEmpty()) {
+                        return resolveZipPath(baseDir, href);
+                    }
+                }
             }
         } catch (Exception ignored) {
         } finally {
@@ -982,40 +1017,57 @@ public class EpubParser {
     }
 
     public static String findCoverImageFromOpf(ZipFile zip, String opfPath, String baseDir) {
-        ZipEntry opfEntry = zip.getEntry(opfPath);
+        ZipEntry opfEntry = findZipEntry(zip, opfPath);
         if (opfEntry == null) return null;
         InputStream is = null;
         try {
             is = zip.getInputStream(opfEntry);
             String opfXml = readStreamToString(is);
-            // 1. EPUB 2: <meta name="cover" content="id"/>
-            Pattern metaPattern = Pattern.compile("<meta\\s+[^>]*?name\\s*=\\s*[\"']cover[\"'][^>]*?content\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
-            Matcher metaM = metaPattern.matcher(opfXml);
-            if (!metaM.find()) {
-                metaPattern = Pattern.compile("<meta\\s+[^>]*?content\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?name\\s*=\\s*[\"']cover[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
-                metaM = metaPattern.matcher(opfXml);
-            }
-            if (metaM.find()) {
-                String coverId = metaM.group(1);
-                Pattern itemPattern = Pattern.compile("<item\\s+[^>]*?id\\s*=\\s*[\"']" + Pattern.quote(coverId) + "[\"'][^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
-                Matcher m = itemPattern.matcher(opfXml);
-                if (m.find()) {
-                    return resolveZipPath(baseDir, m.group(1));
+            Map<String, String> idToHref = new HashMap<>();
+            String coverPropHref = null;
+            String coverIdHref = null;
+            Pattern itemTagPattern = Pattern.compile("<item\\b([^>]*)>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+            Matcher im = itemTagPattern.matcher(opfXml);
+            while (im.find()) {
+                String attrs = im.group(1);
+                String id = extractXmlTagAttr(attrs, "id");
+                String href = extractXmlTagAttr(attrs, "href");
+                String props = extractXmlTagAttr(attrs, "properties");
+                if (id != null && !id.isEmpty() && href != null && !href.isEmpty()) {
+                    idToHref.put(id, href);
+                    if (coverIdHref == null && ("cover".equalsIgnoreCase(id) || "cover-image".equalsIgnoreCase(id) || "book-cover".equalsIgnoreCase(id))) {
+                        String lowHref = href.toLowerCase(java.util.Locale.US);
+                        if (lowHref.endsWith(".jpg") || lowHref.endsWith(".jpeg") || lowHref.endsWith(".png") || lowHref.endsWith(".webp") || lowHref.endsWith(".gif")) {
+                            coverIdHref = href;
+                        }
+                    }
+                }
+                if (coverPropHref == null && href != null && props != null && props.toLowerCase(java.util.Locale.US).contains("cover-image")) {
+                    coverPropHref = href;
                 }
             }
 
-            // 2. EPUB 3: <item ... properties="...cover-image..." href="..." ...>
-            Pattern propPattern = Pattern.compile("<item\\s+[^>]*?properties\\s*=\\s*[\"'][^\"']*cover-image[^\"']*[\"'][^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
-            Matcher propM = propPattern.matcher(opfXml);
-            if (propM.find()) {
-                return resolveZipPath(baseDir, propM.group(1));
+            // 1. EPUB 2: <meta name="cover" content="id"/> (независимо от порядка атрибутов)
+            Pattern metaPattern = Pattern.compile("<meta\\b([^>]*)>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+            Matcher metaM = metaPattern.matcher(opfXml);
+            while (metaM.find()) {
+                String mAttrs = metaM.group(1);
+                if ("cover".equalsIgnoreCase(extractXmlTagAttr(mAttrs, "name"))) {
+                    String coverId = extractXmlTagAttr(mAttrs, "content");
+                    if (coverId != null && idToHref.containsKey(coverId)) {
+                        return resolveZipPath(baseDir, idToHref.get(coverId));
+                    }
+                }
             }
 
-            // 3. Fallback: <item id="cover" ... href="...jpg|png..." ...>
-            Pattern idPattern = Pattern.compile("<item\\s+[^>]*?id\\s*=\\s*[\"'](?:cover|cover-image|book-cover)[\"'][^>]*?href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*?>", Pattern.CASE_INSENSITIVE);
-            Matcher idM = idPattern.matcher(opfXml);
-            if (idM.find()) {
-                return resolveZipPath(baseDir, idM.group(1));
+            // 2. EPUB 3: properties="...cover-image..."
+            if (coverPropHref != null) {
+                return resolveZipPath(baseDir, coverPropHref);
+            }
+
+            // 3. Fallback: <item id="cover" ...>
+            if (coverIdHref != null) {
+                return resolveZipPath(baseDir, coverIdHref);
             }
         } catch (Exception ignored) {
         } finally {
@@ -1068,20 +1120,19 @@ public class EpubParser {
                         if (!stack.isEmpty()) {
                             String src = parser.getAttributeValue(null, "src");
                             if (src != null) {
-                                try {
-                                    src = URLDecoder.decode(src, "UTF-8");
-                                } catch (Exception ignored) {}
-                                String fullSrc = ncxBaseDir.isEmpty() ? src : (ncxBaseDir + src);
-                                TocNode top = stack.peek();
-                                top.rawHref = fullSrc;
-                                if (fullSrc.contains("#")) {
-                                    int hash = fullSrc.indexOf('#');
-                                    top.fileHref = fullSrc.substring(0, hash).trim();
-                                    top.anchor = fullSrc.substring(hash + 1).trim();
-                                } else {
-                                    top.fileHref = fullSrc.trim();
-                                    top.anchor = null;
+                                int hash = src.indexOf('#');
+                                String rawFilePart = hash >= 0 ? src.substring(0, hash).trim() : src.trim();
+                                String anchorPart = hash >= 0 ? src.substring(hash + 1).trim() : null;
+                                if (anchorPart != null) {
+                                    try { anchorPart = URLDecoder.decode(anchorPart, "UTF-8"); } catch (Exception ignored) {}
                                 }
+                                String resolvedFile = resolveZipPath(ncxBaseDir, rawFilePart);
+                                TocNode top = stack.peek();
+                                top.fileHref = resolvedFile;
+                                top.anchor = (anchorPart != null && !anchorPart.isEmpty()) ? anchorPart : null;
+                                top.rawHref = top.anchor != null
+                                        ? (resolvedFile + "#" + top.anchor)
+                                        : resolvedFile;
                             }
                         }
                     } else if ("text".equalsIgnoreCase(name)) {
@@ -1130,9 +1181,10 @@ public class EpubParser {
      * Построение подлинного иерархического дерева оглавления из NAV (EPUB 3).
      */
     private static List<TocNode> parseNavTree(ZipFile zip, String navPath) {
-        List<TocNode> roots = new ArrayList<>();
+        List<TocNode> tocNavRoots = new ArrayList<>();
+        List<TocNode> fallbackNavRoots = new ArrayList<>();
         ZipEntry entry = findZipEntry(zip, navPath);
-        if (entry == null) return roots;
+        if (entry == null) return tocNavRoots;
 
         String navBaseDir = "";
         if (navPath.contains("/")) {
@@ -1149,65 +1201,118 @@ public class EpubParser {
 
             Stack<TocNode> stack = new Stack<>();
             int eventType = parser.getEventType();
-            String currentTag = "";
             StringBuilder textBuffer = new StringBuilder();
             TocNode currentNode = null;
+            boolean inNav = false;
+            boolean currentNavIsToc = false;
+            boolean inAnchor = false;
+            int anchorNestedDepth = 0;
+            int navDepth = 0;
+            boolean capturedFallbackNav = false;
 
             while (eventType != XmlPullParser.END_DOCUMENT) {
                 String name = parser.getName();
                 if (eventType == XmlPullParser.START_TAG) {
-                    currentTag = name;
-                    if ("ol".equalsIgnoreCase(name)) {
-                        if (currentNode != null) {
-                            stack.push(currentNode);
-                            currentNode = null;
-                        }
-                    } else if ("a".equalsIgnoreCase(name)) {
-                        String href = parser.getAttributeValue(null, "href");
-                        int level = stack.size();
-                        currentNode = new TocNode();
-                        currentNode.level = level;
-                        currentNode.isExpanded = (level == 0);
-                        if (href != null) {
-                            try {
-                                href = URLDecoder.decode(href, "UTF-8");
-                            } catch (Exception ignored) {}
-                            String fullSrc = navBaseDir.isEmpty() ? href : (navBaseDir + href);
-                            currentNode.rawHref = fullSrc;
-                            if (fullSrc.contains("#")) {
-                                int hash = fullSrc.indexOf('#');
-                                currentNode.fileHref = fullSrc.substring(0, hash).trim();
-                                currentNode.anchor = fullSrc.substring(hash + 1).trim();
-                            } else {
-                                currentNode.fileHref = fullSrc.trim();
-                                currentNode.anchor = null;
+                    if ("nav".equalsIgnoreCase(name)) {
+                        inNav = true;
+                        navDepth = 1;
+                        stack.clear();
+                        currentNode = null;
+                        inAnchor = false;
+                        anchorNestedDepth = 0;
+                        String epubType = parser.getAttributeValue(null, "epub:type");
+                        String typeAttr = parser.getAttributeValue(null, "type");
+                        String idAttr = parser.getAttributeValue(null, "id");
+                        String combined = ((epubType != null ? epubType : "") + " "
+                                + (typeAttr != null ? typeAttr : "") + " "
+                                + (idAttr != null ? idAttr : "")).toLowerCase(java.util.Locale.US);
+                        currentNavIsToc = combined.matches(".*\\btoc\\b.*");
+                    } else if (inNav) {
+                        if ("nav".equalsIgnoreCase(name)) {
+                            navDepth++;
+                        } else if ("ol".equalsIgnoreCase(name)) {
+                            if (currentNode != null) {
+                                stack.push(currentNode);
+                                currentNode = null;
                             }
+                        } else if ("a".equalsIgnoreCase(name)) {
+                            inAnchor = true;
+                            anchorNestedDepth = 1;
+                            String href = parser.getAttributeValue(null, "href");
+                            int level = stack.size();
+                            currentNode = new TocNode();
+                            currentNode.level = level;
+                            currentNode.isExpanded = (level == 0);
+                            if (href != null) {
+                                int hash = href.indexOf('#');
+                                String rawFilePart = hash >= 0 ? href.substring(0, hash).trim() : href.trim();
+                                String anchorPart = hash >= 0 ? href.substring(hash + 1).trim() : null;
+                                if (anchorPart != null) {
+                                    try { anchorPart = URLDecoder.decode(anchorPart, "UTF-8"); } catch (Exception ignored) {}
+                                }
+                                String resolvedFile = rawFilePart.isEmpty()
+                                        ? resolveZipPath("", navPath)
+                                        : resolveZipPath(navBaseDir, rawFilePart);
+                                currentNode.fileHref = resolvedFile;
+                                currentNode.anchor = (anchorPart != null && !anchorPart.isEmpty()) ? anchorPart : null;
+                                currentNode.rawHref = currentNode.anchor != null
+                                        ? (resolvedFile + "#" + currentNode.anchor)
+                                        : resolvedFile;
+                            }
+                            textBuffer.setLength(0);
+                        } else if (inAnchor) {
+                            anchorNestedDepth++;
                         }
-                        textBuffer.setLength(0);
                     }
                 } else if (eventType == XmlPullParser.TEXT) {
-                    if ("a".equalsIgnoreCase(currentTag)) {
+                    if (inNav && inAnchor) {
                         textBuffer.append(parser.getText());
                     }
                 } else if (eventType == XmlPullParser.END_TAG) {
-                    if ("a".equalsIgnoreCase(name)) {
-                        if (currentNode != null) {
-                            String clean = cleanHtmlText(textBuffer.toString()).replaceAll("\\s+", " ").trim();
-                            currentNode.title = TocNode.normalizeTitle(clean);
-                            if (currentNode.title.isEmpty()) currentNode.title = "Глава";
-                            if (stack.isEmpty()) {
-                                roots.add(currentNode);
-                            } else {
-                                stack.peek().children.add(currentNode);
-                                stack.peek().hasChildren = true;
+                    if (inNav) {
+                        if (inAnchor) {
+                            if ("a".equalsIgnoreCase(name)) {
+                                anchorNestedDepth--;
+                                if (anchorNestedDepth <= 0) {
+                                    inAnchor = false;
+                                    anchorNestedDepth = 0;
+                                    if (currentNode != null) {
+                                        String clean = cleanHtmlText(textBuffer.toString()).replaceAll("\\s+", " ").trim();
+                                        currentNode.title = TocNode.normalizeTitle(clean);
+                                        if (currentNode.title.isEmpty()) currentNode.title = "Глава";
+                                        if (stack.isEmpty()) {
+                                            if (currentNavIsToc) {
+                                                tocNavRoots.add(currentNode);
+                                            } else if (!capturedFallbackNav) {
+                                                fallbackNavRoots.add(currentNode);
+                                            }
+                                        } else {
+                                            stack.peek().children.add(currentNode);
+                                            stack.peek().hasChildren = true;
+                                        }
+                                    }
+                                }
+                            }
+                        } else if ("ol".equalsIgnoreCase(name)) {
+                            if (!stack.isEmpty()) {
+                                stack.pop();
+                            }
+                            currentNode = null;
+                        } else if ("li".equalsIgnoreCase(name)) {
+                            currentNode = null;
+                        } else if ("nav".equalsIgnoreCase(name)) {
+                            navDepth--;
+                            if (navDepth <= 0) {
+                                inNav = false;
+                                if (!currentNavIsToc && !fallbackNavRoots.isEmpty()) {
+                                    capturedFallbackNav = true;
+                                }
+                                currentNavIsToc = false;
+                                stack.clear();
+                                currentNode = null;
                             }
                         }
-                    } else if ("ol".equalsIgnoreCase(name)) {
-                        if (!stack.isEmpty()) {
-                            stack.pop();
-                        }
                     }
-                    currentTag = "";
                 }
                 eventType = parser.next();
             }
@@ -1218,7 +1323,7 @@ public class EpubParser {
                 try { is.close(); } catch (Exception ignored) {}
             }
         }
-        return roots;
+        return !tocNavRoots.isEmpty() ? tocNavRoots : fallbackNavRoots;
     }
 
     private static String findAnyEntryByExtension(ZipFile zip, String ext) {
@@ -1234,20 +1339,31 @@ public class EpubParser {
     }
 
     private static ZipEntry findZipEntry(ZipFile zip, String name) {
-        if (name == null) return null;
+        if (zip == null || name == null) return null;
+        String cleanName = resolveZipPath("", name);
+        if (!cleanName.isEmpty()) {
+            ZipEntry cleanEntry = zip.getEntry(cleanName);
+            if (cleanEntry != null) return cleanEntry;
+        }
         ZipEntry entry = zip.getEntry(name);
         if (entry != null) return entry;
 
-        String lower = name.toLowerCase();
+        String target = cleanName.isEmpty() ? name.replace('\\', '/') : cleanName;
+        while (target.startsWith("/")) target = target.substring(1);
+        String lower = target.toLowerCase(java.util.Locale.US);
         Enumeration<? extends ZipEntry> entries = zip.entries();
+        ZipEntry suffixMatch = null;
         while (entries.hasMoreElements()) {
             ZipEntry e = entries.nextElement();
-            String eName = e.getName();
-            if (eName.equalsIgnoreCase(name) || eName.toLowerCase().endsWith(lower)) {
+            String eName = e.getName().replace('\\', '/');
+            if (eName.equalsIgnoreCase(target)) {
                 return e;
             }
+            if (suffixMatch == null && !lower.isEmpty() && eName.toLowerCase(java.util.Locale.US).endsWith("/" + lower)) {
+                suffixMatch = e;
+            }
         }
-        return null;
+        return suffixMatch;
     }
 
     static String extractTitle(String html, String defaultTitle) {
@@ -1588,7 +1704,12 @@ public class EpubParser {
                     srcBaseDir = srcNormHref.substring(0, srcNormHref.lastIndexOf('/') + 1);
                 }
 
-                Matcher m = FOOTNOTE_REF_PATTERN.matcher(srcHtml);
+                String scanHtml = srcHtml;
+                if (cd.rawHtmlEndOffset > cd.rawHtmlStartOffset && cd.rawHtmlEndOffset <= srcHtml.length()) {
+                    scanHtml = srcHtml.substring(Math.max(0, cd.rawHtmlStartOffset), cd.rawHtmlEndOffset);
+                }
+
+                Matcher m = FOOTNOTE_REF_PATTERN.matcher(scanHtml);
                 while (m.find()) {
                     String href = m.group(1);
                     String innerRaw = m.group(2);
@@ -1677,7 +1798,36 @@ public class EpubParser {
                 nameEnd++;
             }
             String tagName = html.substring(tagStart + 1, nameEnd).toLowerCase(java.util.Locale.US);
-            if (!"aside".equals(tagName) && !"div".equals(tagName) && !"p".equals(tagName)
+            if ("a".equals(tagName) || "span".equals(tagName) || "sup".equals(tagName)) {
+                // Ищем обрамляющий блочный контейнер (p/div/aside/li/dd/section) для встроенных якорей вида <p><a id="fn1"/>...</p>
+                String inlineSelf = extractTagInnerText(html, tagStart, tagName);
+                String strippedSelf = stripFootnoteNumberPrefix(inlineSelf, bareMarker);
+                if (!strippedSelf.isEmpty() && strippedSelf.length() >= 12) {
+                    return strippedSelf.length() > 1200 ? strippedSelf.substring(0, 1197).trim() + "…" : strippedSelf;
+                }
+                int searchFrom = Math.max(0, tagStart - 300);
+                int bestBlockStart = -1;
+                String prefixSlice = html.substring(searchFrom, tagStart);
+                Matcher bm = Pattern.compile("<(aside|div|p|li|dd|section)\\b", Pattern.CASE_INSENSITIVE).matcher(prefixSlice);
+                while (bm.find()) {
+                    bestBlockStart = searchFrom + bm.start();
+                }
+                if (bestBlockStart < 0) {
+                    return null;
+                }
+                int bOpenEnd = html.indexOf('>', bestBlockStart);
+                if (bOpenEnd < tagStart) {
+                    tagStart = bestBlockStart;
+                    openEnd = bOpenEnd;
+                    nameEnd = tagStart + 1;
+                    while (nameEnd < openEnd && !Character.isWhitespace(html.charAt(nameEnd))) {
+                        nameEnd++;
+                    }
+                    tagName = html.substring(tagStart + 1, nameEnd).toLowerCase(java.util.Locale.US);
+                } else {
+                    return null;
+                }
+            } else if (!"aside".equals(tagName) && !"div".equals(tagName) && !"p".equals(tagName)
                     && !"li".equals(tagName) && !"dd".equals(tagName) && !"section".equals(tagName)) {
                 return null;
             }
@@ -1742,6 +1892,36 @@ public class EpubParser {
         } catch (Throwable ignored) {
             return null;
         }
+    }
+
+    private static String extractTagInnerText(String html, int tagStart, String tagName) {
+        int openEnd = html.indexOf('>', tagStart);
+        if (openEnd <= tagStart || html.charAt(openEnd - 1) == '/') return "";
+        int bodyStart = openEnd + 1;
+        int limit = Math.min(html.length(), bodyStart + 4000);
+        int end = findMatchingCloseTagEnd(html, bodyStart, tagName, limit);
+        if (end <= bodyStart) return "";
+        String rawInner = html.substring(bodyStart, end);
+        if (rawInner.indexOf('<') >= 0) {
+            rawInner = FOOTNOTE_BACKLINK_PATTERN.matcher(rawInner).replaceAll("");
+        }
+        return FOOTNOTE_WS_PATTERN.matcher(cleanHtmlText(rawInner, "")).replaceAll(" ").trim();
+    }
+
+    private static String stripFootnoteNumberPrefix(String rawClean, String bareMarker) {
+        if (rawClean == null) return "";
+        String clean = rawClean.trim();
+        if (bareMarker != null && !bareMarker.isEmpty()) {
+            String bracketPrefix = "[" + bareMarker + "]";
+            if (clean.startsWith(bracketPrefix)) clean = clean.substring(bracketPrefix.length()).trim();
+            else if (clean.startsWith(bareMarker + ".")) clean = clean.substring(bareMarker.length() + 1).trim();
+            else if (clean.startsWith(bareMarker + ")")) clean = clean.substring(bareMarker.length() + 1).trim();
+            else if (clean.startsWith(bareMarker + " ")) clean = clean.substring(bareMarker.length() + 1).trim();
+        }
+        if (clean.startsWith("^") || clean.startsWith("↑") || clean.startsWith("←")) {
+            clean = clean.substring(1).trim();
+        }
+        return clean;
     }
 
     public static final class CfiDomLocation {
@@ -1949,21 +2129,29 @@ public class EpubParser {
 
             List<Integer> targetChildIndices = new ArrayList<>();
             String lastIdAssertion = "";
+            int lastIdElementStepIdx = -1;
             Matcher mStep = Pattern.compile("/(\\d+)(?:\\[([^\\]]+)\\])?").matcher(elemPath);
             boolean skippedBodyRoot = false;
             while (mStep.find()) {
                 int stepNum = Integer.parseInt(mStep.group(1));
                 String stepId = mStep.group(2);
-                if (stepId != null && !stepId.isEmpty()) {
-                    lastIdAssertion = stepId;
-                }
                 if (!skippedBodyRoot && stepNum == 4) {
                     skippedBodyRoot = true;
+                    if (stepId != null && !stepId.isEmpty()) {
+                        lastIdAssertion = stepId;
+                        lastIdElementStepIdx = -1;
+                    }
                     continue;
                 }
                 skippedBodyRoot = true;
                 if (stepNum >= 2 && stepNum % 2 == 0) {
                     targetChildIndices.add(stepNum / 2);
+                    if (stepId != null && !stepId.isEmpty()) {
+                        lastIdAssertion = stepId;
+                        lastIdElementStepIdx = targetChildIndices.size() - 1;
+                    }
+                } else if (stepId != null && !stepId.isEmpty()) {
+                    lastIdAssertion = stepId;
                 }
             }
 
@@ -1971,7 +2159,12 @@ public class EpubParser {
             if (bodyStart < 0) return null;
             int bodyEnd = findBodyInnerEnd(html, bodyStart);
 
-            // Если присутствует ID-утверждение ([anchor_id]) — пробуем прямое точное совпадение элемента
+            int traversalStart = bodyStart;
+            int traversalEnd = bodyEnd;
+            List<Integer> activeChildIndices = targetChildIndices;
+
+            // Если присутствует ID-утверждение ([anchor_id]):
+            // на финальном шаге возвращаем точный элемент; на промежуточном — используем его как корень DOM-обхода
             if (!lastIdAssertion.isEmpty()) {
                 int anchorStart = findAnchorOffset(html, lastIdAssertion);
                 if (anchorStart >= bodyStart && anchorStart < bodyEnd) {
@@ -1980,49 +2173,60 @@ public class EpubParser {
                         int sp = anchorStart + 1;
                         while (sp < openGt && !Character.isWhitespace(html.charAt(sp))) sp++;
                         String tName = html.substring(anchorStart + 1, sp).toLowerCase(java.util.Locale.US);
-                        int closeLt = (openGt > 0 && html.charAt(openGt - 1) == '/') ? openGt : findMatchingCloseTagEnd(html, openGt + 1, tName, bodyEnd);
-                        String rawSlice = html.substring(anchorStart, Math.min(bodyEnd, Math.max(openGt + 1, closeLt)));
-                        String snip = normalizeSnippetText(rawSlice);
-                        if (!snip.isEmpty()) {
-                            return new CfiDomLocation(spineIndex, opfItemId, snip, snip, charOff, 0);
+                        int closeLt = (openGt > 0 && html.charAt(openGt - 1) == '/')
+                                ? openGt : findMatchingCloseTagEnd(html, openGt + 1, tName, bodyEnd);
+                        boolean idIsFinalStep = targetChildIndices.isEmpty()
+                                || (lastIdElementStepIdx >= targetChildIndices.size() - 1);
+                        if (idIsFinalStep) {
+                            String rawSlice = html.substring(anchorStart, Math.min(bodyEnd, Math.max(openGt + 1, closeLt)));
+                            String snip = normalizeSnippetText(rawSlice);
+                            if (!snip.isEmpty()) {
+                                return new CfiDomLocation(spineIndex, opfItemId, snip, snip, charOff, 0);
+                            }
+                        } else if (lastIdElementStepIdx >= 0 && lastIdElementStepIdx + 1 < targetChildIndices.size()
+                                && closeLt > openGt + 1) {
+                            traversalStart = openGt + 1;
+                            traversalEnd = Math.min(bodyEnd, closeLt);
+                            activeChildIndices = new ArrayList<>(
+                                    targetChildIndices.subList(lastIdElementStepIdx + 1, targetChildIndices.size()));
                         }
                     }
                 }
             }
 
-            if (targetChildIndices.isEmpty()) return null;
+            if (activeChildIndices.isEmpty()) return null;
 
             int[] childCounters = new int[64];
             String[] tagStack = new String[64];
             int[] openStartStack = new int[64];
             int[] innerStartStack = new int[64];
             int depth = 0;
-            int cursor = bodyStart;
+            int cursor = traversalStart;
             int targetMatchStart = -1;
             int targetMatchInnerStart = -1;
             int targetMatchEnd = -1;
             int blockStart = -1;
             int blockInnerStart = -1;
             int blockEnd = -1;
-            int targetDepthNeeded = targetChildIndices.size() - 1;
+            int targetDepthNeeded = activeChildIndices.size() - 1;
             boolean pathPrefixMatches = true;
 
-            while (cursor < bodyEnd) {
+            while (cursor < traversalEnd) {
                 int lt = html.indexOf('<', cursor);
-                if (lt < 0 || lt >= bodyEnd) break;
+                if (lt < 0 || lt >= traversalEnd) break;
                 if (html.startsWith("<!--", lt)) {
                     int ec = html.indexOf("-->", lt + 4);
-                    cursor = (ec >= 0) ? Math.min(bodyEnd, ec + 3) : bodyEnd;
+                    cursor = (ec >= 0) ? Math.min(traversalEnd, ec + 3) : traversalEnd;
                     continue;
                 }
                 if (html.startsWith("<![CDATA[", lt)) {
                     int ec = html.indexOf("]]>", lt + 9);
-                    cursor = (ec >= 0) ? Math.min(bodyEnd, ec + 3) : bodyEnd;
+                    cursor = (ec >= 0) ? Math.min(traversalEnd, ec + 3) : traversalEnd;
                     continue;
                 }
                 int gt = -1;
                 char q = '\0';
-                for (int k = lt + 1; k < bodyEnd; k++) {
+                for (int k = lt + 1; k < traversalEnd; k++) {
                     char c = html.charAt(k);
                     if (q != '\0') { if (c == q) q = '\0'; }
                     else if (c == '"' || c == '\'') q = c;
@@ -2059,7 +2263,7 @@ public class EpubParser {
 
                 if ("script".equals(tagName) || "style".equals(tagName)) {
                     if (!isSelfClose) {
-                        cursor = Math.min(bodyEnd, findMatchingCloseTagEnd(html, cursor, tagName, bodyEnd) + tagName.length() + 3);
+                        cursor = Math.min(traversalEnd, findMatchingCloseTagEnd(html, cursor, tagName, traversalEnd) + tagName.length() + 3);
                     }
                     continue;
                 }
@@ -2067,13 +2271,13 @@ public class EpubParser {
                 if (depth < 64) {
                     childCounters[depth]++;
                     boolean stepMatches = pathPrefixMatches && depth <= targetDepthNeeded
-                            && childCounters[depth] == targetChildIndices.get(depth);
+                            && childCounters[depth] == activeChildIndices.get(depth);
 
                     if (stepMatches && depth == targetDepthNeeded) {
                         targetMatchStart = lt;
                         targetMatchInnerStart = cursor;
                         targetMatchEnd = (isSelfClose || isHtmlVoidTag(tagName))
-                                ? cursor : findMatchingCloseTagEnd(html, cursor, tagName, bodyEnd);
+                                ? cursor : findMatchingCloseTagEnd(html, cursor, tagName, traversalEnd);
                         break;
                     }
 
@@ -2084,7 +2288,7 @@ public class EpubParser {
                         if (stepMatches && isDomLeafBlockTag(tagName)) {
                             blockStart = lt;
                             blockInnerStart = cursor;
-                            blockEnd = findMatchingCloseTagEnd(html, cursor, tagName, bodyEnd);
+                            blockEnd = findMatchingCloseTagEnd(html, cursor, tagName, traversalEnd);
                         }
                         depth++;
                         if (depth < 64) childCounters[depth] = 0;
@@ -2100,11 +2304,11 @@ public class EpubParser {
             }
 
             if (targetMatchStart >= 0 && targetMatchEnd >= targetMatchStart) {
-                String inlineSnip = normalizeSnippetText(html.substring(targetMatchStart, Math.min(bodyEnd, targetMatchEnd)));
+                String inlineSnip = normalizeSnippetText(html.substring(targetMatchStart, Math.min(traversalEnd, targetMatchEnd)));
                 String blockSnip = inlineSnip;
                 int prefixInBlock = 0;
                 if (blockStart >= 0 && blockEnd >= blockStart && targetMatchStart >= blockInnerStart && targetMatchStart <= blockEnd) {
-                    blockSnip = normalizeSnippetText(html.substring(blockStart, Math.min(bodyEnd, blockEnd)));
+                    blockSnip = normalizeSnippetText(html.substring(blockStart, Math.min(traversalEnd, blockEnd)));
                     prefixInBlock = normalizeSnippetText(html.substring(blockInnerStart, targetMatchStart)).length();
                 }
                 if (blockSnip.length() > 140) blockSnip = blockSnip.substring(0, 140);

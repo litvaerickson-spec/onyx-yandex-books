@@ -164,7 +164,6 @@ public class EpubFormatting {
     }
 
     private static final Pattern CSS_COMMENT_PATTERN = Pattern.compile("(?s)/\\*.*?\\*/");
-    private static final Pattern CSS_AT_RULE_PATTERN = Pattern.compile("(?is)@(?:font-face|page|import|charset|namespace)[^{;]*(?:\\{[^}]*\\}|;)");
     private static final Pattern CSS_RULE_PATTERN = Pattern.compile("([^{}@]+)\\{([^}]*)\\}");
     private static final Pattern ZERO_CSS_LEN_PATTERN = Pattern.compile("^0(?:\\.?0+)?(?:px|em|rem|pt|%|mm|cm|ex)?$");
     private static final Pattern POS_CSS_LEN_PATTERN = Pattern.compile("^([0-9]+(?:\\.[0-9]+)?)\\s*(em|rem|pt|px|%)?$");
@@ -219,8 +218,8 @@ public class EpubFormatting {
         public void parseCss(String cssText) {
             if (cssText == null || cssText.isEmpty()) return;
             String cleaned = CSS_COMMENT_PATTERN.matcher(cssText).replaceAll(" ");
-            // Игнорируем @font-face / @page / @media оболочки при разборе простых правил
-            cleaned = CSS_AT_RULE_PATTERN.matcher(cleaned).replaceAll(" ");
+            // Игнорируем @font-face / @page / @media оболочки (включая вложенные фигурные скобки)
+            cleaned = stripAtRulesWithBraces(cleaned);
             Matcher m = CSS_RULE_PATTERN.matcher(cleaned);
             while (m.find()) {
                 String selectorGroup = m.group(1);
@@ -1021,10 +1020,16 @@ public class EpubFormatting {
             CssRuleProps css = cssSheet.resolveElement(tagName, idAttr, classAttr, alignAttr, styleAttr, stack);
 
             if (blockTag) {
-                flushRichLine(lines, curBody, activeLineStyle, stack.peek().blockStyle,
-                        activeLineStyleLocked, activeLinkTarget, linkTextBuffer);
-                activeLinkTarget = null;
-                linkTextBuffer = null;
+                boolean absorbFirstListChildBlock = ("p".equals(tagName) || "div".equals(tagName))
+                        && !stack.isEmpty()
+                        && "li".equals(stack.peek().tag)
+                        && "• ".equals(curBody.toString());
+                if (!absorbFirstListChildBlock) {
+                    flushRichLine(lines, curBody, activeLineStyle, stack.peek().blockStyle,
+                            activeLineStyleLocked, activeLinkTarget, linkTextBuffer);
+                    activeLinkTarget = null;
+                    linkTextBuffer = null;
+                }
 
                 BlockStyle inherited = stack.peek().blockStyle.copy();
                 inherited.pageBreakBefore = false;
@@ -1350,7 +1355,11 @@ public class EpubFormatting {
 
     private static String resolveLinkHref(String rawHref, String baseDir, String normChapterHref) {
         if (rawHref == null) return null;
-        String href = rawHref.trim();
+        String href = rawHref.trim()
+                .replace("&amp;", "&")
+                .replace("&#38;", "&")
+                .replace("&#x26;", "&")
+                .replace("&#X26;", "&");
         if (href.isEmpty() || href.startsWith("javascript:")) return null;
         String lower = href.toLowerCase(Locale.US);
         if (lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("mailto:")) {
@@ -1362,6 +1371,82 @@ public class EpubFormatting {
         String resolvedFile = filePart.isEmpty() ? normChapterHref : resolveZipPath(baseDir, filePart);
         if (resolvedFile.isEmpty() && anchorPart.isEmpty()) return null;
         return anchorPart.isEmpty() ? resolvedFile : (resolvedFile + "#" + anchorPart);
+    }
+
+    private static String stripAtRulesWithBraces(String css) {
+        if (css == null || css.indexOf('@') < 0) return css;
+        StringBuilder out = new StringBuilder(css.length());
+        int len = css.length();
+        int i = 0;
+        char quote = '\0';
+        while (i < len) {
+            char c = css.charAt(i);
+            if (quote != '\0') {
+                out.append(c);
+                if (c == '\\' && i + 1 < len) {
+                    out.append(css.charAt(++i));
+                } else if (c == quote) {
+                    quote = '\0';
+                }
+                i++;
+                continue;
+            }
+            if (c == '"' || c == '\'') {
+                quote = c;
+                out.append(c);
+                i++;
+                continue;
+            }
+            if (c == '@') {
+                out.append(' ');
+                int j = i + 1;
+                char q2 = '\0';
+                while (j < len) {
+                    char ch = css.charAt(j);
+                    if (q2 != '\0') {
+                        if (ch == '\\' && j + 1 < len) j++;
+                        else if (ch == q2) q2 = '\0';
+                        j++;
+                        continue;
+                    }
+                    if (ch == '"' || ch == '\'') {
+                        q2 = ch;
+                        j++;
+                        continue;
+                    }
+                    if (ch == ';') {
+                        j++;
+                        break;
+                    }
+                    if (ch == '{') {
+                        int depth = 1;
+                        j++;
+                        char q3 = '\0';
+                        while (j < len && depth > 0) {
+                            char bch = css.charAt(j);
+                            if (q3 != '\0') {
+                                if (bch == '\\' && j + 1 < len) j++;
+                                else if (bch == q3) q3 = '\0';
+                            } else if (bch == '"' || bch == '\'') {
+                                q3 = bch;
+                            } else if (bch == '{') {
+                                depth++;
+                            } else if (bch == '}') {
+                                depth--;
+                            }
+                            j++;
+                        }
+                        break;
+                    }
+                    j++;
+                }
+                i = j;
+                continue;
+            }
+            out.append(c);
+            i++;
+        }
+        return out.toString();
     }
 
     private static String decodeAndCleanTextChunk(String raw) {
@@ -1381,7 +1466,6 @@ public class EpubFormatting {
                 .replace("&mdash;", "—")
                 .replace("&ndash;", "–")
                 .replace("&hellip;", "…")
-                .replace("&amp;", "&")
                 .replace("&lt;", "<")
                 .replace("&gt;", ">")
                 .replace("&quot;", "\"")
@@ -1396,10 +1480,12 @@ public class EpubFormatting {
                     int code = (val.startsWith("x") || val.startsWith("X"))
                             ? Integer.parseInt(val.substring(1), 16)
                             : Integer.parseInt(val);
-                    if (code == 0xFFFC || code == 0xFFFD || code == 0xFEFF || (code < 32 && code != 10 && code != 9)) {
+                    if (code == 0xFFFC || code == 0xFFFD || code == 0xFEFF
+                            || (code < 32 && code != 10 && code != 9)
+                            || !Character.isValidCodePoint(code)) {
                         matcher.appendReplacement(sb, "");
                     } else {
-                        matcher.appendReplacement(sb, Matcher.quoteReplacement(String.valueOf((char) code)));
+                        matcher.appendReplacement(sb, Matcher.quoteReplacement(new String(Character.toChars(code))));
                     }
                 } catch (Exception e) {
                     matcher.appendReplacement(sb, "");
@@ -1408,6 +1494,7 @@ public class EpubFormatting {
             matcher.appendTail(sb);
             text = sb.toString();
         }
+        text = text.replace("&amp;", "&");
         return text;
     }
 
