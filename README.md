@@ -5,13 +5,13 @@
 # 📚 Яндекс Книги Lite для Onyx Boox
 
 [![Latest Release](https://img.shields.io/github/v/release/litvaerickson-spec/onyx-yandex-books?style=for-the-badge&logo=github&color=brightgreen)](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/latest)
-[![Version](https://img.shields.io/badge/Version-v2.0.8-blue?style=for-the-badge&logo=android)](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/tag/v2.0.8)
+[![Version](https://img.shields.io/badge/Version-v2.0.7-blue?style=for-the-badge&logo=android)](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/tag/v2.0.7)
 [![Android](https://img.shields.io/badge/Android-4.2.2%20--%2014%2B-gray?style=for-the-badge&logo=android)](https://github.com/litvaerickson-spec/onyx-yandex-books)
 [![E-Ink](https://img.shields.io/badge/Screen-E--Ink%20Carta%20Plus-white?style=for-the-badge)](https://github.com/litvaerickson-spec/onyx-yandex-books)
 [![RAM Footprint](https://img.shields.io/badge/RAM_Usage-15--20_MB-brightgreen?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
 
-> **Стабильный релиз v2.0.8 (`versionCode 71`) легковесного клиента сервиса «Яндекс Книги»** для электронных книг **Onyx Boox** (Darwin 1–7, Vasco da Gama, Faust, Monte Cristo, Livingstone, Leaf, Poke, Palma, Nova, Note, Tab, Go 10.3), Bigme B6 и любых ридеров/планшетов на базе **Android 4.2.2 – Android 14+**: с **гибридным книжным форматированием EPUB и встроенными шрифтами**, **всплывающими сносками и предпросмотром локальных `#якорей`**, **выделением цитат в обе стороны, заметками и экспортом в `.md`**, **настраиваемой сеткой тапов 3×3**, **дизерингом обложек Флойда–Стейнберга**, **полкой «Мои файлы» (`user_books`)**, **мобильным GraphQL Gateway + точным DOM EPUB CFI**, **прямой интеграцией NeoReader / AlReader**, **устойчивым масштабированием интерфейса 100%–200%**, **встроенным набором 148 сертификатов CA для Android 4.2–4.4**, **архивом версий и резервным копированием с безопасным откатом**.
+> **Стабильный релиз v2.0.7 (`versionCode 70`) легковесного клиента сервиса «Яндекс Книги»** для электронных книг **Onyx Boox** (Darwin 1–7, Vasco da Gama, Faust, Monte Cristo, Livingstone, Leaf, Poke, Palma, Nova, Note, Tab, Go 10.3), Bigme B6 и любых ридеров/планшетов на базе **Android 4.2.2 – Android 14+**: с **гибридным книжным форматированием EPUB и встроенными шрифтами**, **всплывающими сносками и предпросмотром локальных `#якорей`**, **выделением цитат в обе стороны, заметками и экспортом в `.md`**, **настраиваемой сеткой тапов 3×3**, **дизерингом обложек Флойда–Стейнберга**, **полкой «Мои файлы» (`user_books`)**, **мобильным GraphQL Gateway + точным DOM EPUB CFI**, **прямой интеграцией NeoReader / AlReader**, **устойчивым масштабированием интерфейса 100%–200%**, **встроенным набором 148 сертификатов CA для Android 4.2–4.4**, **архивом версий и резервным копированием с безопасным откатом**.
 >
 > **Статус тестирования:** все модули ядра (64 автотеста), среда Android ART/Dalvik (`DeviceRuntimeHarness`), сложные EPUB-файлы, 5-эмуляторная матрица Android 4.2.2–9.0 и сквозной E2E-прогон всех экранов, кнопок, панели «Формат», закладок, цитат, ссылок, сохранения позиции и масштабов (`758×1024` и `1072×1448`) пройдены с нулём сбоев. На физических устройствах с Android 10–14 при необходимости предусмотрен встроенный **«Архив версий и откат ПО»** *(при откате на `v1.6.0` потребуется заново войти в аккаунт и повторно скачать книги — см. раздел 7 руководства)*.
 
@@ -28,18 +28,18 @@
 
 ### 📥 Загрузка и установка
 
-* 🚀 **Актуальный выпуск (`v2.0.8`):** [**Страница релизов на GitHub (Releases)**](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/tag/v2.0.8)
+* 🚀 **Актуальный выпуск (`v2.0.7`):** [**Страница релизов на GitHub (Releases)**](https://github.com/litvaerickson-spec/onyx-yandex-books/releases/tag/v2.0.7)
 * 🔐 **Контрольные суммы (SHA-256):** [`CHECKSUMS.md`](CHECKSUMS.md) и [`SHA256SUMS`](SHA256SUMS)
 * 🔄 **Обновление по воздуху (OTA без провода):** прямо на устройстве через **«Меню» → «Обновление ПО»** (или нажатием на строку статуса внизу экрана)
-* 📖 **Подробное руководство пользователя:** [`docs/guides/user_guide.md`](docs/guides/user_guide.md) · 📥 [**Скачать в PDF (`YandexBooksLite_UserGuide_v2.0.8.pdf`)**](docs/guides/YandexBooksLite_UserGuide_v2.0.8.pdf)
+* 📖 **Подробное руководство пользователя:** [`docs/guides/user_guide.md`](docs/guides/user_guide.md) · 📥 [**Скачать в PDF (`YandexBooksLite_UserGuide_v2.0.7.pdf`)**](docs/guides/YandexBooksLite_UserGuide_v2.0.7.pdf)
 * 📋 **Полный список изменений:** [`CHANGELOG.md`](CHANGELOG.md) · [`RELEASE_NOTES.md`](RELEASE_NOTES.md)
 * 🔨 **Скрипт сборки из исходников:** [`build_apk.sh`](build_apk.sh)
 
 ---
 
-## 📊 Сравнение: Официальный клиент vs Яндекс Книги Lite v2.0.8
+## 📊 Сравнение: Официальный клиент vs Яндекс Книги Lite v2.0.7
 
-| Параметр | Официальное приложение «Яндекс Книги» | Яндекс Книги Lite (v2.0.8) |
+| Параметр | Официальное приложение «Яндекс Книги» | Яндекс Книги Lite (v2.0.7) |
 | :--- | :--- | :--- |
 | **Поддержка ОС Android** | ⚠️ Android 7+ с сервисами Google | ✅ **Android 4.2.2 – Android 14+ (`minSdk 17`, `targetSdk 28`, 4 ABI, 148 CA)** |
 | **Потребление ОЗУ (RAM)** | ⚠️ 280–340 МБ (тормоза и вылеты на 512 МБ / 1 ГБ) | 🚀 **15–20 МБ (мгновенный отклик)** |
@@ -58,7 +58,7 @@
 
 ---
 
-## 🏛️ Ключевые возможности релиза v2.0.8
+## 🏛️ Ключевые возможности релиза v2.0.7
 
 ```mermaid
 flowchart TD
@@ -134,14 +134,14 @@ flowchart TD
 
 ```text
 01_onyx_yandex_books/
-├── README.md                          # Главная страница и обзор возможностей v2.0.8
+├── README.md                          # Главная страница и обзор возможностей v2.0.7
 ├── CHANGELOG.md                       # Полная история версий (Keep a Changelog)
-├── RELEASE_NOTES.md                   # Описание текущего релиза v2.0.8
+├── RELEASE_NOTES.md                   # Описание текущего релиза v2.0.7
 ├── CHECKSUMS.md / SHA256SUMS          # Контрольные суммы SHA-256 релизных дистрибутивов
 ├── version.json                       # CDN-манифест для OTA-обновлений по воздуху
 ├── build_apk.sh                       # Скрипт сборки и v1/v2/v3 подписи релизного APK
 ├── tools/                             # 64 теста ядра + E2E и ART/Dalvik стенд (tools/emulator/)
-├── docs/                              # Документация, руководство (MD/PDF v2.0.8) и спецификации
+├── docs/                              # Документация, руководство (MD/PDF v2.0.7) и спецификации
 ├── app/                               # Исходный код Android-приложения (включая res/raw/ca_roots.crt)
 └── libs/                              # Conscrypt JNI (armeabi-v7a, arm64-v8a, x86, x86_64) и зависимости
 ```

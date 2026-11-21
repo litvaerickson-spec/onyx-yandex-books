@@ -4957,34 +4957,34 @@ def test_v206_deep_stabilization_audit():
 
 
 def test_v207_real_device_bugfixes():
-    """[ТЕСТ 64] v2.0.8: Исправления 4 багов с реальных E-Ink устройств + широкий предпросмотр текста в панели «Формат»"""
-    print("--- [ТЕСТ 64] v2.0.8: Широкий предпросмотр «Формат», защита от возврата 100%, отмена загрузки и сохранение позиции ---")
+    """[ТЕСТ 64] v2.0.7: Исправления 4 багов с реальных E-Ink устройств + широкий предпросмотр текста в панели «Формат»"""
+    print("--- [ТЕСТ 64] v2.0.7: Широкий предпросмотр «Формат», защита от возврата 100%, отмена загрузки и сохранение позиции ---")
     import hashlib, json, os
 
     jb = "app/src/main/java/com/onyx/yandexbooks/"
     rd = lambda p: open(os.path.join(PROJECT_DIR, p), "r", encoding="utf-8").read()
 
-    # 1. Версионирование и дистрибутив v2.0.8 (versionCode 71)
+    # 1. Версионирование и дистрибутив v2.0.7 (versionCode 70)
     ver = rd("VERSION").strip()
-    assert ver == "2.0.8", f"Ожидался 2.0.8, получено: {ver}"
+    assert ver == "2.0.7", f"Ожидался 2.0.7, получено: {ver}"
     m = rd("app/src/main/AndroidManifest.xml")
-    assert 'android:versionName="2.0.8"' in m and 'android:versionCode="71"' in m
+    assert 'android:versionName="2.0.7"' in m and 'android:versionCode="70"' in m
     g = rd("app/build.gradle")
-    assert 'versionName "2.0.8"' in g and 'versionCode 71' in g
+    assert 'versionName "2.0.7"' in g and 'versionCode 70' in g
 
-    apk = os.path.join(PROJECT_DIR, "yandex-books-lite-v2.0.8.apk")
+    apk = os.path.join(PROJECT_DIR, "yandex-books-lite-v2.0.7.apk")
     assert os.path.exists(apk), f"APK не найден: {apk}"
     apk_size = os.path.getsize(apk)
     with open(apk, "rb") as fh:
         h = hashlib.sha256(fh.read()).hexdigest()
-    assert f"{h}  yandex-books-lite-v2.0.8.apk" in rd("SHA256SUMS")
+    assert f"{h}  yandex-books-lite-v2.0.7.apk" in rd("SHA256SUMS")
     vj = json.loads(rd("version.json"))
-    assert vj["versionName"] == "2.0.8" and vj["versionCode"] == 71 and vj["tagName"] == "v2.0.8"
+    assert vj["versionName"] == "2.0.7" and vj["versionCode"] == 70 and vj["tagName"] == "v2.0.7"
     assert vj["apkSize"] == apk_size and vj["sha256"] == h
-    assert os.path.exists(os.path.join(PROJECT_DIR, "docs/guides/YandexBooksLite_UserGuide_v2.0.8.pdf"))
+    assert os.path.exists(os.path.join(PROJECT_DIR, "docs/guides/YandexBooksLite_UserGuide_v2.0.7.pdf"))
     for doc_rel in ("RELEASE_NOTES.md", "CHANGELOG.md", "CHECKSUMS.md", "version.json", "README.md", "docs/guides/user_guide.md"):
         doc = rd(doc_rel)
-        assert "2.0.8" in doc, f"Отсутствует 2.0.8 в {doc_rel}"
+        assert "2.0.7" in doc, f"Отсутствует 2.0.7 в {doc_rel}"
         assert "читалк" not in doc.lower(), f"Найдено запрещённое слово в {doc_rel}"
 
     # 2. Баг 1: Панель «Формат» не перекрывает reader_top_bar, оставляет видимый холст и имеет кнопку ✕
