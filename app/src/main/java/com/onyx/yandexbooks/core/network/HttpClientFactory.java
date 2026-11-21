@@ -10,20 +10,16 @@ import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLSession;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
 
-import okhttp3.CipherSuite;
 import okhttp3.ConnectionPool;
 import okhttp3.ConnectionSpec;
 import okhttp3.OkHttpClient;
@@ -58,13 +54,6 @@ public class HttpClientFactory {
         try {
             ConnectionSpec modernTlsSpec = new ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
                     .tlsVersions(TlsVersion.TLS_1_3, TlsVersion.TLS_1_2)
-                    .cipherSuites(
-                            CipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-                            CipherSuite.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-                            CipherSuite.TLS_DHE_RSA_WITH_AES_128_GCM_SHA256,
-                            CipherSuite.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-                            CipherSuite.TLS_RSA_WITH_AES_128_GCM_SHA256
-                    )
                     .build();
 
             List<ConnectionSpec> specs = new ArrayList<>();
@@ -72,19 +61,12 @@ public class HttpClientFactory {
             specs.add(ConnectionSpec.CLEARTEXT);
             builder.connectionSpecs(specs);
 
-            X509TrustManager trustManager = createTrustManager();
+            X509TrustManager trustManager = getSharedTrustManager();
             SSLContext sslContext = SSLContext.getInstance("TLS");
             sslContext.init(null, new TrustManager[]{trustManager}, null);
 
             SSLSocketFactory socketFactory = new Tls12SocketFactory(sslContext.getSocketFactory());
             builder.sslSocketFactory(socketFactory, trustManager);
-
-            builder.hostnameVerifier(new HostnameVerifier() {
-                @Override
-                public boolean verify(String hostname, SSLSession session) {
-                    return true;
-                }
-            });
         } catch (Throwable t) {
             Log.e(TAG, "Failed to apply custom SSLSocketFactory, falling back to default OkHttp builder", t);
         }
@@ -92,29 +74,27 @@ public class HttpClientFactory {
         return builder.build();
     }
 
-    private static X509TrustManager createTrustManager() {
+    public static X509TrustManager getSharedTrustManager() {
+        try {
+            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            tmf.init((KeyStore) null);
+            for (TrustManager tm : tmf.getTrustManagers()) {
+                if (tm instanceof X509TrustManager) {
+                    return (X509TrustManager) tm;
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to obtain default X509TrustManager", e);
+        }
         return new X509TrustManager() {
             @Override
-            public void checkClientTrusted(X509Certificate[] chain, String authType) {}
+            public void checkClientTrusted(X509Certificate[] chain, String authType) throws CertificateException {
+                throw new CertificateException("No system X509TrustManager available");
+            }
 
             @Override
             public void checkServerTrusted(X509Certificate[] chain, String authType) throws CertificateException {
-                try {
-                    TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-                    tmf.init((KeyStore) null);
-                    for (TrustManager tm : tmf.getTrustManagers()) {
-                        if (tm instanceof X509TrustManager) {
-                            ((X509TrustManager) tm).checkServerTrusted(chain, authType);
-                            return;
-                        }
-                    }
-                } catch (Exception e) {
-                    if (chain != null && chain.length > 0) {
-                        try {
-                            chain[0].checkValidity();
-                        } catch (Exception ignored) {}
-                    }
-                }
+                throw new CertificateException("No system X509TrustManager available");
             }
 
             @Override
@@ -169,11 +149,18 @@ public class HttpClientFactory {
         private Socket patch(Socket s) {
             if (s instanceof SSLSocket) {
                 SSLSocket sslSocket = (SSLSocket) s;
-                List<String> enabled = new ArrayList<>(Arrays.asList(sslSocket.getSupportedProtocols()));
-                if (!enabled.contains("TLSv1.2")) {
-                    enabled.add("TLSv1.2");
+                String[] supported = sslSocket.getSupportedProtocols();
+                if (supported != null) {
+                    List<String> supportedList = Arrays.asList(supported);
+                    List<String> enabled = new ArrayList<>();
+                    if (supportedList.contains("TLSv1.3")) enabled.add("TLSv1.3");
+                    if (supportedList.contains("TLSv1.2")) enabled.add("TLSv1.2");
+                    if (supportedList.contains("TLSv1.1")) enabled.add("TLSv1.1");
+                    if (supportedList.contains("TLSv1")) enabled.add("TLSv1");
+                    if (!enabled.isEmpty()) {
+                        sslSocket.setEnabledProtocols(enabled.toArray(new String[0]));
+                    }
                 }
-                sslSocket.setEnabledProtocols(enabled.toArray(new String[0]));
             }
             return s;
         }

@@ -4,14 +4,21 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
+import android.net.Uri;
+import android.net.http.SslCertificate;
 import android.net.http.SslError;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebSettings;
@@ -25,15 +32,28 @@ import com.onyx.yandexbooks.R;
 import com.onyx.yandexbooks.core.auth.TokenStorage;
 import com.onyx.yandexbooks.core.eink.EinkWebView;
 import com.onyx.yandexbooks.core.eink.EpdController;
+import com.onyx.yandexbooks.core.network.HttpClientFactory;
+import com.onyx.yandexbooks.core.storage.AppSettings;
+import com.onyx.yandexbooks.core.ui.UiScaleHelper;
 
+import org.json.JSONObject;
+
+import java.io.ByteArrayInputStream;
 import java.net.URLDecoder;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.util.Collection;
+import java.util.List;
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import javax.net.ssl.X509TrustManager;
+
 /**
- * Встроенный браузер для прямой авторизации в Яндекс ID на экране ридера.
+ * Встроенный браузер для прямой авторизации в Яндекс ID на экране устройства.
  * Поддерживает ввод телефона/логина с вызовом экранной клавиатуры и нативным диалогом ввода.
- * Оснащен обходом устаревших SSL-сертификатов Android Jelly Bean / KitKat и перехватом OAuth-токенов.
+ * Проверяет SSL-сертификаты доверенных доменов и перехватывает OAuth-токен при редиректе.
  */
 public class AuthWebViewActivity extends Activity {
 
@@ -41,6 +61,10 @@ public class AuthWebViewActivity extends Activity {
     private static final String BOOKMATE_CLIENT_ID = "4483e97bab6e486a9822973109a14d05";
     private static final String AUTH_URL = "https://oauth.yandex.ru/authorize?response_type=token&client_id=" + BOOKMATE_CLIENT_ID + "&lang=ru&force_confirm=yes";
     private static final Pattern TOKEN_PATTERN = Pattern.compile("y0_[A-Za-z0-9_-]{15,}");
+    private static final String[] TRUSTED_AUTH_DOMAINS = new String[]{
+            "yandex.ru", "yandex.net", "ya.ru", "bookmate.com", "bookmate.ru"
+    };
+    private static final int MAX_STYLE_RETRIES = 4;
 
     private EinkWebView webView;
     private TextView webviewHint;
@@ -49,12 +73,28 @@ public class AuthWebViewActivity extends Activity {
     private Button btnOpenKeyboard;
     private Button btnNativeInput;
     private TokenStorage tokenStorage;
+    private AlertDialog activeDialog;
     private boolean isFinished = false;
+    private boolean isPageLoaded = false;
+    private int styleRetryCount = 0;
+
+    @Override
+    protected void attachBaseContext(Context newBase) {
+        AppSettings settings = new AppSettings(newBase);
+        super.attachBaseContext(UiScaleHelper.wrapBaseContext(newBase, settings.getUiScale()));
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        AppSettings settings = new AppSettings(this);
+        UiScaleHelper.applyScale(this, settings.getUiScale());
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        com.onyx.yandexbooks.core.storage.AppSettings settings = new com.onyx.yandexbooks.core.storage.AppSettings(this);
-        com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, settings.getUiScale());
+        AppSettings settings = new AppSettings(this);
+        UiScaleHelper.applyScale(this, settings.getUiScale());
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_auth_webview);
 
@@ -147,15 +187,19 @@ public class AuthWebViewActivity extends Activity {
     }
 
     private void showKeyboard() {
+        if (webView == null) return;
         webView.requestFocus(View.FOCUS_DOWN);
         InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm != null) {
             imm.showSoftInput(webView, InputMethodManager.SHOW_FORCED);
-            imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0);
         }
     }
 
     private void showNativeInputDialog() {
+        if (isFinishing()) return;
+        if (activeDialog != null && activeDialog.isShowing()) {
+            activeDialog.dismiss();
+        }
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("Ввод логина или пароля");
         builder.setMessage("Введите текст для активного поля (логин или пароль). Он будет сразу вставлен в форму Яндекса:");
@@ -176,13 +220,15 @@ public class AuthWebViewActivity extends Activity {
         });
         builder.setNegativeButton("Отмена", null);
         AlertDialog dialog = builder.create();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+        }
+        activeDialog = dialog;
         dialog.show();
 
         input.requestFocus();
-        InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-        if (imm != null) {
-            imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0);
-        }
     }
 
     private void executeJavascript(WebView view, String js) {
@@ -193,9 +239,9 @@ public class AuthWebViewActivity extends Activity {
     }
 
     private void injectInputValue(String value) {
-        String escaped = value.replace("\\", "\\\\").replace("'", "\\'");
+        String quoted = JSONObject.quote(value != null ? value : "");
         String js = "(function() {" +
-                "  var val = '" + escaped + "';" +
+                "  var val = " + quoted + ";" +
                 "  var input = document.activeElement;" +
                 "  if (!input || input.tagName !== 'INPUT') {" +
                 "    input = document.querySelector('#login') || " +
@@ -287,16 +333,22 @@ public class AuthWebViewActivity extends Activity {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
+                isPageLoaded = false;
+                styleRetryCount = 0;
+                styleHandler.removeCallbacks(styleRunnable);
                 checkUrlForToken(url);
-                injectEinkStyles(view);
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                isPageLoaded = true;
+                styleRetryCount = 0;
                 checkUrlForToken(url);
                 injectEinkStyles(view);
                 EpdController.requestFullRefresh(AuthWebViewActivity.this, webView);
+                styleHandler.removeCallbacks(styleRunnable);
+                styleHandler.postDelayed(styleRunnable, 1200);
             }
 
             @Override
@@ -307,9 +359,13 @@ public class AuthWebViewActivity extends Activity {
 
             @Override
             public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-                // Игнорируем проверку устаревших корневых сертификатов Jelly Bean / KitKat для яндексовских доменов
-                Log.w(TAG, "SSL Certificate Notice in WebView: " + error.toString());
-                handler.proceed();
+                if (Build.VERSION.SDK_INT < 24 && isTrustedSslError(view, error)) {
+                    Log.w(TAG, "Accepted Conscrypt-verified certificate for legacy WebView: " + error.getUrl());
+                    handler.proceed();
+                } else {
+                    Log.e(TAG, "Rejected untrusted SSL certificate in WebView: " + (error != null ? error.toString() : "null"));
+                    handler.cancel();
+                }
             }
 
             @Override
@@ -367,17 +423,115 @@ public class AuthWebViewActivity extends Activity {
     private final Runnable styleRunnable = new Runnable() {
         @Override
         public void run() {
-            if (!isFinishing() && webView != null) {
+            if (!isFinishing() && webView != null && isPageLoaded && styleRetryCount < MAX_STYLE_RETRIES) {
                 injectEinkStyles(webView);
-                styleHandler.postDelayed(this, 1500);
+                styleRetryCount++;
+                if (styleRetryCount < MAX_STYLE_RETRIES) {
+                    styleHandler.postDelayed(this, 1500);
+                }
             }
         }
     };
 
+    private boolean isTrustedSslError(WebView view, SslError error) {
+        if (error == null) return false;
+        String url = error.getUrl();
+        if ((url == null || url.trim().isEmpty()) && view != null) {
+            url = view.getUrl();
+        }
+        String host = extractHost(url);
+        if (!isAllowedAuthHost(host)) {
+            return false;
+        }
+        SslCertificate sslCert = error.getCertificate();
+        if (sslCert == null) {
+            return false;
+        }
+        try {
+            Bundle state = SslCertificate.saveState(sslCert);
+            byte[] certBytes = state != null ? state.getByteArray("x509-certificate") : null;
+            if (certBytes == null || certBytes.length == 0) {
+                return false;
+            }
+            CertificateFactory cf = CertificateFactory.getInstance("X.509");
+            X509Certificate x509 = (X509Certificate) cf.generateCertificate(new ByteArrayInputStream(certBytes));
+            x509.checkValidity();
+            if (!verifyHostMatchesCertificate(host, x509)) {
+                return false;
+            }
+            X509TrustManager trustManager = HttpClientFactory.getSharedTrustManager();
+            String alg = x509.getPublicKey() != null ? x509.getPublicKey().getAlgorithm() : "RSA";
+            String authType = "EC".equalsIgnoreCase(alg) ? "ECDHE_ECDSA" : "RSA";
+            trustManager.checkServerTrusted(new X509Certificate[]{x509}, authType);
+            return true;
+        } catch (Throwable t) {
+            Log.w(TAG, "WebView SSL validation failed for host " + host + ": " + t.getMessage());
+            return false;
+        }
+    }
+
+    private String extractHost(String url) {
+        if (url == null) return null;
+        try {
+            Uri uri = Uri.parse(url);
+            String host = uri.getHost();
+            return host != null ? host.toLowerCase(Locale.US) : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private boolean isAllowedAuthHost(String host) {
+        if (host == null || host.isEmpty()) return false;
+        for (String domain : TRUSTED_AUTH_DOMAINS) {
+            if (host.equals(domain) || host.endsWith("." + domain)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean verifyHostMatchesCertificate(String host, X509Certificate cert) {
+        try {
+            Collection<List<?>> altNames = cert.getSubjectAlternativeNames();
+            if (altNames != null) {
+                for (List<?> entry : altNames) {
+                    if (entry == null || entry.size() < 2) continue;
+                    Object typeObj = entry.get(0);
+                    Object valueObj = entry.get(1);
+                    if (typeObj instanceof Integer && ((Integer) typeObj) == 2 && valueObj instanceof String) {
+                        String pattern = ((String) valueObj).toLowerCase(Locale.US);
+                        if (matchesHostnamePattern(host, pattern)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    private boolean matchesHostnamePattern(String host, String pattern) {
+        if (host == null || pattern == null || host.isEmpty() || pattern.isEmpty()) return false;
+        if (!pattern.contains("*")) {
+            return host.equals(pattern);
+        }
+        if (pattern.startsWith("*.") && pattern.indexOf('*', 1) < 0) {
+            String suffix = pattern.substring(1); // includes leading dot
+            if (!host.endsWith(suffix)) return false;
+            int prefixLen = host.length() - suffix.length();
+            return prefixLen > 0 && host.substring(0, prefixLen).indexOf('.') < 0;
+        }
+        return false;
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
-        styleHandler.post(styleRunnable);
+        if (isPageLoaded && styleRetryCount < MAX_STYLE_RETRIES) {
+            styleHandler.removeCallbacks(styleRunnable);
+            styleHandler.post(styleRunnable);
+        }
     }
 
     @Override
@@ -423,9 +577,22 @@ public class AuthWebViewActivity extends Activity {
     @Override
     protected void onDestroy() {
         styleHandler.removeCallbacks(styleRunnable);
+        if (activeDialog != null && activeDialog.isShowing()) {
+            try {
+                activeDialog.dismiss();
+            } catch (Exception ignored) {}
+            activeDialog = null;
+        }
         if (webView != null) {
-            webView.stopLoading();
-            webView.destroy();
+            try {
+                webView.stopLoading();
+                if (webView.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) webView.getParent()).removeView(webView);
+                }
+                webView.removeAllViews();
+                webView.destroy();
+            } catch (Throwable ignored) {}
+            webView = null;
         }
         super.onDestroy();
     }

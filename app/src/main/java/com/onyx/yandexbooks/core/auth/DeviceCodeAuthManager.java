@@ -47,8 +47,13 @@ public class DeviceCodeAuthManager {
     private final OkHttpClient httpClient;
     private final TokenStorage tokenStorage;
     private final Handler mainHandler;
-    private boolean isPollingActive = false;
-    private int pollAttempt = 0;
+    private final java.util.concurrent.atomic.AtomicBoolean isPollingActive =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+    private final java.util.concurrent.atomic.AtomicInteger pollAttempt =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+    private final java.util.concurrent.atomic.AtomicInteger pollGeneration =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+    private volatile Call activePollCall;
 
     public DeviceCodeAuthManager(TokenStorage tokenStorage) {
         this.httpClient = HttpClientFactory.getClient();
@@ -128,13 +133,14 @@ public class DeviceCodeAuthManager {
      */
     public void startPolling(final String deviceCode, final int intervalSeconds, final TokenCallback callback) {
         stopPolling();
-        isPollingActive = true;
-        pollAttempt = 0;
-        pollTokenStep(deviceCode, intervalSeconds, callback);
+        final int gen = pollGeneration.incrementAndGet();
+        isPollingActive.set(true);
+        pollAttempt.set(0);
+        pollTokenStep(deviceCode, intervalSeconds, gen, callback);
     }
 
-    private void pollTokenStep(final String deviceCode, final int intervalSeconds, final TokenCallback callback) {
-        if (!isPollingActive) {
+    private void pollTokenStep(final String deviceCode, final int intervalSeconds, final int gen, final TokenCallback callback) {
+        if (!isPollingActive.get() || gen != pollGeneration.get()) {
             return;
         }
 
@@ -150,16 +156,29 @@ public class DeviceCodeAuthManager {
                 .post(formBody)
                 .build();
 
-        httpClient.newCall(request).enqueue(new Callback() {
+        Call call = httpClient.newCall(request);
+        activePollCall = call;
+        call.enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-                scheduleNextPoll(deviceCode, intervalSeconds, callback);
+                if (!isPollingActive.get() || gen != pollGeneration.get()) return;
+                if (pollAttempt.incrementAndGet() > 60) {
+                    isPollingActive.set(false);
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            callback.onError("Время ожидания подтверждения истекло.");
+                        }
+                    });
+                } else {
+                    scheduleNextPoll(deviceCode, intervalSeconds, gen, callback);
+                }
             }
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
                 try {
-                    if (!isPollingActive) return;
+                    if (!isPollingActive.get() || gen != pollGeneration.get()) return;
                     String body = response.body() != null ? response.body().string() : "";
                     JSONObject json = new JSONObject(body);
 
@@ -169,7 +188,7 @@ public class DeviceCodeAuthManager {
                         final long expiresIn = json.optLong("expires_in", 31536000L);
 
                         tokenStorage.saveTokens(accessToken, refreshToken, expiresIn);
-                        isPollingActive = false;
+                        isPollingActive.set(false);
 
                         mainHandler.post(new Runnable() {
                             @Override
@@ -182,8 +201,7 @@ public class DeviceCodeAuthManager {
 
                     String error = json.optString("error", "");
                     if ("authorization_pending".equals(error) || "slow_down".equals(error)) {
-                        pollAttempt++;
-                        final int currentAttempt = pollAttempt;
+                        final int currentAttempt = pollAttempt.incrementAndGet();
                         mainHandler.post(new Runnable() {
                             @Override
                             public void run() {
@@ -194,9 +212,9 @@ public class DeviceCodeAuthManager {
                         if ("slow_down".equals(error)) {
                             nextInterval += 3;
                         }
-                        scheduleNextPoll(deviceCode, nextInterval, callback);
+                        scheduleNextPoll(deviceCode, nextInterval, gen, callback);
                     } else if ("expired_token".equals(error)) {
-                        isPollingActive = false;
+                        isPollingActive.set(false);
                         mainHandler.post(new Runnable() {
                             @Override
                             public void run() {
@@ -204,7 +222,7 @@ public class DeviceCodeAuthManager {
                             }
                         });
                     } else if ("access_denied".equals(error)) {
-                        isPollingActive = false;
+                        isPollingActive.set(false);
                         mainHandler.post(new Runnable() {
                             @Override
                             public void run() {
@@ -212,7 +230,7 @@ public class DeviceCodeAuthManager {
                             }
                         });
                     } else if ("invalid_grant".equals(error)) {
-                        isPollingActive = false;
+                        isPollingActive.set(false);
                         mainHandler.post(new Runnable() {
                             @Override
                             public void run() {
@@ -220,9 +238,8 @@ public class DeviceCodeAuthManager {
                             }
                         });
                     } else {
-                        pollAttempt++;
-                        if (pollAttempt > 60) {
-                            isPollingActive = false;
+                        if (pollAttempt.incrementAndGet() > 60) {
+                            isPollingActive.set(false);
                             mainHandler.post(new Runnable() {
                                 @Override
                                 public void run() {
@@ -230,11 +247,23 @@ public class DeviceCodeAuthManager {
                                 }
                             });
                         } else {
-                            scheduleNextPoll(deviceCode, intervalSeconds + 1, callback);
+                            scheduleNextPoll(deviceCode, intervalSeconds + 1, gen, callback);
                         }
                     }
                 } catch (Exception e) {
-                    scheduleNextPoll(deviceCode, intervalSeconds, callback);
+                    if (isPollingActive.get() && gen == pollGeneration.get()) {
+                        if (pollAttempt.incrementAndGet() > 60) {
+                            isPollingActive.set(false);
+                            mainHandler.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    callback.onError("Время ожидания истекло.");
+                                }
+                            });
+                        } else {
+                            scheduleNextPoll(deviceCode, intervalSeconds, gen, callback);
+                        }
+                    }
                 } finally {
                     if (response != null) {
                         try { response.close(); } catch (Throwable ignored) {}
@@ -244,18 +273,24 @@ public class DeviceCodeAuthManager {
         });
     }
 
-    private void scheduleNextPoll(final String deviceCode, final int intervalSeconds, final TokenCallback callback) {
-        if (!isPollingActive) return;
+    private void scheduleNextPoll(final String deviceCode, final int intervalSeconds, final int gen, final TokenCallback callback) {
+        if (!isPollingActive.get() || gen != pollGeneration.get()) return;
         mainHandler.postDelayed(new Runnable() {
             @Override
             public void run() {
-                pollTokenStep(deviceCode, intervalSeconds, callback);
+                pollTokenStep(deviceCode, intervalSeconds, gen, callback);
             }
         }, Math.max(intervalSeconds + 1, 6) * 1000L);
     }
 
     public void stopPolling() {
-        isPollingActive = false;
+        isPollingActive.set(false);
+        pollGeneration.incrementAndGet();
+        Call call = activePollCall;
+        activePollCall = null;
+        if (call != null) {
+            try { call.cancel(); } catch (Throwable ignored) {}
+        }
         mainHandler.removeCallbacksAndMessages(null);
     }
 }

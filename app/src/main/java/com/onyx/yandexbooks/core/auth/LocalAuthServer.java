@@ -97,20 +97,44 @@ public class LocalAuthServer {
 
     private void handleClient(Socket socket) {
         try {
-            BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8"));
+            socket.setSoTimeout(10000);
+            java.io.InputStream in = socket.getInputStream();
             OutputStream out = socket.getOutputStream();
 
-            String requestLine = reader.readLine();
-            if (requestLine == null) {
-                socket.close();
+            java.io.ByteArrayOutputStream headerBuf = new java.io.ByteArrayOutputStream(1024);
+            int b;
+            int crlfState = 0;
+            while (headerBuf.size() < 16384 && (b = in.read()) != -1) {
+                headerBuf.write(b);
+                if ((crlfState == 0 || crlfState == 2) && b == '\r') {
+                    crlfState++;
+                } else if ((crlfState == 1 || crlfState == 3) && b == '\n') {
+                    crlfState++;
+                    if (crlfState == 4) break;
+                } else {
+                    crlfState = (b == '\r') ? 1 : 0;
+                }
+            }
+            if (headerBuf.size() == 0) {
+                return;
+            }
+
+            String headerStr = headerBuf.toString("UTF-8");
+            String[] headerLines = headerStr.split("\\r?\\n");
+            String requestLine = headerLines.length > 0 ? headerLines[0] : "";
+            if (requestLine.isEmpty()) {
                 return;
             }
 
             int contentLength = 0;
-            String line;
-            while ((line = reader.readLine()) != null && !line.isEmpty()) {
+            for (int hi = 1; hi < headerLines.length; hi++) {
+                String line = headerLines[hi];
                 if (line.toLowerCase().startsWith("content-length:")) {
-                    contentLength = Integer.parseInt(line.substring(15).trim());
+                    try {
+                        contentLength = Integer.parseInt(line.substring(15).trim());
+                    } catch (NumberFormatException ignored) {
+                        contentLength = -1;
+                    }
                 }
             }
 
@@ -121,10 +145,15 @@ public class LocalAuthServer {
                 String query = (qIdx != -1) ? requestLine.substring(qIdx + 1) : "";
                 int spaceIdx = query.indexOf(' ');
                 if (spaceIdx != -1) query = query.substring(0, spaceIdx);
-                
+
                 String extractedToken = null;
                 if (!query.isEmpty()) {
-                    String decoded = URLDecoder.decode(query, "UTF-8");
+                    String decoded;
+                    try {
+                        decoded = URLDecoder.decode(query, "UTF-8");
+                    } catch (IllegalArgumentException ignored) {
+                        decoded = query;
+                    }
                     Matcher m = TOKEN_PATTERN.matcher(decoded);
                     if (m.find()) {
                         extractedToken = m.group();
@@ -132,19 +161,32 @@ public class LocalAuthServer {
                 }
                 handleExtractedToken(out, extractedToken);
             } else if (requestLine.startsWith("POST /save")) {
-                char[] bodyChars = new char[contentLength];
-                int read = reader.read(bodyChars, 0, contentLength);
-                String body = new String(bodyChars, 0, Math.max(0, read));
-                
-                String extractedToken = null;
-                if (!body.isEmpty()) {
-                    String decoded = URLDecoder.decode(body, "UTF-8");
-                    Matcher m = TOKEN_PATTERN.matcher(decoded);
-                    if (m.find()) {
-                        extractedToken = m.group();
+                if (contentLength < 0 || contentLength > 65536) {
+                    sendHtmlResponse(out, buildErrorHtmlPage());
+                } else {
+                    byte[] bodyBytes = new byte[contentLength];
+                    int offset = 0;
+                    while (offset < contentLength) {
+                        int r = in.read(bodyBytes, offset, contentLength - offset);
+                        if (r <= 0) break;
+                        offset += r;
                     }
+                    String body = new String(bodyBytes, 0, offset, "UTF-8");
+                    String extractedToken = null;
+                    if (!body.isEmpty()) {
+                        String decoded;
+                        try {
+                            decoded = URLDecoder.decode(body, "UTF-8");
+                        } catch (IllegalArgumentException ignored) {
+                            decoded = body;
+                        }
+                        Matcher m = TOKEN_PATTERN.matcher(decoded);
+                        if (m.find()) {
+                            extractedToken = m.group();
+                        }
+                    }
+                    handleExtractedToken(out, extractedToken);
                 }
-                handleExtractedToken(out, extractedToken);
             } else if (requestLine.startsWith("GET /")) {
                 sendHtmlResponse(out, buildAuthHtmlPage());
             } else {
@@ -152,9 +194,10 @@ public class LocalAuthServer {
             }
 
             out.flush();
-            socket.close();
         } catch (Exception e) {
             Log.e(TAG, "Error handling client request", e);
+        } finally {
+            try { socket.close(); } catch (Exception ignored) {}
         }
     }
 

@@ -2,14 +2,20 @@ package com.onyx.yandexbooks.ui;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.Window;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -24,7 +30,9 @@ import com.onyx.yandexbooks.core.auth.TokenStorage;
 import com.onyx.yandexbooks.core.eink.EinkScrollView;
 import com.onyx.yandexbooks.core.eink.EpdController;
 import com.onyx.yandexbooks.core.network.HttpClientFactory;
+import com.onyx.yandexbooks.core.storage.AppSettings;
 import com.onyx.yandexbooks.core.ui.EinkNotice;
+import com.onyx.yandexbooks.core.ui.UiScaleHelper;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -33,6 +41,7 @@ import java.util.Random;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import okhttp3.Call;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -50,6 +59,7 @@ public class AuthActivity extends Activity {
 
     private static final String TAG = "AuthActivity";
     private static final int REQUEST_WEBVIEW = 1002;
+    private static final int REQUEST_READ_STORAGE = 1003;
     private static final Pattern TOKEN_REGEX = Pattern.compile("y0_[A-Za-z0-9_-]{15,}");
 
     private EinkScrollView authScrollView;
@@ -63,18 +73,34 @@ public class AuthActivity extends Activity {
 
     private TokenStorage tokenStorage;
     private LocalAuthServer localAuthServer;
+    private boolean localServerStarted = false;
+    private AlertDialog activeDialog;
 
     private String cloudSessionId;
     private Thread cloudPollThread;
+    private volatile Call activeCloudCall;
     private volatile boolean isCloudPolling = false;
 
     private static final String BOOKMATE_CLIENT_ID = "4483e97bab6e486a9822973109a14d05";
     private static final String DIRECT_AUTH_URL = "https://oauth.yandex.ru/authorize?response_type=token&client_id=" + BOOKMATE_CLIENT_ID + "&force_confirm=yes";
 
     @Override
+    protected void attachBaseContext(Context newBase) {
+        AppSettings settings = new AppSettings(newBase);
+        super.attachBaseContext(UiScaleHelper.wrapBaseContext(newBase, settings.getUiScale()));
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        AppSettings settings = new AppSettings(this);
+        UiScaleHelper.applyScale(this, settings.getUiScale());
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
-        com.onyx.yandexbooks.core.storage.AppSettings settings = new com.onyx.yandexbooks.core.storage.AppSettings(this);
-        com.onyx.yandexbooks.core.ui.UiScaleHelper.applyScale(this, settings.getUiScale());
+        AppSettings settings = new AppSettings(this);
+        UiScaleHelper.applyScale(this, settings.getUiScale());
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_auth);
 
@@ -102,6 +128,10 @@ public class AuthActivity extends Activity {
         btnImportFile.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                if (!hasStorageReadPermission()) {
+                    requestStoragePermission();
+                    return;
+                }
                 if (!tryImportTokenFromFile()) {
                     showFileNotFoundDialog();
                 }
@@ -128,17 +158,17 @@ public class AuthActivity extends Activity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        if (event.getAction() == KeyEvent.ACTION_DOWN && authScrollView != null) {
-            int keyCode = event.getKeyCode();
-            if (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-                if (authScrollView.pageScrollEink(true)) {
-                    return true;
-                }
-            } else if (keyCode == KeyEvent.KEYCODE_PAGE_UP || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-                if (authScrollView.pageScrollEink(false)) {
-                    return true;
-                }
+        int keyCode = event.getKeyCode();
+        boolean isPageOrVolume = keyCode == KeyEvent.KEYCODE_PAGE_DOWN
+                || keyCode == KeyEvent.KEYCODE_PAGE_UP
+                || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+                || keyCode == KeyEvent.KEYCODE_VOLUME_UP;
+        if (isPageOrVolume) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0 && authScrollView != null) {
+                boolean down = (keyCode == KeyEvent.KEYCODE_PAGE_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN);
+                authScrollView.pageScrollEink(down);
             }
+            return true;
         }
         return super.dispatchKeyEvent(event);
     }
@@ -150,7 +180,7 @@ public class AuthActivity extends Activity {
                 onAuthSuccess(token, "Локальный Wi-Fi мост");
             }
         });
-        localAuthServer.start();
+        localServerStarted = localAuthServer.start();
     }
 
     private void startAuthorizationFlow() {
@@ -163,7 +193,11 @@ public class AuthActivity extends Activity {
         final String localIp = LocalAuthServer.getLocalIpAddress();
         if (localIp != null) {
             localUrlTextView.setText(cloudUrl);
-            statusTextView.setText("Интернет-мост: активен | Локальный Wi-Fi: " + localIp + ":8888\nОжидание подтверждения со смартфона...");
+            if (localServerStarted) {
+                statusTextView.setText("Интернет-мост: активен | Локальный Wi-Fi: " + localIp + ":8888\nОжидание подтверждения со смартфона...");
+            } else {
+                statusTextView.setText("Интернет-мост: активен | Локальный Wi-Fi: порт 8888 занят\nОжидание подтверждения со смартфона...");
+            }
         } else {
             localUrlTextView.setText(cloudUrl);
             statusTextView.setText("Подключите Wi-Fi на устройстве для облачного входа\nили используйте импорт из файла / ручной ввод.");
@@ -210,9 +244,13 @@ public class AuthActivity extends Activity {
                             .post(body)
                             .build();
 
-                    Response response = client.newCall(request).execute();
-                    if (response.body() != null) {
-                        response.body().close();
+                    Response response = null;
+                    try {
+                        response = client.newCall(request).execute();
+                    } finally {
+                        if (response != null) {
+                            response.close();
+                        }
                     }
                     Log.i(TAG, "Posted JSON welcome notice to cloud relay: " + topic);
                 } catch (Exception e) {
@@ -231,22 +269,28 @@ public class AuthActivity extends Activity {
                 String pollUrl = "https://ntfy.sh/" + topic + "/raw?poll=1&since=all";
                 Log.i(TAG, "Starting cloud relay poll on " + pollUrl);
 
-                while (isCloudPolling) {
+                while (isCloudPolling && !Thread.currentThread().isInterrupted()) {
+                    Response response = null;
                     try {
                         Request request = new Request.Builder()
                                 .url(pollUrl)
                                 .get()
                                 .build();
-                        Response response = client.newCall(request).execute();
+                        Call call = client.newCall(request);
+                        activeCloudCall = call;
+                        response = call.execute();
                         if (response.isSuccessful() && response.body() != null) {
                             String body = response.body().string().trim();
                             if (!body.isEmpty()) {
                                 final String token = extractToken(body);
                                 if (token != null) {
+                                    isCloudPolling = false;
                                     runOnUiThread(new Runnable() {
                                         @Override
                                         public void run() {
-                                            onAuthSuccess(token, "Облачный интернет-мост");
+                                            if (!isFinishing()) {
+                                                onAuthSuccess(token, "Облачный интернет-мост");
+                                            }
                                         }
                                     });
                                     break;
@@ -255,8 +299,16 @@ public class AuthActivity extends Activity {
                         }
                     } catch (Exception e) {
                         Log.d(TAG, "Cloud poll tick: " + e.getMessage());
+                    } finally {
+                        activeCloudCall = null;
+                        if (response != null) {
+                            response.close();
+                        }
                     }
 
+                    if (!isCloudPolling) {
+                        break;
+                    }
                     try {
                         Thread.sleep(3000);
                     } catch (InterruptedException e) {
@@ -271,6 +323,13 @@ public class AuthActivity extends Activity {
 
     private void stopCloudPolling() {
         isCloudPolling = false;
+        Call call = activeCloudCall;
+        activeCloudCall = null;
+        if (call != null) {
+            try {
+                call.cancel();
+            } catch (Exception ignored) {}
+        }
         if (cloudPollThread != null) {
             cloudPollThread.interrupt();
             cloudPollThread = null;
@@ -306,14 +365,14 @@ public class AuthActivity extends Activity {
 
         for (File file : candidates) {
             if (file.exists() && file.canRead()) {
+                BufferedReader br = null;
                 try {
-                    BufferedReader br = new BufferedReader(new FileReader(file));
+                    br = new BufferedReader(new FileReader(file));
                     StringBuilder sb = new StringBuilder();
                     String line;
                     while ((line = br.readLine()) != null) {
                         sb.append(line).append(" ");
                     }
-                    br.close();
 
                     String token = extractToken(sb.toString());
                     if (token != null) {
@@ -322,10 +381,68 @@ public class AuthActivity extends Activity {
                     }
                 } catch (Exception e) {
                     Log.e(TAG, "Failed to read token file: " + file.getAbsolutePath(), e);
+                } finally {
+                    if (br != null) {
+                        try {
+                            br.close();
+                        } catch (Exception ignored) {}
+                    }
                 }
             }
         }
         return false;
+    }
+
+    private boolean hasStorageReadPermission() {
+        if (Build.VERSION.SDK_INT < 23) {
+            return true;
+        }
+        try {
+            java.lang.reflect.Method checkSelf = Context.class.getMethod("checkSelfPermission", String.class);
+            Object res = checkSelf.invoke(this, "android.permission.READ_EXTERNAL_STORAGE");
+            return res instanceof Integer && ((Integer) res) == PackageManager.PERMISSION_GRANTED;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    private void requestStoragePermission() {
+        if (Build.VERSION.SDK_INT >= 23) {
+            try {
+                java.lang.reflect.Method reqPerms = Activity.class.getMethod("requestPermissions", String[].class, int.class);
+                reqPerms.invoke(this, new Object[]{new String[]{"android.permission.READ_EXTERNAL_STORAGE"}, REQUEST_READ_STORAGE});
+            } catch (Throwable t) {
+                Log.w(TAG, "Failed to request storage permission: " + t.getMessage());
+            }
+        }
+    }
+
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        if (requestCode == REQUEST_READ_STORAGE) {
+            if (grantResults != null && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                if (!tryImportTokenFromFile()) {
+                    showFileNotFoundDialog();
+                }
+            } else {
+                EinkNotice.show(this, "Нет доступа к памяти", "Разрешите доступ к хранилищу, чтобы прочитать yandex_token.txt.");
+            }
+        }
+    }
+
+    private void showCleanDialog(AlertDialog.Builder builder) {
+        if (isFinishing()) return;
+        if (activeDialog != null && activeDialog.isShowing()) {
+            try {
+                activeDialog.dismiss();
+            } catch (Exception ignored) {}
+        }
+        AlertDialog dialog = builder.create();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        }
+        activeDialog = dialog;
+        dialog.show();
     }
 
     private void showFileNotFoundDialog() {
@@ -336,7 +453,7 @@ public class AuthActivity extends Activity {
                 "3. Нажмите кнопку «Загрузить токен из файла» снова.\n\n" +
                 "Либо воспользуйтесь кнопкой «Войти на этом устройстве».");
         builder.setPositiveButton("Понятно", null);
-        builder.show();
+        showCleanDialog(builder);
     }
 
     @Override
@@ -373,7 +490,7 @@ public class AuthActivity extends Activity {
             }
         });
         builder.setNegativeButton(R.string.btn_cancel, null);
-        builder.show();
+        showCleanDialog(builder);
     }
 
     private String extractToken(String text) {
@@ -439,11 +556,17 @@ public class AuthActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
         stopCloudPolling();
+        if (activeDialog != null && activeDialog.isShowing()) {
+            try {
+                activeDialog.dismiss();
+            } catch (Exception ignored) {}
+            activeDialog = null;
+        }
         if (localAuthServer != null) {
             localAuthServer.stop();
             localAuthServer = null;
         }
+        super.onDestroy();
     }
 }
