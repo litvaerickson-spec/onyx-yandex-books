@@ -86,13 +86,45 @@ public class YandexBooksApiClient {
     }
 
     private final OkHttpClient httpClient;
+    private final OkHttpClient downloadHttpClient;
     private final TokenStorage tokenStorage;
     private final Handler mainHandler;
 
     public YandexBooksApiClient(TokenStorage tokenStorage) {
         this.httpClient = HttpClientFactory.getClient();
+        this.downloadHttpClient = this.httpClient.newBuilder()
+                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(25, java.util.concurrent.TimeUnit.SECONDS)
+                .writeTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+                .build();
         this.tokenStorage = tokenStorage;
         this.mainHandler = new Handler(Looper.getMainLooper());
+    }
+
+    /**
+     * Отменяет все активные и ожидающие HTTP-запросы загрузки конкретной книги.
+     */
+    public void cancelBookDownloads(String bookUuid) {
+        if (bookUuid == null || bookUuid.isEmpty()) return;
+        String targetTag = "dl:" + bookUuid;
+        cancelTaggedCalls(downloadHttpClient, targetTag);
+        cancelTaggedCalls(httpClient, targetTag);
+    }
+
+    private static void cancelTaggedCalls(OkHttpClient client, String targetTag) {
+        if (client == null || targetTag == null) return;
+        try {
+            for (Call call : client.dispatcher().queuedCalls()) {
+                if (targetTag.equals(call.request().tag())) {
+                    call.cancel();
+                }
+            }
+            for (Call call : client.dispatcher().runningCalls()) {
+                if (targetTag.equals(call.request().tag())) {
+                    call.cancel();
+                }
+            }
+        } catch (Throwable ignored) {}
     }
 
     private long currentAuthEpoch() {
@@ -873,13 +905,28 @@ public class YandexBooksApiClient {
         String mappedShelf;
         if (isUploadedUserBook) {
             mappedShelf = "user_books";
-        } else if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state) || "completed".equalsIgnoreCase(state) || "done".equalsIgnoreCase(state) || pr.percent >= 99.5) {
-            mappedShelf = "done";
-            if (pr.percent >= 99.0) pr.percent = 100.0;
-        } else if ("reading".equalsIgnoreCase(state) || (pr.percent > 0.0 && pr.percent < 99.5)) {
-            mappedShelf = "reading";
         } else if ("want_to_read".equalsIgnoreCase(state) || "to_read".equalsIgnoreCase(state) || "planned".equalsIgnoreCase(state)) {
             mappedShelf = "to_read";
+            // Если карточка на сервере явно в «В планах», остаточный 100% от прошлого чтения не имеет права
+            // перекидывать её обратно в «Прочитано»
+            if (pr.percent >= 99.0) {
+                pr.percent = 0.0;
+                pr.chapterIndex = 0;
+                pr.paragraphIndex = 0;
+            }
+        } else if ("finished".equalsIgnoreCase(state) || "read".equalsIgnoreCase(state) || "completed".equalsIgnoreCase(state) || "done".equalsIgnoreCase(state)) {
+            mappedShelf = "done";
+            if (pr.percent >= 99.0) pr.percent = 100.0;
+        } else if ("reading".equalsIgnoreCase(state)) {
+            mappedShelf = "reading";
+            if (pr.percent >= 99.5 && pr.chapterIndex == 0) {
+                pr.percent = 0.0;
+            }
+        } else if (pr.percent >= 99.5 && pr.chapterIndex > 0) {
+            mappedShelf = "done";
+            pr.percent = 100.0;
+        } else if (pr.percent > 0.0 && pr.percent < 99.5) {
+            mappedShelf = "reading";
         } else {
             mappedShelf = "to_read";
         }
@@ -1799,25 +1846,36 @@ public class YandexBooksApiClient {
     }
 
     public void downloadBookEpub(final String bookUuid, final String directFileUrl, final File destFile, final ApiCallback<File> callback) {
+        final String dlTag = "dl:" + bookUuid;
         if (directFileUrl != null && !directFileUrl.trim().isEmpty()) {
             Request directReq = createAuthRequestBuilder(directFileUrl.trim())
                     .header("Accept", "*/*")
+                    .tag(dlTag)
                     .get()
                     .build();
-            httpClient.newCall(directReq).enqueue(new Callback() {
+            downloadHttpClient.newCall(directReq).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
+                    if (call.isCanceled()) {
+                        postError(callback, "Загрузка отменена");
+                        return;
+                    }
                     attemptDownloadBookEpub(bookUuid, destFile, callback, false);
                 }
 
                 @Override
                 public void onResponse(Call call, Response response) throws IOException {
+                    if (call.isCanceled()) {
+                        response.close();
+                        postError(callback, "Загрузка отменена");
+                        return;
+                    }
                     if (!response.isSuccessful()) {
                         response.close();
                         attemptDownloadBookEpub(bookUuid, destFile, callback, false);
                         return;
                     }
-                    saveResponseBodyToFile(response, destFile, callback, new Runnable() {
+                    saveResponseBodyToFile(bookUuid, response, destFile, callback, new Runnable() {
                         @Override
                         public void run() {
                             attemptDownloadBookEpub(bookUuid, destFile, callback, false);
@@ -1834,17 +1892,27 @@ public class YandexBooksApiClient {
         String urlV4 = BASE_URL + "/books/" + bookUuid + "/content/v4";
         Request request = createAuthRequestBuilder(urlV4)
                 .header("Accept", "*/*")
+                .tag("dl:" + bookUuid)
                 .get()
                 .build();
 
-        httpClient.newCall(request).enqueue(new Callback() {
+        downloadHttpClient.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
+                if (call.isCanceled()) {
+                    postError(callback, "Загрузка отменена");
+                    return;
+                }
                 downloadBookEpubFallback(bookUuid, destFile, callback, e.getMessage(), isRetryAfterAdd);
             }
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
+                if (call.isCanceled()) {
+                    response.close();
+                    postError(callback, "Загрузка отменена");
+                    return;
+                }
                 if (!response.isSuccessful()) {
                     int code = response.code();
                     response.close();
@@ -1852,7 +1920,7 @@ public class YandexBooksApiClient {
                     return;
                 }
 
-                saveResponseBodyToFile(response, destFile, callback, new Runnable() {
+                saveResponseBodyToFile(bookUuid, response, destFile, callback, new Runnable() {
                     @Override
                     public void run() {
                         downloadBookEpubFallback(bookUuid, destFile, callback, "v4 вернул некорректный файл", isRetryAfterAdd);
@@ -1863,9 +1931,13 @@ public class YandexBooksApiClient {
     }
 
     private void downloadBookEpubFallback(final String bookUuid, final File destFile, final ApiCallback<File> callback, final String initialError, final boolean isRetryAfterAdd) {
-        if (!isRetryAfterAdd) {
-            // Если ошибка (например 403 Forbidden при отсутствии карточки в библиотеке),
-            // регистрируем книгу в профиле пользователя и повторяем запрос
+        boolean isAuthOrCardHttpError = initialError != null
+                && (initialError.contains("HTTP 401") || initialError.contains("HTTP 403")
+                || initialError.contains("HTTP 404") || initialError.contains("HTTP 422"));
+        if (!isRetryAfterAdd && isAuthOrCardHttpError) {
+            // При HTTP 401/403/404/422 (например отсутствует карточка в библиотеке)
+            // регистрируем книгу в профиле пользователя и повторяем запрос.
+            // При сетевом таймауте НЕ тратим время на лишний addBookToLibrary!
             addBookToLibrary(bookUuid, new ApiCallback<Boolean>() {
                 @Override
                 public void onSuccess(Boolean result) {
@@ -1887,24 +1959,34 @@ public class YandexBooksApiClient {
         String fallbackUrl = BASE_URL + "/books/" + bookUuid + "/content";
         Request request = createAuthRequestBuilder(fallbackUrl)
                 .header("Accept", "*/*")
+                .tag("dl:" + bookUuid)
                 .get()
                 .build();
 
-        httpClient.newCall(request).enqueue(new Callback() {
+        downloadHttpClient.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
+                if (call.isCanceled()) {
+                    postError(callback, "Загрузка отменена");
+                    return;
+                }
                 tryFileEndpoint(bookUuid, destFile, callback, initialError + " -> " + e.getMessage());
             }
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
+                if (call.isCanceled()) {
+                    response.close();
+                    postError(callback, "Загрузка отменена");
+                    return;
+                }
                 if (!response.isSuccessful()) {
                     int code = response.code();
                     response.close();
                     tryFileEndpoint(bookUuid, destFile, callback, initialError + " -> HTTP " + code);
                     return;
                 }
-                saveResponseBodyToFile(response, destFile, callback, new Runnable() {
+                saveResponseBodyToFile(bookUuid, response, destFile, callback, new Runnable() {
                     @Override
                     public void run() {
                         tryFileEndpoint(bookUuid, destFile, callback, initialError + " -> content returned non-epub");
@@ -1918,29 +2000,39 @@ public class YandexBooksApiClient {
         String fileUrl = BASE_URL + "/books/" + bookUuid + "/file";
         Request request = createAuthRequestBuilder(fileUrl)
                 .header("Accept", "*/*")
+                .tag("dl:" + bookUuid)
                 .get()
                 .build();
 
-        httpClient.newCall(request).enqueue(new Callback() {
+        downloadHttpClient.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
+                if (call.isCanceled()) {
+                    postError(callback, "Загрузка отменена");
+                    return;
+                }
                 postError(callback, "Ошибка загрузки книги: " + initialError + " -> " + e.getMessage());
             }
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
+                if (call.isCanceled()) {
+                    response.close();
+                    postError(callback, "Загрузка отменена");
+                    return;
+                }
                 if (!response.isSuccessful()) {
                     int code = response.code();
                     response.close();
                     postError(callback, "Ошибка скачивания книги: " + initialError + " -> HTTP " + code);
                     return;
                 }
-                saveResponseBodyToFile(response, destFile, callback, null);
+                saveResponseBodyToFile(bookUuid, response, destFile, callback, null);
             }
         });
     }
 
-    private void saveResponseBodyToFile(Response response, final File destFile, final ApiCallback<File> callback, final Runnable onFallback) {
+    private void saveResponseBodyToFile(final String bookUuid, Response response, final File destFile, final ApiCallback<File> callback, final Runnable onFallback) {
         try {
             String contentType = response.header("Content-Type", "");
             if (contentType != null && (contentType.contains("json") || contentType.contains("html"))) {
@@ -1964,11 +2056,16 @@ public class YandexBooksApiClient {
                         Request redirReq = new Request.Builder()
                                 .url(redirectUrl)
                                 .header("User-Agent", "okhttp/3.12.13")
+                                .tag("dl:" + bookUuid)
                                 .get()
                                 .build();
-                        httpClient.newCall(redirReq).enqueue(new Callback() {
+                        downloadHttpClient.newCall(redirReq).enqueue(new Callback() {
                             @Override
                             public void onFailure(Call call, IOException e) {
+                                if (call.isCanceled()) {
+                                    postError(callback, "Загрузка отменена");
+                                    return;
+                                }
                                 if (onFallback != null) {
                                     onFallback.run();
                                 } else {
@@ -1978,6 +2075,11 @@ public class YandexBooksApiClient {
 
                             @Override
                             public void onResponse(Call call, Response redirResp) throws IOException {
+                                if (call.isCanceled()) {
+                                    redirResp.close();
+                                    postError(callback, "Загрузка отменена");
+                                    return;
+                                }
                                 if (!redirResp.isSuccessful()) {
                                     int code = redirResp.code();
                                     redirResp.close();
@@ -1988,7 +2090,7 @@ public class YandexBooksApiClient {
                                     }
                                     return;
                                 }
-                                saveResponseBodyToFile(redirResp, destFile, callback, onFallback);
+                                saveResponseBodyToFile(bookUuid, redirResp, destFile, callback, onFallback);
                             }
                         });
                         return;

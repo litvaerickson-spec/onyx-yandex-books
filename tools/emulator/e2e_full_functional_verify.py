@@ -277,6 +277,10 @@ def _match_api17_res_id(attrs, res_id_contains):
         return cls.endswith("TextView") and int(SCREEN_H * 0.55) < mid_y < int(SCREEN_H * 0.90) and len(text) > 1
     if res_id_contains == "reader_format_scroll":
         return attrs.get("scrollable") == "true" and mid_y > int(SCREEN_H * 0.35)
+    if res_id_contains == "btn_close_format_panel":
+        return text in ("✕", "×") or "Свернуть формат" in (attrs.get("content-desc") or "")
+    if res_id_contains == "reader_top_bar":
+        return rect is not None and rect[1] <= int(SCREEN_H * 0.08) and rect[3] <= int(SCREEN_H * 0.22) and (rect[2] - rect[0]) >= int(SCREEN_W * 0.85)
     return False
 
 
@@ -1218,9 +1222,26 @@ def step_5_reader_links_footnotes_toc_bookmarks_quotes(args):
     print("[quotes] Forward + Reverse selection, export & delete CRUD verified: OK")
     tap_node(find_node(dump_ui(), text_equals="Закрыть", clickable_only=True), "Close Quotes dialog")
 
-    # Test Format rows: indent, edge brightness toggle (+ dismiss notice + restore), audio sync row, progress tab Sync, refresh, and back
+    # Test Format rows: verify non-overlapping layout (Bug 1), indent, edge brightness, audio sync, close button (✕)
     tap_node(find_node(dump_ui(), res_id_contains="btn_tab_format"), "Tab Формат")
-    tap_node(wait_for_node(res_id_contains="row_toggle_indent", timeout=6)[1], "Toggle Indent")
+    root_fmt, fmt_row = wait_for_node(res_id_contains="row_toggle_indent", timeout=6)
+    back_node_fmt = find_node(root_fmt, res_id_contains="btn_reader_back")
+    close_fmt_btn = find_node(root_fmt, res_id_contains="btn_close_format_panel")
+    if not back_node_fmt:
+        raise AssertionError("reader_top_bar / btn_reader_back was covered or missing when Format panel opened!")
+    if not close_fmt_btn:
+        raise AssertionError("btn_close_format_panel (✕) missing when Format panel opened!")
+    r_top_btn = parse_rect(back_node_fmt.get("bounds"))
+    r_close_fmt = parse_rect(close_fmt_btn.get("bounds"))
+    if r_top_btn and r_close_fmt:
+        visible_canvas_gap = r_close_fmt[1] - r_top_btn[3]
+        print(f"[format_layout] top_bar_bottom={r_top_btn[3]}px, format_subtabs_top={r_close_fmt[1]}px, visible_canvas_gap={visible_canvas_gap}px")
+        if visible_canvas_gap < 40:
+            raise AssertionError(
+                f"Format panel overlapped or left no visible canvas! gap={visible_canvas_gap}px "
+                f"(top_bottom={r_top_btn[3]}, format_top={r_close_fmt[1]})"
+            )
+    tap_node(fmt_row, "Toggle Indent")
     tap_node(wait_for_node(res_id_contains="row_toggle_edge_brightness", timeout=6)[1], "Toggle Edge Brightness OFF")
     time.sleep(0.5)
     dismiss_notices(include_close=False)
@@ -1241,6 +1262,13 @@ def step_5_reader_links_footnotes_toc_bookmarks_quotes(args):
     time.sleep(0.6)
     dismiss_notices(include_close=False)
 
+    # Close Format panel cleanly using dedicated ✕ button (no hardware Back needed!)
+    tap_node(wait_for_node(res_id_contains="btn_close_format_panel", timeout=6)[1], "Close Format panel via ✕")
+    time.sleep(0.5)
+    if find_node(dump_ui(), res_id_contains="row_toggle_indent"):
+        raise AssertionError("Format panel did not collapse after tapping btn_close_format_panel (✕)!")
+    print("[format_layout] Format panel non-overlapping canvas + ✕ close button verified: OK")
+
     # Tab Прогресс: opens 'Прогресс чтения' dialog -> tap Синхронизировать -> dismiss -> close dialog
     tap_node(wait_for_node(res_id_contains="btn_tab_progress", timeout=6)[1], "Tab Прогресс")
     wait_for_node(text_contains="Прогресс чтения", timeout=6)
@@ -1252,16 +1280,55 @@ def step_5_reader_links_footnotes_toc_bookmarks_quotes(args):
         tap_node(close_prog, "Close Прогресс чтения dialog")
         time.sleep(0.5)
 
-    # Bottom overlay slider controls + header refresh + back
-    tap_node(wait_for_node(res_id_contains="btn_slider_page_forward", timeout=6)[1], "Slider Forward >")
+    # Bottom overlay slider controls + header refresh + advance 2 pages and verify persistence on exit & reopen (Bug 4)
+    tap_node(wait_for_node(res_id_contains="btn_slider_page_forward", timeout=6)[1], "Slider Forward > (1)")
+    tap_node(wait_for_node(res_id_contains="btn_slider_page_forward", timeout=6)[1], "Slider Forward > (2)")
     tap_node(wait_for_node(res_id_contains="btn_slider_page_back", timeout=6)[1], "Slider Back <")
     tap_node(wait_for_node(res_id_contains="btn_reader_refresh", timeout=6)[1], "Header Refresh E-Ink")
-    time.sleep(0.5)
+    time.sleep(0.6)
 
-    # Exit Reader -> MainActivity
-    tap_node(wait_for_node(res_id_contains="btn_reader_back", timeout=6)[1], "Reader Back")
+    # Exit Reader -> MainActivity -> immediately reopen -> verify saved chapter & page preserved!
+    tap_node(wait_for_node(res_id_contains="btn_reader_back", timeout=6)[1], "Reader Back (save progress)")
     wait_for_node(res_id_contains="btn_main_menu", timeout=12)
-    print("[reader] All interactive reader buttons & dialogs verified cleanly: OK")
+    time.sleep(1.0)
+
+    db_remote = f"/data/data/{PKG}/databases/yandex_books_lite.db"
+    db_local = os.path.join(args.artifacts, f".tmp_{args.tag}_prog_check.sqlite")
+    for ext in ("", "-wal", "-shm", "-journal"):
+        if os.path.exists(db_local + ext):
+            os.remove(db_local + ext)
+    adb("pull", db_remote, db_local, timeout=20)
+    for ext in ("-wal", "-shm", "-journal"):
+        adb("pull", db_remote + ext, db_local + ext, check=False, timeout=10)
+    conn_p = sqlite3.connect(db_local)
+    try:
+        row_p = conn_p.execute(
+            "SELECT chapter_index, page_index, percent FROM progress WHERE book_uuid = ?",
+            (MAIN_BOOK_UUID,),
+        ).fetchone()
+    finally:
+        conn_p.close()
+        for ext in ("", "-wal", "-shm", "-journal"):
+            if os.path.exists(db_local + ext):
+                os.remove(db_local + ext)
+    print(f"[progress_persist] Saved SQLite progress on exit: {row_p}")
+    if not row_p or (row_p[0] == 0 and row_p[1] == 0):
+        raise AssertionError(f"Progress was NOT saved on Reader exit! row={row_p}")
+    saved_ch, saved_pg = row_p[0], row_p[1]
+
+    # Immediately reopen the same book and verify page/chapter is restored (not snapped back to 0!)
+    tap_node(find_all_nodes(dump_ui(), text_equals="Читать")[0], "Reopen Полный Тест Функционала (Bug 4 check)")
+    wait_for_node(res_id_contains="reader_canvas", timeout=20)
+    time.sleep(2.0)
+    open_reader_overlay(sw, sh)
+    ov_reopen, ch_reopen = wait_for_node(res_id_contains="reader_chapter_title_view", timeout=6)
+    ch_reopen_txt = (ch_reopen.get("text") or "").strip()
+    print(f"[progress_persist] Reopened overlay chapter='{ch_reopen_txt}' (saved ch={saved_ch}, page={saved_pg})")
+    if saved_ch >= 1 and "Глава 1" in ch_reopen_txt and "Глава 2" not in ch_reopen_txt:
+        raise AssertionError(f"Reopened book snapped back to Глава 1 instead of saved ch={saved_ch}!")
+    tap_node(wait_for_node(res_id_contains="btn_reader_back", timeout=6)[1], "Reader Back (after reopen check)")
+    wait_for_node(res_id_contains="btn_main_menu", timeout=12)
+    print("[reader] All interactive reader buttons, Format non-overlap & progress persistence verified cleanly: OK")
 
 
 def step_6_logout_and_cleanup_verification(args):

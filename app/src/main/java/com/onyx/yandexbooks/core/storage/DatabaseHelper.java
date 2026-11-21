@@ -106,6 +106,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 try { schemaCur.close(); } catch (Throwable ignored) {}
             }
         }
+        ensureHiddenBooksTable(db);
+        ensureBookResetOverridesTable(db);
     }
 
     private void createTables(SQLiteDatabase db) {
@@ -206,6 +208,66 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     "removed_at INTEGER" +
                     ")");
         } catch (Exception ignored) {}
+    }
+
+    private void ensureBookResetOverridesTable(SQLiteDatabase db) {
+        try {
+            db.execSQL("CREATE TABLE IF NOT EXISTS book_reset_overrides (" +
+                    "uuid TEXT PRIMARY KEY," +
+                    "reset_ts INTEGER," +
+                    "target_shelf TEXT" +
+                    ")");
+        } catch (Exception ignored) {}
+    }
+
+    private void recordBookResetOverrideInternal(SQLiteDatabase db, String uuid, String targetShelf, long ts) {
+        if (db == null || uuid == null || uuid.isEmpty()) return;
+        try {
+            ensureBookResetOverridesTable(db);
+            ContentValues ov = new ContentValues();
+            ov.put("uuid", uuid);
+            ov.put("reset_ts", ts > 0L ? ts : System.currentTimeMillis());
+            ov.put("target_shelf", targetShelf != null ? targetShelf : "to_read");
+            db.insertWithOnConflict("book_reset_overrides", null, ov, SQLiteDatabase.CONFLICT_REPLACE);
+        } catch (Exception ignored) {}
+    }
+
+    private void clearBookResetOverrideInternal(SQLiteDatabase db, String uuid) {
+        if (db == null || uuid == null || uuid.isEmpty()) return;
+        try {
+            ensureBookResetOverridesTable(db);
+            db.delete("book_reset_overrides", "uuid = ?", new String[]{uuid});
+        } catch (Exception ignored) {}
+    }
+
+    private long getBookResetOverrideTimestampInternal(SQLiteDatabase db, String uuid) {
+        if (db == null || uuid == null || uuid.isEmpty()) return 0L;
+        Cursor c = null;
+        try {
+            if (!db.isReadOnly()) {
+                ensureBookResetOverridesTable(db);
+            }
+            c = db.rawQuery("SELECT reset_ts FROM book_reset_overrides WHERE uuid = ?", new String[]{uuid});
+            if (c != null && c.moveToFirst()) {
+                return c.getLong(0);
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
+        }
+        return 0L;
+    }
+
+    public synchronized long getBookResetOverrideTimestamp(String uuid) {
+        if (uuid == null || uuid.isEmpty()) return 0L;
+        SQLiteDatabase db = getReadableDatabase();
+        return getBookResetOverrideTimestampInternal(db, uuid);
+    }
+
+    public synchronized void clearBookResetOverride(String uuid) {
+        if (uuid == null || uuid.isEmpty()) return;
+        SQLiteDatabase db = getWritableDatabase();
+        clearBookResetOverrideInternal(db, uuid);
     }
 
     private void ensureQuotesTable(SQLiteDatabase db) {
@@ -446,8 +508,17 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             }
 
             boolean hasLocalProgress = hasLocalRecord && (bestLocalPercent > 0.0 || bestLocalCh > 0 || bestLocalTs > 0);
-            boolean wasJustResetLocally = "to_read".equals(localShelfType) && bestLocalPercent <= 0.0 && bestLocalTs > 0 && (cloudTimestamp <= 0 || bestLocalTs > cloudTimestamp);
-            boolean cloudPercentValid = book.getPercent() > 0.0 && !(book.getPercent() >= 99.0 && book.getCurrentChapterIndex() == 0 && !"done".equals(book.getShelfType()));
+            long resetOverrideTs = getBookResetOverrideTimestampInternal(db, book.getUuid());
+            boolean cloudIsFinishedOrFull = "done".equals(book.getShelfType()) || book.getPercent() >= 99.0;
+            // Защита от возврата в «Прочитано» (100%) после ручного сброса или переноса книги пользователем:
+            // облачный статус 100%/done игнорируется, пока пользователь сам не дочитает книгу или не вернёт её в «Прочитано».
+            boolean cloudDoneBlockedByReset = (resetOverrideTs > 0L)
+                    && (cloudIsFinishedOrFull || cloudTimestamp <= 0L || cloudTimestamp <= (resetOverrideTs + 5000L));
+            boolean wasJustResetLocally = ("to_read".equals(localShelfType) && bestLocalPercent <= 0.0 && bestLocalTs > 0 && (cloudTimestamp <= 0 || bestLocalTs > cloudTimestamp))
+                    || cloudDoneBlockedByReset;
+            boolean cloudPercentValid = book.getPercent() > 0.0
+                    && !(book.getPercent() >= 99.0 && book.getCurrentChapterIndex() == 0 && !"done".equals(book.getShelfType()))
+                    && !(cloudDoneBlockedByReset && book.getPercent() >= 99.0);
             boolean localFullySynced = isLocalProgressSynced && !hasUnsyncedQueue;
             boolean serverIsNewerAndFurther = false;
 
@@ -470,8 +541,12 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                         && (Math.abs(book.getPercent() - bestLocalPercent) <= 3.5
                         || (cloudTimestamp > 0 && bestProgressTs > 0 && cloudTimestamp <= (bestProgressTs + 120000L)
                             && Math.abs(book.getPercent() - bestLocalPercent) <= 6.0));
+                // Не позволяем облачному 100% без свежей метки времени затирать активное локальное чтение или «В планах»
+                boolean cloudStaleFullOverLocal = book.getPercent() >= 99.0
+                        && ("reading".equals(localShelfType) || "to_read".equals(localShelfType))
+                        && (cloudTimestamp <= 0L || cloudTimestamp <= bestLocalTs);
 
-                serverIsNewerAndFurther = !wasJustResetLocally && !cloudProbablyEchoOfLocal
+                serverIsNewerAndFurther = !wasJustResetLocally && !cloudProbablyEchoOfLocal && !cloudStaleFullOverLocal
                         && (!savedInRecentSession || cloudStrictlyNewerThanRecent) && cloudPercentValid && (
                         (cloudTimestamp > bestProgressTs && cloudTimestamp > 0)
                         || (bestLocalPercent <= 0.0 && bestLocalCh == 0 && hasAnyCloudProgress)
@@ -514,9 +589,11 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     }
                 }
             } else {
-                // Локального прогресса нет - защита от ложного 100% при 0 главе
-                if (effectivePercent >= 99.0 && effectiveChapter == 0) {
+                // Локального прогресса нет - защита от ложного 100% при 0 главе и после локального сброса
+                if (cloudDoneBlockedByReset || (effectivePercent >= 99.0 && effectiveChapter == 0)) {
                     effectivePercent = 0.0;
+                    effectiveChapter = 0;
+                    effectiveParagraph = 0;
                 }
             }
 
@@ -530,11 +607,22 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 boolean localReadingIsNewer = "reading".equals(localShelfType) && (hasLocalProgress || bestLocalTs > 0) && (cloudTimestamp <= 0 || bestLocalTs >= cloudTimestamp);
                 boolean localToReadIsNewer = "to_read".equals(localShelfType) && bestLocalTs > 0 && (cloudTimestamp <= 0 || bestLocalTs > cloudTimestamp);
                 boolean localDoneIsNewer = "done".equals(localShelfType) && bestLocalTs > 0 && (cloudTimestamp <= 0 || bestLocalTs > cloudTimestamp);
-                if ("done".equals(book.getShelfType()) || localDoneIsNewer || (effectivePercent >= 99.0 && effectiveChapter > 0)) {
+                boolean cloudDoneAllowed = "done".equals(book.getShelfType()) && !cloudDoneBlockedByReset && !localToReadIsNewer && !localReadingIsNewer;
+                if (cloudDoneAllowed || localDoneIsNewer || (effectivePercent >= 99.0 && effectiveChapter > 0 && !cloudDoneBlockedByReset)) {
                     targetShelf = "done";
+                } else if (cloudDoneBlockedByReset) {
+                    if ("reading".equals(localShelfType) || (effectivePercent > 0.0 && effectivePercent < 99.0)) {
+                        targetShelf = "reading";
+                    } else {
+                        targetShelf = "to_read";
+                    }
                 } else if ("to_read".equals(book.getShelfType()) && ("reading".equals(localShelfType) && (localReadingIsNewer || hasLocalProgress))) {
                     targetShelf = "reading";
                 } else if ("reading".equals(book.getShelfType()) && localToReadIsNewer) {
+                    targetShelf = "to_read";
+                } else if ("done".equals(book.getShelfType()) && localReadingIsNewer) {
+                    targetShelf = "reading";
+                } else if ("done".equals(book.getShelfType()) && localToReadIsNewer) {
                     targetShelf = "to_read";
                 } else if (effectivePercent > 0.0 && effectivePercent < 99.0 && !localToReadIsNewer) {
                     targetShelf = "reading";
@@ -745,10 +833,37 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     public synchronized void updateBookShelf(String uuid, String shelfType) {
         SQLiteDatabase db = getWritableDatabase();
         ensureHiddenBooksTable(db);
+        ensureBookResetOverridesTable(db);
         db.delete("hidden_books", "uuid = ?", new String[]{uuid});
+        String prevShelf = null;
+        double prevPercent = 0.0;
+        Cursor c = null;
+        try {
+            c = db.rawQuery("SELECT shelf_type, percent FROM books WHERE uuid = ?", new String[]{uuid});
+            if (c != null && c.moveToFirst()) {
+                prevShelf = c.getString(0);
+                prevPercent = c.getDouble(1);
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
+        }
+        long now = System.currentTimeMillis();
         ContentValues cv = new ContentValues();
         cv.put("shelf_type", shelfType);
         cv.put("last_read_timestamp", System.currentTimeMillis());
+        if ("done".equals(shelfType)) {
+            clearBookResetOverrideInternal(db, uuid);
+        } else if ("to_read".equals(shelfType) || "reading".equals(shelfType)) {
+            if ("done".equals(prevShelf) || prevPercent >= 99.0) {
+                recordBookResetOverrideInternal(db, uuid, shelfType, now);
+                if ("to_read".equals(shelfType) && prevPercent >= 99.0) {
+                    cv.put("percent", 0.0);
+                    cv.put("current_chapter", 0);
+                    cv.put("current_paragraph", 0);
+                }
+            }
+        }
         db.update("books", cv, "uuid = ?", new String[]{uuid});
     }
 
@@ -789,18 +904,21 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         db.beginTransaction();
         try {
             ensureHiddenBooksTable(db);
+            ensureBookResetOverridesTable(db);
             db.delete("hidden_books", "uuid = ?", new String[]{uuid});
+            long now = System.currentTimeMillis();
             ContentValues cv = new ContentValues();
             cv.put("percent", 0.0);
             cv.put("current_chapter", 0);
             cv.put("current_paragraph", 0);
             cv.put("cfi", "");
-            cv.put("last_read_timestamp", System.currentTimeMillis());
+            cv.put("last_read_timestamp", now);
             cv.put("shelf_type", "to_read");
             db.update("books", cv, "uuid = ?", new String[]{uuid});
             db.delete("progress", "book_uuid = ?", new String[]{uuid});
             db.delete("sync_queue", "book_uuid = ?", new String[]{uuid});
             db.delete("bookmarks", "book_uuid = ? AND title LIKE 'Облако%'", new String[]{uuid});
+            recordBookResetOverrideInternal(db, uuid, "to_read", now);
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
@@ -1083,6 +1201,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             bookCv.put("shelf_type", "user_books");
         } else if (progress.getPercent() >= 99.0 && (progress.getChapterIndex() > 0 || progress.getPercent() >= 99.9)) {
             bookCv.put("shelf_type", "done");
+            clearBookResetOverrideInternal(db, progress.getBookUuid());
         } else {
             bookCv.put("shelf_type", "reading");
         }
@@ -1601,7 +1720,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     public synchronized void clearUserAccountDataOnLogout(Context context) {
         try {
             SQLiteDatabase db = getWritableDatabase();
-            for (String tbl : new String[]{"books", "chapters", "progress", "bookmarks", "quotes", "sync_queue", "hidden_books"}) {
+            for (String tbl : new String[]{"books", "chapters", "progress", "bookmarks", "quotes", "sync_queue", "hidden_books", "book_reset_overrides"}) {
                 try {
                     db.delete(tbl, null, null);
                 } catch (Throwable ignored) {}

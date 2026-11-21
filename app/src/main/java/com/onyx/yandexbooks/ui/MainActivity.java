@@ -1640,7 +1640,20 @@ public class MainActivity extends Activity {
     }
 
     private Dialog showEinkLoadingDialog(String title, String message) {
+        return showEinkLoadingDialog(title, message, null);
+    }
+
+    private Dialog showEinkLoadingDialog(String title, String message, final Runnable onCancel) {
         if (!isActivityAlive()) return null;
+        final java.util.concurrent.atomic.AtomicBoolean cancelNotified = new java.util.concurrent.atomic.AtomicBoolean(false);
+        final Runnable fireCancelOnce = new Runnable() {
+            @Override
+            public void run() {
+                if (cancelNotified.compareAndSet(false, true) && onCancel != null) {
+                    try { onCancel.run(); } catch (Throwable ignored) {}
+                }
+            }
+        };
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle(title);
         builder.setMessage(message);
@@ -1648,12 +1661,19 @@ public class MainActivity extends Activity {
         builder.setNegativeButton("Отмена", new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
+                fireCancelOnce.run();
                 dialog.dismiss();
                 EpdController.requestFullRefresh(MainActivity.this, null);
             }
         });
         final AlertDialog dialog = builder.create();
         dialog.setCanceledOnTouchOutside(false);
+        dialog.setOnCancelListener(new DialogInterface.OnCancelListener() {
+            @Override
+            public void onCancel(DialogInterface d) {
+                fireCancelOnce.run();
+            }
+        });
         if (dialog.getWindow() != null) {
             dialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
         }
@@ -1661,6 +1681,7 @@ public class MainActivity extends Activity {
             @Override
             public void run() {
                 if (isActivityAlive() && dialog != null && dialog.isShowing()) {
+                    fireCancelOnce.run();
                     try {
                         dialog.dismiss();
                     } catch (Exception ignored) {}
@@ -2832,6 +2853,7 @@ public class MainActivity extends Activity {
         } else {
             dbHelper.updateBookShelf(book.getUuid(), targetShelf);
         }
+        SyncManager.markBookSavedRecently(book.getUuid());
         updateTabBadges();
 
         // Если мы находимся на полке, с которой книга перемещена, убираем ее из текущего списка
@@ -2924,10 +2946,11 @@ public class MainActivity extends Activity {
             dbHelper.saveBooks(java.util.Collections.singletonList(book), "to_read");
         }
         dbHelper.resetReadingProgress(book.getUuid());
+        SyncManager.markBookSavedRecently(book.getUuid());
         book.setPercent(0.0);
         book.setCurrentChapterIndex(0);
         book.setCurrentParagraphIndex(0);
-        book.setLastReadTimestamp(0L);
+        book.setLastReadTimestamp(System.currentTimeMillis());
         book.setShelfType("to_read");
         updateTabBadges();
 
@@ -2949,6 +2972,18 @@ public class MainActivity extends Activity {
                 updateShelfFooter();
             }
         }
+
+        // Отправляем в облако сброс прогресса на начало книги (0%) и перевод на полку «В планах»
+        ReadingProgress zeroProg = new ReadingProgress(book.getUuid(), 0.0, 0, 0, 0, System.currentTimeMillis());
+        zeroProg.setLibraryCardId(book.getLibraryCardId());
+        zeroProg.setDocumentUuid(book.getDocumentUuid());
+        zeroProg.setCfi("epubcfi(/6/2!/4/2/1:0)");
+        apiClient.sendReadingProgress(zeroProg, new YandexBooksApiClient.ApiCallback<Boolean>() {
+            @Override
+            public void onSuccess(Boolean result) {}
+            @Override
+            public void onError(String errorMessage) {}
+        });
 
         apiClient.updateBookShelfState(book.getUuid(), book.getLibraryCardId(), "to_read", new YandexBooksApiClient.ApiCallback<Boolean>() {
             @Override
@@ -3025,7 +3060,14 @@ public class MainActivity extends Activity {
             return;
         }
 
-        final Dialog dialog = showEinkLoadingDialog("Яндекс Книги", "Загрузка EPUB в /sdcard/Books/ для внешнего ридера...");
+        final java.util.concurrent.atomic.AtomicBoolean cancelled = new java.util.concurrent.atomic.AtomicBoolean(false);
+        final Dialog dialog = showEinkLoadingDialog("Яндекс Книги", "Загрузка EPUB в /sdcard/Books/ для внешнего ридера...", new Runnable() {
+            @Override
+            public void run() {
+                cancelled.set(true);
+                apiClient.cancelBookDownloads(book.getUuid());
+            }
+        });
 
         cacheManager.downloadBookAsync(book.getUuid(), book.getTitle(), new CacheManager.DownloadProgressCallback() {
             @Override
@@ -3033,6 +3075,10 @@ public class MainActivity extends Activity {
 
             @Override
             public void onComplete() {
+                if (cancelled.get() || !isActivityAlive()) {
+                    dismissEinkLoadingDialog(dialog);
+                    return;
+                }
                 dismissEinkLoadingDialog(dialog);
                 adapter.notifyDataSetChanged();
                 if (book.getPercent() > 0.0 && book.getPercent() < 99.0) {
@@ -3055,6 +3101,9 @@ public class MainActivity extends Activity {
             @Override
             public void onError(String message) {
                 dismissEinkLoadingDialog(dialog);
+                if (cancelled.get() || !isActivityAlive()) {
+                    return;
+                }
                 EinkNotice.show(MainActivity.this, "Ошибка скачивания", "Ошибка скачивания: " + message + ".\nОткрываем во встроенном ридере.");
                 openInLiteReader(book);
             }
@@ -3067,12 +3116,22 @@ public class MainActivity extends Activity {
             return;
         }
 
-        final Dialog dialog = showEinkLoadingDialog("Яндекс Книги", "Загрузка и подготовка книги к чтению...");
+        final java.util.concurrent.atomic.AtomicBoolean cancelled = new java.util.concurrent.atomic.AtomicBoolean(false);
+        final Dialog dialog = showEinkLoadingDialog("Яндекс Книги", "Загрузка и подготовка книги к чтению...", new Runnable() {
+            @Override
+            public void run() {
+                cancelled.set(true);
+                apiClient.cancelBookDownloads(book.getUuid());
+            }
+        });
 
         cacheManager.ensureBookReady(book.getUuid(), book.getTitle(), new CacheManager.BookReadyCallback() {
             @Override
             public void onReady(List<Chapter> chapters) {
                 dismissEinkLoadingDialog(dialog);
+                if (cancelled.get() || !isActivityAlive()) {
+                    return;
+                }
                 adapter.notifyDataSetChanged();
                 launchReader(book);
             }
@@ -3080,22 +3139,27 @@ public class MainActivity extends Activity {
             @Override
             public void onError(String message) {
                 dismissEinkLoadingDialog(dialog);
+                if (cancelled.get() || !isActivityAlive()) {
+                    return;
+                }
                 EinkNotice.show(MainActivity.this, "Ошибка книги", "Не удалось открыть книгу: " + message);
             }
         });
     }
 
     private void launchReader(Book book) {
+        Book fresh = (dbHelper != null && book != null) ? dbHelper.getBookByUuid(book.getUuid()) : null;
+        Book src = (fresh != null) ? fresh : book;
         Intent intent = new Intent(MainActivity.this, ReaderActivity.class);
-        intent.putExtra("book_uuid", book.getUuid());
-        intent.putExtra("book_title", book.getTitle());
-        intent.putExtra("book_percent", book.getPercent());
-        intent.putExtra("book_chapter", book.getCurrentChapterIndex());
-        intent.putExtra("book_paragraph", book.getCurrentParagraphIndex());
-        if (book.getLinkedAudioUuid() != null && !book.getLinkedAudioUuid().isEmpty()) {
-            intent.putExtra("linked_audio_uuid", book.getLinkedAudioUuid());
-            intent.putExtra("audio_percent", book.getAudioPercent());
-            intent.putExtra("audio_updated_at", book.getAudioUpdatedAt());
+        intent.putExtra("book_uuid", src.getUuid());
+        intent.putExtra("book_title", src.getTitle());
+        intent.putExtra("book_percent", src.getPercent());
+        intent.putExtra("book_chapter", src.getCurrentChapterIndex());
+        intent.putExtra("book_paragraph", src.getCurrentParagraphIndex());
+        if (src.getLinkedAudioUuid() != null && !src.getLinkedAudioUuid().isEmpty()) {
+            intent.putExtra("linked_audio_uuid", src.getLinkedAudioUuid());
+            intent.putExtra("audio_percent", src.getAudioPercent());
+            intent.putExtra("audio_updated_at", src.getAudioUpdatedAt());
         }
         startActivity(intent);
     }

@@ -48,6 +48,9 @@ public class CacheManager {
     private final DatabaseHelper dbHelper;
     private final LruCache<String, Bitmap> imageCache;
     private final java.util.concurrent.ConcurrentHashMap<String, int[]> imageDimCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.ExecutorService bookPrepExecutor = java.util.concurrent.Executors.newFixedThreadPool(2);
+    private final java.util.concurrent.ConcurrentHashMap<String, List<BookReadyCallback>> inFlightPrep = new java.util.concurrent.ConcurrentHashMap<>();
+    private final android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
 
     public interface DownloadProgressCallback {
         void onProgress(int downloadedCount, int totalCount);
@@ -785,6 +788,8 @@ public class CacheManager {
 
     /**
      * Загрузка книги (EPUB) и извлечение глав.
+     * Парсинг выполняется на выделенном пуле bookPrepExecutor (без конкуренции с загрузкой обложек),
+     * а экспорт копии в /sdcard/Books/YandexBooks/ выполняется асинхронно после открытия книги.
      */
     public void downloadBookAsync(final String bookUuid, final String bookTitle, final DownloadProgressCallback callback) {
         final File epubFile = getEpubFile(bookUuid);
@@ -794,46 +799,53 @@ public class CacheManager {
         apiClient.downloadBookEpub(bookUuid, directFileUrl, epubFile, new YandexBooksApiClient.ApiCallback<File>() {
             @Override
             public void onSuccess(final File downloadedFile) {
-                // В фоновом потоке парсим главы из скачанного EPUB архива
-                new AsyncTask<Void, Void, List<Chapter>>() {
+                bookPrepExecutor.execute(new Runnable() {
                     @Override
-                    protected List<Chapter> doInBackground(Void... voids) {
+                    public void run() {
+                        List<Chapter> parsedChapters = null;
                         try {
                             EpubParser.ParseResult parsed = EpubParser.parseEpubFull(downloadedFile, getEpubFontsDir(bookUuid));
                             if (parsed == null || parsed.chapters.isEmpty()) {
                                 try { downloadedFile.delete(); } catch (Throwable ignored) {}
                                 dbHelper.updateBookDownloaded(bookUuid, false);
-                                return null;
+                            } else {
+                                parsedChapters = saveParsedBookChapters(bookUuid, parsed);
                             }
-
-                            List<Chapter> chapters = saveParsedBookChapters(bookUuid, parsed);
-
-                            // Также экспортируем копию в /sdcard/Books/YandexBooks/ для системы Onyx
-                            exportToPublicBooksDir(downloadedFile, bookUuid, bookTitle);
-
-                            return chapters;
                         } catch (Throwable e) {
                             Log.e(TAG, "Error parsing downloaded EPUB", e);
                             try { downloadedFile.delete(); } catch (Throwable ignored) {}
                             dbHelper.updateBookDownloaded(bookUuid, false);
-                            return null;
                         }
-                    }
 
-                    @Override
-                    protected void onPostExecute(List<Chapter> chapters) {
-                        if (chapters != null && !chapters.isEmpty()) {
-                            if (callback != null) {
-                                callback.onProgress(chapters.size(), chapters.size());
-                                callback.onComplete();
+                        final List<Chapter> finalChapters = parsedChapters;
+                        mainHandler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (finalChapters != null && !finalChapters.isEmpty()) {
+                                    if (callback != null) {
+                                        callback.onProgress(finalChapters.size(), finalChapters.size());
+                                        callback.onComplete();
+                                    }
+                                } else {
+                                    if (callback != null) {
+                                        callback.onError("Не удалось извлечь текст из книги");
+                                    }
+                                }
                             }
-                        } else {
-                            if (callback != null) {
-                                callback.onError("Не удалось извлечь текст из книги");
-                            }
+                        });
+
+                        // Экспорт копии в /sdcard/Books/YandexBooks/ выполняем асинхронно после уведомления UI,
+                        // чтобы не задерживать открытие встроенного ридера
+                        if (finalChapters != null && !finalChapters.isEmpty()) {
+                            bookPrepExecutor.execute(new Runnable() {
+                                @Override
+                                public void run() {
+                                    exportToPublicBooksDir(downloadedFile, bookUuid, bookTitle);
+                                }
+                            });
                         }
                     }
-                }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+                });
             }
 
             @Override
@@ -845,22 +857,89 @@ public class CacheManager {
         });
     }
 
+    private void notifyInFlightReady(final String bookUuid, final List<Chapter> chapters) {
+        final List<BookReadyCallback> waiters = inFlightPrep.remove(bookUuid);
+        if (waiters == null) return;
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                List<BookReadyCallback> copy;
+                synchronized (waiters) {
+                    copy = new ArrayList<>(waiters);
+                }
+                for (BookReadyCallback cb : copy) {
+                    if (cb != null) {
+                        try { cb.onReady(chapters); } catch (Throwable ignored) {}
+                    }
+                }
+            }
+        });
+    }
+
+    private void notifyInFlightError(final String bookUuid, final String message) {
+        final List<BookReadyCallback> waiters = inFlightPrep.remove(bookUuid);
+        if (waiters == null) return;
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                List<BookReadyCallback> copy;
+                synchronized (waiters) {
+                    copy = new ArrayList<>(waiters);
+                }
+                for (BookReadyCallback cb : copy) {
+                    if (cb != null) {
+                        try { cb.onError(message); } catch (Throwable ignored) {}
+                    }
+                }
+            }
+        });
+    }
+
     /**
      * Обеспечивает готовность книги к чтению (берет из локального кэша или скачивает).
+     * Дедуплицирует параллельные запросы на подготовку одной и той же книги.
      */
     public void ensureBookReady(final String bookUuid, final String bookTitle, final BookReadyCallback callback) {
         final File epub = getEpubFile(bookUuid);
         List<Chapter> chapters = dbHelper.getChapters(bookUuid);
 
-        // Если EPUB файл уже на устройстве, но список глав неполный, повреждён или кэш от старой версии без форматирования v1.7.0:
-        if (epub.exists() && epub.length() > 500
-                && ((chapters == null || chapters.size() <= 1) || !isFormattedCacheCurrent(bookUuid) || !isChapterCacheValid(bookUuid, chapters))) {
-            reparseAndSaveBook(bookUuid, bookTitle, callback);
+        if (isBookDownloaded(bookUuid) && chapters != null && !chapters.isEmpty()
+                && isFormattedCacheCurrent(bookUuid) && isChapterCacheValid(bookUuid, chapters)) {
+            if (callback != null) {
+                callback.onReady(chapters);
+            }
             return;
         }
 
-        if (isBookDownloaded(bookUuid) && chapters != null && !chapters.isEmpty() && isChapterCacheValid(bookUuid, chapters)) {
-            callback.onReady(chapters);
+        // Дедупликация параллельных запусков для одного bookUuid (например, после «Отмена» и повторного нажатия)
+        List<BookReadyCallback> newWaiters = new ArrayList<>();
+        if (callback != null) newWaiters.add(callback);
+        List<BookReadyCallback> existingWaiters = inFlightPrep.putIfAbsent(bookUuid, newWaiters);
+        if (existingWaiters != null) {
+            if (callback != null) {
+                synchronized (existingWaiters) {
+                    existingWaiters.add(callback);
+                }
+            }
+            return;
+        }
+
+        BookReadyCallback sharedCallback = new BookReadyCallback() {
+            @Override
+            public void onReady(List<Chapter> chs) {
+                notifyInFlightReady(bookUuid, chs);
+            }
+
+            @Override
+            public void onError(String message) {
+                notifyInFlightError(bookUuid, message);
+            }
+        };
+
+        // Если EPUB файл уже на устройстве, но список глав неполный, повреждён или кэш от старой версии:
+        if (epub.exists() && epub.length() > 500
+                && ((chapters == null || chapters.size() <= 1) || !isFormattedCacheCurrent(bookUuid) || !isChapterCacheValid(bookUuid, chapters))) {
+            reparseAndSaveBookInternal(bookUuid, bookTitle, sharedCallback);
             return;
         }
 
@@ -873,15 +952,15 @@ public class CacheManager {
             public void onComplete() {
                 List<Chapter> chs = dbHelper.getChapters(bookUuid);
                 if (chs != null && !chs.isEmpty()) {
-                    callback.onReady(chs);
+                    notifyInFlightReady(bookUuid, chs);
                 } else {
-                    callback.onError("Книга загружена, но главы не найдены");
+                    notifyInFlightError(bookUuid, "Книга загружена, но главы не найдены");
                 }
             }
 
             @Override
             public void onError(String message) {
-                callback.onError(message);
+                notifyInFlightError(bookUuid, message);
             }
         });
     }
@@ -890,51 +969,60 @@ public class CacheManager {
      * Принудительно парсит существующий локальный EPUB файл и обновляет список глав в базе данных.
      */
     public void reparseAndSaveBook(final String bookUuid, final String bookTitle, final BookReadyCallback callback) {
+        reparseAndSaveBookInternal(bookUuid, bookTitle, callback);
+    }
+
+    private void reparseAndSaveBookInternal(final String bookUuid, final String bookTitle, final BookReadyCallback callback) {
         final File epub = getEpubFile(bookUuid);
         if (epub != null && epub.exists() && epub.length() > 500) {
-            new AsyncTask<Void, Void, List<Chapter>>() {
+            bookPrepExecutor.execute(new Runnable() {
                 @Override
-                protected List<Chapter> doInBackground(Void... voids) {
+                public void run() {
+                    List<Chapter> parsedChapters = null;
                     try {
                         EpubParser.ParseResult parsed = EpubParser.parseEpubFull(epub, getEpubFontsDir(bookUuid));
                         if (parsed == null || parsed.chapters.isEmpty()) {
                             try { epub.delete(); } catch (Throwable ignored) {}
                             dbHelper.updateBookDownloaded(bookUuid, false);
-                            return null;
+                        } else {
+                            parsedChapters = saveParsedBookChapters(bookUuid, parsed);
                         }
-
-                        return saveParsedBookChapters(bookUuid, parsed);
                     } catch (Throwable e) {
                         Log.e(TAG, "Error reparsing EPUB", e);
                         try { epub.delete(); } catch (Throwable ignored) {}
                         dbHelper.updateBookDownloaded(bookUuid, false);
-                        return null;
                     }
-                }
 
-                @Override
-                protected void onPostExecute(List<Chapter> res) {
-                    if (res != null && !res.isEmpty()) {
-                        if (callback != null) callback.onReady(res);
-                    } else {
-                        // Если повторный парсинг не удался, скачиваем заново
-                        downloadBookAsync(bookUuid, bookTitle, new DownloadProgressCallback() {
-                            @Override
-                            public void onProgress(int downloadedCount, int totalCount) {}
-                            @Override
-                            public void onComplete() {
-                                List<Chapter> chs = dbHelper.getChapters(bookUuid);
-                                if (chs != null && !chs.isEmpty()) callback.onReady(chs);
-                                else callback.onError("Книга загружена, но главы не найдены");
+                    final List<Chapter> res = parsedChapters;
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (res != null && !res.isEmpty()) {
+                                if (callback != null) callback.onReady(res);
+                            } else {
+                                // Если повторный парсинг не удался, скачиваем заново
+                                downloadBookAsync(bookUuid, bookTitle, new DownloadProgressCallback() {
+                                    @Override
+                                    public void onProgress(int downloadedCount, int totalCount) {}
+                                    @Override
+                                    public void onComplete() {
+                                        List<Chapter> chs = dbHelper.getChapters(bookUuid);
+                                        if (chs != null && !chs.isEmpty()) {
+                                            if (callback != null) callback.onReady(chs);
+                                        } else {
+                                            if (callback != null) callback.onError("Книга загружена, но главы не найдены");
+                                        }
+                                    }
+                                    @Override
+                                    public void onError(String message) {
+                                        if (callback != null) callback.onError(message);
+                                    }
+                                });
                             }
-                            @Override
-                            public void onError(String message) {
-                                callback.onError(message);
-                            }
-                        });
-                    }
+                        }
+                    });
                 }
-            }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+            });
         } else {
             downloadBookAsync(bookUuid, bookTitle, new DownloadProgressCallback() {
                 @Override
@@ -942,12 +1030,15 @@ public class CacheManager {
                 @Override
                 public void onComplete() {
                     List<Chapter> chs = dbHelper.getChapters(bookUuid);
-                    if (chs != null && !chs.isEmpty()) callback.onReady(chs);
-                    else callback.onError("Книга загружена, но главы не найдены");
+                    if (chs != null && !chs.isEmpty()) {
+                        if (callback != null) callback.onReady(chs);
+                    } else {
+                        if (callback != null) callback.onError("Книга загружена, но главы не найдены");
+                    }
                 }
                 @Override
                 public void onError(String message) {
-                    callback.onError(message);
+                    if (callback != null) callback.onError(message);
                 }
             });
         }

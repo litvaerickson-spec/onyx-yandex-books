@@ -10,92 +10,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- 1. Верхняя панель в стиле Onyx NeoReader -->
-    <LinearLayout
-        android:id="@+id/reader_top_bar"
-        android:layout_width="match_parent"
-        android:layout_height="48dp"
-        android:layout_alignParentTop="true"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:background="@color/eink_white"
-        android:paddingLeft="8dp"
-        android:paddingRight="8dp"
-        android:clickable="true"
-        android:focusable="true"
-        android:visibility="gone">
-
-        <!-- Кнопка «Назад в библиотеку» -->
-        <Button
-            android:id="@+id/btn_reader_back"
-            android:layout_width="48dp"
-            android:layout_height="38dp"
-            android:minHeight="38dp"
-            android:minWidth="38dp"
-            android:text="&lt;"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:textColor="@color/btn_eink_text_color"
-            android:background="@drawable/btn_eink"
-            android:includeFontPadding="false" />
-
-        <!-- Название книги -->
-        <TextView
-            android:id="@+id/reader_book_title_top"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Книга"
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:textColor="@color/eink_black"
-            android:singleLine="true"
-            android:ellipsize="end"
-            android:gravity="center_vertical"
-            android:layout_marginLeft="10dp"
-            android:layout_marginRight="8dp" />
-
-        <!-- Кнопка аппаратного сброса дисплея E-Ink -->
-        <Button
-            android:id="@+id/btn_reader_refresh"
-            android:layout_width="74dp"
-            android:layout_height="38dp"
-            android:minHeight="38dp"
-            android:minWidth="38dp"
-            android:text="Сброс"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textColor="@color/btn_eink_text_color"
-            android:background="@drawable/btn_eink"
-            android:includeFontPadding="false"
-            android:layout_marginRight="6dp" />
-
-        <!-- Кнопка закрытия меню -->
-        <Button
-            android:id="@+id/btn_reader_close_overlay"
-            android:layout_width="44dp"
-            android:layout_height="38dp"
-            android:minHeight="38dp"
-            android:minWidth="38dp"
-            android:text="X"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/btn_eink_text_color"
-            android:background="@drawable/btn_eink"
-            android:includeFontPadding="false" />
-
-    </LinearLayout>
-
-    <!-- Тонкий разделитель под верхней панелью -->
-    <View
-        android:id="@+id/reader_top_divider"
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="@color/eink_black"
-        android:layout_below="@id/reader_top_bar"
-        android:visibility="gone" />
-
-    <!-- 2. Нижняя панель управления в стиле Onyx NeoReader -->
+    <!-- 2. Нижняя панель управления в стиле Onyx NeoReader (размещена ниже верхней по Z-order) -->
     <LinearLayout
         android:id="@+id/reader_bottom_bar"
         android:layout_width="match_parent"
@@ -285,7 +200,23 @@
                     android:textColor="@color/btn_eink_text_color"
                     android:background="@drawable/btn_eink"
                     android:includeFontPadding="false"
-                    android:layout_marginLeft="3dp" />
+                    android:layout_marginLeft="3dp"
+                    android:layout_marginRight="3dp" />
+
+                <Button
+                    android:id="@+id/btn_close_format_panel"
+                    android:layout_width="38dp"
+                    android:layout_height="match_parent"
+                    android:minHeight="38dp"
+                    android:minWidth="38dp"
+                    android:text="&#x2715;"
+                    android:contentDescription="Свернуть формат"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/btn_eink_text_color"
+                    android:background="@drawable/btn_eink"
+                    android:includeFontPadding="false"
+                    android:padding="0dp" />
             </LinearLayout>
 
             <View
@@ -1047,6 +978,91 @@
         </LinearLayout>
 
     </LinearLayout>
+
+    <!-- 1. Верхняя панель в стиле Onyx NeoReader (поверх нижней по Z-order, всегда доступна для закрытия) -->
+    <LinearLayout
+        android:id="@+id/reader_top_bar"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_alignParentTop="true"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@color/eink_white"
+        android:paddingLeft="8dp"
+        android:paddingRight="8dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone">
+
+        <!-- Кнопка «Назад в библиотеку» -->
+        <Button
+            android:id="@+id/btn_reader_back"
+            android:layout_width="48dp"
+            android:layout_height="38dp"
+            android:minHeight="38dp"
+            android:minWidth="38dp"
+            android:text="&lt;"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="@color/btn_eink_text_color"
+            android:background="@drawable/btn_eink"
+            android:includeFontPadding="false" />
+
+        <!-- Название книги -->
+        <TextView
+            android:id="@+id/reader_book_title_top"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Книга"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/eink_black"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:gravity="center_vertical"
+            android:layout_marginLeft="10dp"
+            android:layout_marginRight="8dp" />
+
+        <!-- Кнопка аппаратного сброса дисплея E-Ink -->
+        <Button
+            android:id="@+id/btn_reader_refresh"
+            android:layout_width="74dp"
+            android:layout_height="38dp"
+            android:minHeight="38dp"
+            android:minWidth="38dp"
+            android:text="Сброс"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="@color/btn_eink_text_color"
+            android:background="@drawable/btn_eink"
+            android:includeFontPadding="false"
+            android:layout_marginRight="6dp" />
+
+        <!-- Кнопка закрытия меню -->
+        <Button
+            android:id="@+id/btn_reader_close_overlay"
+            android:layout_width="44dp"
+            android:layout_height="38dp"
+            android:minHeight="38dp"
+            android:minWidth="38dp"
+            android:text="X"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="@color/btn_eink_text_color"
+            android:background="@drawable/btn_eink"
+            android:includeFontPadding="false" />
+
+    </LinearLayout>
+
+    <!-- Тонкий разделитель под верхней панелью -->
+    <View
+        android:id="@+id/reader_top_divider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/eink_black"
+        android:layout_below="@id/reader_top_bar"
+        android:visibility="gone" />
 
     <!-- Индикатор загрузки и подготовки книги к чтению (перехватывает касания до готовности глав) -->
     <RelativeLayout
